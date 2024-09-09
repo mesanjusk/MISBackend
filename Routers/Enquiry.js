@@ -4,7 +4,7 @@ const Enquiry = require("../Models/enquiry");
 const { v4: uuid } = require("uuid");
 
 router.post("/addEnquiry", async (req, res) => {
-  const { Customer_name, Priority, Item = "New Enquiry", Task = "Design", Delivery_Date, Assigned = "Sai", Remark } = req.body;
+  const { Customer_name, Priority = "Normal", Item = "New Enquiry", Task = "Design", Delivery_Date, Assigned = "Sai", Remark } = req.body;
 
   try {
    
@@ -17,7 +17,7 @@ router.post("/addEnquiry", async (req, res) => {
         Enquiry_uuid: uuid(),
         Enquiry_Number: newEnquiryNumber,
           Customer_name,
-          Priority,
+          Priority: Priority || "Normal",
           Item: Item || "New Category", 
           Task: Task || "Design",       
           Delivery_Date: Delivery_Date || currentDate, 

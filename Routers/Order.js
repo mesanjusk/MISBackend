@@ -40,18 +40,51 @@ router.post("/addOrder", async (req, res) => {
   }
 });
 
-  router.get("/GetOrderList", async (req, res) => {
-    try {
-      let data = await Orders.find({});
-  
-      if (data.length)
-        res.json({ success: true, result: data.filter((a) => a.Customer_name) });
-      else res.json({ success: false, message: "Order Not found" });
-    } catch (err) {
-      console.error("Error fetching users:", err);
-        res.status(500).json({ success: false, message: err });
+router.get("/GetOrderList", async (req, res) => {
+  try {
+   
+    let data = await Orders.find({});
+    console.log("Fetched Orders:", data); 
+
+    if (data.length) {
+   
+      const filteredData = data.filter(order => {
+      
+        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
+
+       
+        const isMainTaskDelivered = mainTask === "Delivered";
+        const isMainTaskCancel = mainTask === "Cancel";
+        
+      
+        const isStatusDelivered = order.Status.some(
+          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
+        );
+
+        const isStatusCancel = order.Status.some(
+          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "cancel"
+        );
+
+
+
+        return !(isMainTaskDelivered || isStatusDelivered || isMainTaskCancel || isStatusCancel);
+       
+      });
+
+
+      res.json({ success: true, result: filteredData });
+    } else {
+      res.json({ success: false, message: "Order not found" });
     }
-  });
+  } catch (err) {
+    
+    console.error("Error fetching orders:", err);
+
+   
+    res.status(500).json({ success: false, message: err.message || 'An unknown error occurred' });
+  }
+});
+
 
   router.get("/:id", async(req, res) => {
     const orderId = req.params.id;
