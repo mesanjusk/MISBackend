@@ -12,33 +12,62 @@ router.post('/updateStatus', async (req, res) => {
 
 
 router.post("/addOrder", async (req, res) => {
-  const { Customer_name, Priority, Item, Status, Remark } = req.body;
+  const {
+    Customer_name,
+    Priority = "Normal", 
+    Item = "New Order",  
+    Status = [{}],
+    Remark,
+  } = req.body;
 
-  if (!Status || !Status[0].Task || !Status[0].Assigned || !Status[0].Delivery_Date) {
-    return res.status(400).json({ success: false, message: "Task and Assigned fields in Status are required." });
+  const statusDefaults = {
+    Task: "Design",
+    Assigned: "Sai",
+    Status_number: 1,
+    Delivery_Date: new Date().toISOString().split("T")[0], 
+  };
+
+  const updatedStatus = Status.map((status) => ({
+    ...statusDefaults,
+    ...status, 
+  }));
+
+  if (
+    !updatedStatus[0].Task ||
+    !updatedStatus[0].Assigned ||
+    !updatedStatus[0].Delivery_Date
+  ) {
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "Task, Assigned, and Delivery_Date fields in Status are required.",
+      });
   }
 
   try {
-      const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
-      const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
+  
+    const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
+    const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
 
-      const newOrder = new Orders({
-          Order_uuid: uuid(),
-          Order_Number: newOrderNumber,
-          Customer_name,
-          Priority,
-          Item,
-          Status, 
-          Remark
-      });
+    const newOrder = new Orders({
+      Order_uuid: uuid(),
+      Order_Number: newOrderNumber,
+      Customer_name,
+      Priority,
+      Item,
+      Status: updatedStatus,
+      Remark,
+    });
 
-      await newOrder.save();
-      res.json({ success: true, message: "Order added successfully" });
+    await newOrder.save();
+    res.json({ success: true, message: "Order added successfully" });
   } catch (error) {
-      console.error("Error saving order:", error);
-      res.status(500).json({ success: false, message: "Failed to add order" });
+    console.error("Error saving order:", error);
+    res.status(500).json({ success: false, message: "Failed to add order" });
   }
 });
+
 
 router.get("/GetOrderList", async (req, res) => {
   try {
