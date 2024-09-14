@@ -94,8 +94,6 @@ router.get("/GetOrderList", async (req, res) => {
           status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "cancel"
         );
 
-
-
         return !(isMainTaskDelivered || isStatusDelivered || isMainTaskCancel || isStatusCancel);
        
       });
@@ -113,6 +111,34 @@ router.get("/GetOrderList", async (req, res) => {
     res.status(500).json({ success: false, message: err.message || 'An unknown error occurred' });
   }
 });
+
+router.get("/GetDeliveredList", async (req, res) => {
+  try {
+    let data = await Orders.find({});
+    console.log("Fetched Orders:", data);
+
+    if (data.length) {
+      const filteredData = data.filter(order => {
+        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
+        const isMainTaskDelivered = mainTask === "delivered";
+
+        const isStatusDelivered = order.Status.some(
+          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
+        );
+
+        return isMainTaskDelivered || isStatusDelivered;
+      });
+
+      res.json({ success: true, result: filteredData });
+    } else {
+      res.json({ success: false, message: "No orders found" });
+    }
+  } catch (err) {
+    console.error("Error fetching orders:", err);
+    res.status(500).json({ success: false, message: 'Internal Server Error', details: err.message });
+  }
+});
+
 
 
   router.get("/:id", async(req, res) => {
