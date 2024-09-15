@@ -25,6 +25,7 @@ router.post("/addOrder", async (req, res) => {
     Assigned: "Sai",
     Status_number: 1,
     Delivery_Date: new Date().toISOString().split("T")[0], 
+    CreatedAt: new Date().toISOString().split("T")[0]
   };
 
   const updatedStatus = Status.map((status) => ({

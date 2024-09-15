@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Transaction = require("../Models/transaction");
+const Customer = require("../Models/customer");
 const { v4: uuid } = require("uuid");
 
 router.post("/addTransaction", async (req, res) => {
@@ -57,5 +58,60 @@ router.get("/GetTransactionList", async (req, res) => {
         res.status(500).json({ success: false, message: err });
     }
 });
+
+router.get('/GetFilteredTransactions', async (req, res) => {
+  try {
+    const startDateStr = req.query.startDate;
+    const endDateStr = req.query.endDate;
+
+    const startDate = startDateStr ? new Date(startDateStr) : new Date();
+    const endDate = endDateStr ? new Date(endDateStr) : new Date();
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid date format' });
+    }
+    
+    endDate.setHours(23, 59, 59, 999);
+
+    const customers = await Customer.find({});
+    const customerMap = customers.reduce((map, customer) => {
+      map[customer.Customer_uuid] = customer.Customer_name;
+      return map;
+    }, {});
+
+  
+    const query = {
+      Transaction_date: {
+        $gte: startDate,
+        $lte: endDate
+      }
+    };
+
+    const transactions = await Transaction.find(query);
+
+    const customerNameFilter = req.query.customerName ? req.query.customerName.toLowerCase() : null;
+
+    const filteredTransactions = transactions.filter(transaction => {
+      const journalEntries = transaction.Journal_entry || [];
+      const customerNames = journalEntries
+        .map(entry => customerMap[entry.Account_id])
+        .filter(name => name)
+        .map(name => name.toLowerCase());
+
+      const matchesCustomer = customerNameFilter 
+        ? customerNames.some(name => name.includes(customerNameFilter))
+        : true;
+
+      return matchesCustomer;
+    });
+
+    res.status(200).json({ success: true, result: filteredTransactions });
+
+  } catch (err) {
+    console.error("Error filtering transactions:", err);
+    res.status(500).json({ success: false, message: 'Database query failed' });
+  }
+});
+
 
 module.exports = router;

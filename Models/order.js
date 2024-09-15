@@ -4,7 +4,8 @@ const statusSchema = new mongoose.Schema({
     Task: { type: String, required: true },
     Assigned: { type: String, required: true },
     Delivery_Date: { type: Date, required: true },
-    Status_number: { type: Number, required: true } 
+    Status_number: { type: Number, required: true },
+    CreatedAt: { type: Date, required: true} 
   });
 
 const OrdersSchema=new mongoose.Schema({

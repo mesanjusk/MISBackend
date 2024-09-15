@@ -9,7 +9,7 @@ const journalSchema = new mongoose.Schema({
 const TransactionSchema=new mongoose.Schema({
     Transaction_uuid: { type: String },
     Transaction_id: { type: Number },
-    Transaction_date: { type: String, required: true },
+    Transaction_date: { type: Date, required: true },
     Description: { type: String, required: true },
     Total_Debit: { type: Number, required: true },
     Total_Credit: { type: Number, required: true },
