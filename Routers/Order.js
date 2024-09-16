@@ -13,7 +13,7 @@ router.post('/updateStatus', async (req, res) => {
 
 router.post("/addOrder", async (req, res) => {
   const {
-    Customer_name,
+    Customer_uuid,
     Priority = "Normal", 
     Item = "New Order",  
     Status = [{}],
@@ -54,10 +54,10 @@ router.post("/addOrder", async (req, res) => {
     const newOrder = new Orders({
       Order_uuid: uuid(),
       Order_Number: newOrderNumber,
-      Customer_name,
+      Customer_uuid,
       Priority,
       Item,
-      Status: updatedStatus,
+      Status: updatedStatus, 
       Remark,
     });
 

@@ -11,7 +11,6 @@ const statusSchema = new mongoose.Schema({
 const OrdersSchema=new mongoose.Schema({
     Order_uuid: { type: String },
     Order_Number: { type: Number, required: true, unique: true },
-    Customer_name: { type: String, required: true },
     Customer_uuid: { type: String, required: true },   
     Priority: { type: String, required: true },
     Item: { type: String, required: true },
