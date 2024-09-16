@@ -13,7 +13,8 @@ const Priority = require("./Routers/Priority");
 const Orders = require("./Routers/Order");
 const Enquiry = require("./Routers/Enquiry");
 const Payment_mode = require("./Routers/Payment_mode");
-const Transaction = require("./Routers/Transaction")
+const Transaction = require("./Routers/Transaction");
+const Attendance = require("./Routers/Attendance");
 const app = express()
 
 app.use(express.json())
@@ -35,6 +36,7 @@ app.use("/order", Orders);
 app.use("/enquiry", Enquiry);
 app.use("/transaction", Transaction);
 app.use("/payment_mode", Payment_mode);
+app.use("/attendance", Attendance);
 
 app.listen(8000,()=>{
     console.log("port connected");
