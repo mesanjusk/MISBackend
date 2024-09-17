@@ -3,25 +3,25 @@ const router = express.Router();
 const Users = require("../Models/users");
 const { v4: uuid } = require("uuid");
 
-router.post("/login",async(req,res)=>{
-  const{User_name, Password}=req.body
+router.post("/login", async (req, res) => {
+  const { User_name, Password } = req.body;
 
-  try{
-      const check=await Users.findOne({User_name: User_name})
+  try {
+    const user = await Users.findOne({ User_name: User_name });
 
-      if(check){
-          res.json("exist")
-      }
-      else{
-          res.json("notexist")
-      }
-
+    if (user) {
+      res.json({
+        status: "exist",
+        userGroup: user.User_group
+      });
+    } else {
+      res.json({ status: "notexist" });
+    }
+  } catch (e) {
+    res.json({ status: "fail" });
   }
-  catch(e){
-      res.json("fail")
-  }
+});
 
-})
 
 router.post("/addUser", async (req, res) => {
     const{User_name, Password, Mobile_number, User_group}=req.body

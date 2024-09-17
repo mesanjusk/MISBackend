@@ -74,7 +74,6 @@ router.get("/GetOrderList", async (req, res) => {
   try {
    
     let data = await Orders.find({});
-    console.log("Fetched Orders:", data); 
 
     if (data.length) {
    
@@ -116,7 +115,6 @@ router.get("/GetOrderList", async (req, res) => {
 router.get("/GetDeliveredList", async (req, res) => {
   try {
     let data = await Orders.find({});
-    console.log("Fetched Orders:", data);
 
     if (data.length) {
       const filteredData = data.filter(order => {

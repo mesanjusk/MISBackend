@@ -45,26 +45,94 @@ router.post("/addCustomer", async (req, res) => {
     }
   });
 
-  router.put("/updateCustomer/:id", async (req, res) => {
-    const { id } = req.params;
-    const { Customer_name, Mobile_number, Customer_group } = req.body;
+  router.get('/:id', async (req, res) => {
+    const { id } = req.params; 
 
     try {
-        const user = await Customers.findByIdAndUpdate(id, {
-            Customer_name,
-            Mobile_number,
-            Customer_group
-        }, { new: true }); 
+        const customer = await Customers.findById(id);  
 
-        if (!user) {
-            return res.status(404).json({ success: false, message: "Customer not found" });
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer not found',
+            });
         }
 
-        res.json({ success: true, result: user });
+        res.status(200).json({
+            success: true,
+            result: customer,
+        });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: "Server error" });
+        console.error('Error fetching customer:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching customer',
+            error: error.message,
+        });
     }
 });
+
+router.put('/update/:id', async (req, res) => {
+  const { id } = req.params;  
+  const { Customer_name, Mobile_number, Customer_group } = req.body;
+
+  try {
+    const updatedCustomer = await Customers.findOneAndUpdate(
+      { _id: id }, 
+      { Customer_name, Mobile_number, Customer_group },
+      { new: true }  
+    );
+
+    if (!updatedCustomer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer updated successfully',
+      result: updatedCustomer,
+    });
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating customer',
+      error: error.message,
+    });
+  }
+});
+
+
+
+router.delete('/DeleteCustomer/:mobile', async (req, res) => {
+  const { mobile } = req.params; 
+  try {
+    const deletedCustomer = await Customers.findOneAndDelete({ Mobile_number: mobile });
+
+    if (!deletedCustomer) {
+      return res.status(404).json({
+        success: false,
+        message: 'Customer not found',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Customer deleted successfully',
+      result: deletedCustomer,
+    });
+  } catch (error) {
+    console.error('Error deleting customer:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting customer',
+      error: error.message,
+    });
+  }
+});
+
 
   module.exports = router;
