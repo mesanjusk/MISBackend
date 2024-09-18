@@ -44,7 +44,34 @@ router.post("/addTask", async (req, res) => {
     }
   });
 
-  router.put("/updateTask/:id", async (req, res) => {
+  router.get('/:id', async (req, res) => {
+    const { id } = req.params; 
+
+    try {
+        const task = await Tasks.findById(id);  
+
+        if (!task) {
+            return res.status(404).json({
+                success: false,
+                message: ' Task not found',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            result: task,
+        });
+    } catch (error) {
+        console.error('Error fetching task:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching task',
+            error: error.message,
+        });
+    }
+});
+
+  router.put("/update/:id", async (req, res) => {
     const { id } = req.params;
     const { Task_name, Task_group } = req.body;
 
@@ -64,5 +91,21 @@ router.post("/addTask", async (req, res) => {
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
+
+router.delete('/Delete/:taskId', async (req, res) => {
+  console.log('Received taskId:', req.params.taskId); 
+  const { taskId } = req.params;
+  try {
+      const task = await Tasks.findByIdAndDelete(taskId);
+      if (!task) {
+          return res.status(404).json({ success: false, message: 'Task not found' });
+      }
+      return res.status(200).json({ success: true, message: 'Task deleted successfully' });
+  } catch (error) {
+      return res.status(500).json({ success: false, message: 'Error deleting task' });
+  }
+});
+
+
 
   module.exports = router;
