@@ -60,58 +60,74 @@ router.get("/GetTransactionList", async (req, res) => {
 });
 
 router.get('/GetFilteredTransactions', async (req, res) => {
-  try {
-    const startDateStr = req.query.startDate;
-    const endDateStr = req.query.endDate;
+    try {
+        const startDateStr = req.query.startDate;
+        const endDateStr = req.query.endDate;
+        const customerNameFilter = req.query.customerName ? req.query.customerName.toLowerCase() : null;
 
-    const startDate = startDateStr ? new Date(startDateStr) : new Date();
-    const endDate = endDateStr ? new Date(endDateStr) : new Date();
 
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      return res.status(400).json({ success: false, message: 'Invalid date format' });
+        const startDate = startDateStr ? new Date(startDateStr) : new Date('1970-01-01');
+        const endDate = endDateStr ? new Date(endDateStr) : new Date(); 
+
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+            return res.status(400).json({ success: false, message: 'Invalid date format' });
+        }
+
+        endDate.setHours(23, 59, 59, 999);
+
+        const customers = await Customer.find({});
+        const customerMap = customers.reduce((map, customer) => {
+            map[customer.Customer_uuid] = customer.Customer_name;
+            return map;
+        }, {});
+
+        console.log('Customer Map:', customerMap);
+
+        const query = {
+            Transaction_date: {
+                $gte: startDate,
+                $lte: endDate
+            }
+        };
+
+        const transactions = await Transaction.find(query);
+
+        const filteredTransactions = transactions.filter(transaction => {
+            const journalEntries = transaction.Journal_entry || [];
+            const customerNames = journalEntries
+                .map(entry => customerMap[entry.Account_id])
+                .filter(name => name)
+                .map(name => name.toLowerCase());
+
+            const matchesCustomer = customerNameFilter 
+                ? customerNames.some(name => name.includes(customerNameFilter))
+                : true;
+
+            return matchesCustomer;
+        });
+
+
+        res.status(200).json({ success: true, result: filteredTransactions });
+
+    } catch (err) {
+        console.error("Error filtering transactions:", err);
+        res.status(500).json({ success: false, message: 'Database query failed' });
     }
-    
-    endDate.setHours(23, 59, 59, 999);
-
-    const customers = await Customer.find({});
-    const customerMap = customers.reduce((map, customer) => {
-      map[customer.Customer_uuid] = customer.Customer_name;
-      return map;
-    }, {});
-
-  
-    const query = {
-      Transaction_date: {
-        $gte: startDate,
-        $lte: endDate
-      }
-    };
-
-    const transactions = await Transaction.find(query);
-
-    const customerNameFilter = req.query.customerName ? req.query.customerName.toLowerCase() : null;
-
-    const filteredTransactions = transactions.filter(transaction => {
-      const journalEntries = transaction.Journal_entry || [];
-      const customerNames = journalEntries
-        .map(entry => customerMap[entry.Account_id])
-        .filter(name => name)
-        .map(name => name.toLowerCase());
-
-      const matchesCustomer = customerNameFilter 
-        ? customerNames.some(name => name.includes(customerNameFilter))
-        : true;
-
-      return matchesCustomer;
-    });
-
-    res.status(200).json({ success: true, result: filteredTransactions });
-
-  } catch (err) {
-    console.error("Error filtering transactions:", err);
-    res.status(500).json({ success: false, message: 'Database query failed' });
-  }
 });
 
+router.get('/CheckCustomer/:customerUuid', async (req, res) => {
+  const { customerUuid } = req.params;
+
+  try {
+      const transactionExists = await Transaction.findOne({
+          'Journal_entry.Account_id': customerUuid
+      });
+
+      return res.json({ exists: !!transactionExists }); 
+  } catch (error) {
+      console.error('Error checking transactions:', error);
+      return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
 
 module.exports = router;

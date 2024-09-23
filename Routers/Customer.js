@@ -107,32 +107,20 @@ router.put('/update/:id', async (req, res) => {
 
 
 
-router.delete('/DeleteCustomer/:mobile', async (req, res) => {
-  const { mobile } = req.params; 
+router.delete('/DeleteCustomer/:customerUuid', async (req, res) => {
+  const { customerUuid } = req.params;
   try {
-    const deletedCustomer = await Customers.findOneAndDelete({ Mobile_number: mobile });
-
-    if (!deletedCustomer) {
-      return res.status(404).json({
-        success: false,
-        message: 'Customer not found',
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Customer deleted successfully',
-      result: deletedCustomer,
-    });
+      const result = await Customers.findOneAndDelete({ Customer_uuid: customerUuid });
+      if (!result) {
+          return res.status(404).json({ success: false, message: 'Customer not found' });
+      }
+      res.json({ success: true, message: 'Customer deleted successfully' });
   } catch (error) {
-    console.error('Error deleting customer:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error deleting customer',
-      error: error.message,
-    });
+      console.error('Error deleting customer:', error);
+      res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
+
 
 
   module.exports = router;

@@ -2,26 +2,33 @@ const express = require("express");
 const router = express.Router();
 const Users = require("../Models/users");
 const { v4: uuid } = require("uuid");
+const jwt = require('jsonwebtoken');
+const bcrypt  = require('bcrypt')
+
 
 router.post("/login", async (req, res) => {
   const { User_name, Password } = req.body;
 
   try {
-    const user = await Users.findOne({ User_name: User_name });
+      const user = await Users.findOne({ User_name });
 
-    if (user) {
-      res.json({
-        status: "exist",
-        userGroup: user.User_group
-      });
-    } else {
-      res.json({ status: "notexist" });
-    }
+      if (!user) {
+          return res.json({ status: "notexist" });
+      }
+
+      if (Password === user.Password) {
+          res.json({
+              status: "exist",
+              userGroup: user.User_group
+          });
+      } else {
+          res.json({ status: "invalid", message: "Invalid credentials." });
+      }
   } catch (e) {
-    res.json({ status: "fail" });
+      console.error("Error during login:", e);
+      res.json({ status: "fail" });
   }
 });
-
 
 router.post("/addUser", async (req, res) => {
     const{User_name, Password, Mobile_number, User_group}=req.body
@@ -87,6 +94,35 @@ router.post("/addUser", async (req, res) => {
         console.error(error);
         res.status(500).json({ success: false, message: "Server error" });
     }
+});
+
+const authenticateToken = (req, res, next) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  console.log('Token:', token); 
+  if (!token) return res.sendStatus(401); 
+
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
+      if (err) {
+          console.log('Token verification error:', err); 
+          return res.sendStatus(403); 
+      }
+      req.user = user;
+      next();
+  });
+};
+
+
+router.get('/GetLoggedInUser', authenticateToken, async (req, res) => {
+  try {
+    
+      const user = await Users.findById(req.user.id).select('group'); 
+      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+      res.json({ success: true, result: { group: user.User_group } }); 
+  } catch (error) {
+      console.error('Error fetching user group:', error);
+      res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 });
 
   module.exports = router;

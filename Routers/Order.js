@@ -192,5 +192,17 @@ router.put("/updateOrder/:id", async (req, res) => {
 });
 
 
+router.get('/CheckCustomer/:customerUuid', async (req, res) => {
+  const { customerUuid } = req.params;
+
+  try {
+      const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
+      return res.json({ exists: !!orderExists });
+  } catch (error) {
+      console.error('Error checking orders:', error);
+      return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 
   module.exports = router;
