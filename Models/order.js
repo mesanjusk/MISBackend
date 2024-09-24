@@ -16,6 +16,9 @@ const OrdersSchema=new mongoose.Schema({
     Item: { type: String, required: true },
     Status: [statusSchema],
     Remark: { type: String, required: true },
+    Rate: { type: Number, default: 0 }, 
+    Quantity: { type: Number, default: 0 }, 
+    Amount: { type: Number, default: 0 }, 
  },  { timestamps: true })
 
  const Orders = mongoose.model("Orders", OrdersSchema);
