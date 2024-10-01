@@ -4,90 +4,87 @@ const Attendance = require("../Models/attendance");
 const { v4: uuid } = require("uuid");
 const User = require("../Models/users")
 
-router.post("/addAttendance", async (req, res) => {
-    const {
-        User_name, 
-        Type,
-        Status,
-        Time
-    } = req.body;
-
+router.post('/addAttendance', async (req, res) => {
+    const { User_name, Type, Status, Time } = req.body;
     if (!User_name || !Type || !Status || !Time) {
-        return res.status(400).json({
-            success: false,
-            message: "User_name, Type, Status, and Time are required fields."
-        });
+        return res.status(400).json({ success: false, message: 'All fields are required' });
     }
 
+  
+    const currentDate = new Date().toISOString().split('T')[0]; 
+
     try {
+      
         const user = await User.findOne({ User_name });
+
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found." });
         }
 
-        const lastRecord = await Attendance.findOne().sort({ Attendance_Record_ID: -1 });
-        const newRecordNumber = lastRecord ? lastRecord.Attendance_Record_ID + 1 : 1;
-
-        let userArrayIndex = 0;
-        if (Type === 'Out') {
-            userArrayIndex = 1; 
-        }
-
-        const updateData = {
-            Attendance_uuid: uuid(),
-            Attendance_Record_ID: newRecordNumber,
-            Employee_uuid: user.User_uuid, 
-            Status,
-            User: []
-        };
-
-        const existingRecord = await Attendance.findOne({
-            Employee_uuid: user.User_uuid,
-            'User.Date': new Date().toISOString().split("T")[0]
+        const attendanceRecord = await Attendance.findOne({ 
+            Employee_uuid: user.User_uuid 
         });
 
-        if (existingRecord) {
-            await Attendance.updateOne(
-                { _id: existingRecord._id, 'User.Date': new Date().toISOString().split("T")[0] },
-                { $set: { [`User.${userArrayIndex}`]: {
-                    Date: new Date().toISOString().split("T")[0],
-                    Time,
-                    Type,
-                    CreatedAt: new Date()
-                }}}
-            );
+        if (attendanceRecord) {
+         
+            const dateExists = attendanceRecord.User.some(entry => entry.Date === currentDate);
+
+            if (dateExists) {
+                
+                attendanceRecord.User.push({ Type, Date: currentDate, Time, CreatedAt: new Date().toISOString() });
+                await attendanceRecord.save(); 
+                return res.json({ success: true, message: 'New entry added to today\'s attendance.' });
+            } else {
+              
+                attendanceRecord.User.push({ Type, Date: currentDate, Time, CreatedAt: new Date().toISOString() });
+                await attendanceRecord.save(); 
+                return res.json({ success: true, message: 'Attendance recorded successfully for a new date entry.' });
+            }
         } else {
-            updateData.User[userArrayIndex] = {
-                Date: new Date().toISOString().split("T")[0],
-                Time,
-                Type,
-                CreatedAt: new Date()
-            };
+          
+            const newAttendanceRecordId = await getNextAttendanceRecordId(); 
 
-            const newRecord = new Attendance(updateData);
-            await newRecord.save();
+            const newAttendance = new Attendance({
+                Attendance_uuid: uuid(),
+                Attendance_Record_ID: newAttendanceRecordId, 
+                Employee_uuid: user.User_uuid,
+                Status: Status,
+                User: [{ Type, Date: currentDate, Time, CreatedAt: new Date().toISOString() }] 
+            });
+
+          
+            await newAttendance.save();
+            return res.json({ success: true, message: 'New attendance recorded successfully.' });
         }
-
-        res.json({ success: true, message: "Attendance added successfully" });
     } catch (error) {
-        console.error("Error saving attendance:", error);
-        res.status(500).json({ success: false, message: "Failed to add attendance" });
+        console.error('Error saving attendance:', error);
+        res.status(500).json({ success: false, message: 'Error saving attendance: ' + error.message });
     }
 });
 
 
-  router.get("/GetAttendanceList", async (req, res) => {
-    try {
-      let data = await Attendance.find({});
+async function getNextAttendanceRecordId() {
+    const lastRecord = await Attendance.findOne({}).sort({ Attendance_Record_ID: -1 }).limit(1);
+    return lastRecord ? lastRecord.Attendance_Record_ID + 1 : 1; 
+}
+
+
   
-      if (data.length)
-        res.json({ success: true, result: data.filter((a) => a.Employee_uuid) });
-      else res.json({ success: false, message: "Details Not found" });
+
+router.get("/GetAttendanceList", async (req, res) => {
+    try {
+        let data = await Attendance.find({}).populate('User');  
+
+        if (data.length)
+            res.json({ success: true, result: data });
+        else
+            res.json({ success: false, message: "Details Not found" });
     } catch (err) {
-      console.error("Error fetching users:", err);
+        console.error("Error fetching attendance:", err);
         res.status(500).json({ success: false, message: err });
     }
-  });
+});
+
 
  
 

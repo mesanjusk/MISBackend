@@ -191,6 +191,31 @@ router.put("/updateOrder/:id", async (req, res) => {
   }
 });
 
+router.put('/updateDelivery/:id', async (req, res) => {
+  const { id } = req.params;
+  const { Customer_uuid, Item, Quantity, Rate, Amount } = req.body;
+
+  try {
+      const order = await Orders.findById(id);
+      if (!order) {
+          return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+
+      order.Customer_uuid = Customer_uuid;
+      order.Item = Item;
+      order.Quantity = Quantity;
+      order.Rate = Rate;
+      order.Amount = Amount;
+
+      await order.save();
+      res.status(200).json({ success: true, message: 'Order updated successfully' });
+  } catch (error) {
+      console.log('Error updating order:', error);
+      res.status(500).json({ success: false, message: 'Error updating order', error });
+  }
+});
+
+
 
 router.get('/CheckCustomer/:customerUuid', async (req, res) => {
   const { customerUuid } = req.params;
