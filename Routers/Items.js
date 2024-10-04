@@ -44,7 +44,34 @@ router.post("/addItem", async (req, res) => {
     }
   });
 
-  router.put("/updateItem/:id", async (req, res) => {
+  router.get('/:id', async (req, res) => {
+    const { id } = req.params; 
+
+    try {
+        const item = await Items.findById(id);  
+
+        if (!item) {
+            return res.status(404).json({
+                success: false,
+                message: ' Item not found',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            result: item,
+        });
+    } catch (error) {
+        console.error('Error fetching item:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching item',
+            error: error.message,
+        });
+    }
+});
+
+  router.put("/update/:id", async (req, res) => {
     const { id } = req.params;
     const { Item_name, Item_group } = req.body;
 
@@ -64,5 +91,20 @@ router.post("/addItem", async (req, res) => {
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
+
+router.delete('/Delete/:itemId', async (req, res) => {
+  const { itemId } = req.params;
+  try {
+      const item = await Items.findByIdAndDelete(itemId);
+      if (!item) {
+          return res.status(404).json({ success: false, message: 'Item not found' });
+      }
+      return res.status(200).json({ success: true, message: 'Item deleted successfully' });
+  } catch (error) {
+      return res.status(500).json({ success: false, message: 'Error deleting item' });
+  }
+});
+
+
 
   module.exports = router;

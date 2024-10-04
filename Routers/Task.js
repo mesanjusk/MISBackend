@@ -93,7 +93,6 @@ router.post("/addTask", async (req, res) => {
 });
 
 router.delete('/Delete/:taskId', async (req, res) => {
-  console.log('Received taskId:', req.params.taskId); 
   const { taskId } = req.params;
   try {
       const task = await Tasks.findByIdAndDelete(taskId);
