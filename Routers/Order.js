@@ -120,12 +120,13 @@ router.get("/GetDeliveredList", async (req, res) => {
       const filteredData = data.filter(order => {
         const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
         const isMainTaskDelivered = mainTask === "delivered";
+        const isMainAmount = order.Amount === 0;
 
         const isStatusDelivered = order.Status.some(
           status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
         );
 
-        return isMainTaskDelivered || isStatusDelivered;
+        return (isMainTaskDelivered || isStatusDelivered) && isMainAmount;
       });
 
       res.json({ success: true, result: filteredData });
@@ -140,22 +141,21 @@ router.get("/GetDeliveredList", async (req, res) => {
 
 
 
-  router.get("/:id", async(req, res) => {
-    const orderId = req.params.id;
+router.get('/order/:id', async (req, res) => {
+  const orderId = req.params.id;  
 
-    try {
-      const order = await Orders.findById(orderId);
-
-      if (!order) {
-          return res.status(404).send({ success: false, message: "Order not found" });
-      }
-
-      return res.send({ success: true, result: order });
-  } catch (err) {
-      console.error("Error retrieving order:", err);
-      return res.status(500).send({ success: false, message: "Internal Server Error" });
+  try {
+    const order = await Orders.findById(orderId);  
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    res.json(order);
+  } catch (error) {
+    console.error('Error retrieving order:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 router.post('/addStatus', async (req, res) => {
   const { orderId, newStatus } = req.body;
