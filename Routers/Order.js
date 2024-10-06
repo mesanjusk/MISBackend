@@ -139,7 +139,32 @@ router.get("/GetDeliveredList", async (req, res) => {
   }
 });
 
+router.get("/GetBillList", async (req, res) => {
+  try {
+    let data = await Orders.find({});
 
+    if (data.length) {
+      const filteredData = data.filter(order => {
+        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
+        const isMainTaskDelivered = mainTask === "delivered";
+        const isMainAmount = order.Amount !== 0;
+
+        const isStatusDelivered = order.Status.some(
+          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
+        );
+
+        return (isMainTaskDelivered || isStatusDelivered) && isMainAmount;
+      });
+
+      res.json({ success: true, result: filteredData });
+    } else {
+      res.json({ success: false, message: "No orders found" });
+    }
+  } catch (err) {
+    console.error("Error fetching orders:", err);
+    res.status(500).json({ success: false, message: 'Internal Server Error', details: err.message });
+  }
+});
 
 router.get('/order/:id', async (req, res) => {
   const orderId = req.params.id;  
