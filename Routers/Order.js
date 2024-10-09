@@ -166,7 +166,7 @@ router.get("/GetBillList", async (req, res) => {
   }
 });
 
-router.get('/order/:id', async (req, res) => {
+router.get('/:id', async (req, res) => {
   const orderId = req.params.id;  
 
   try {

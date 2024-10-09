@@ -124,4 +124,81 @@ router.get('/GetLoggedInUser', authenticateToken, async (req, res) => {
   }
 });
 
+router.get('/:id', async (req, res) => {
+  const { id } = req.params; 
+
+  try {
+      const user = await Users.findById(id);  
+
+      if (!user) {
+          return res.status(404).json({
+              success: false,
+              message: 'User not found',
+          });
+      }
+
+      res.status(200).json({
+          success: true,
+          result: user,
+      });
+  } catch (error) {
+      console.error('Error fetching user:', error);
+      res.status(500).json({
+          success: false,
+          message: 'Error fetching user',
+          error: error.message,
+      });
+  }
+});
+
+router.put('/update/:id', async (req, res) => {
+const { id } = req.params;  
+const { User_name, Mobile_number, User_group } = req.body;
+
+try {
+  const updatedUser = await Users.findOneAndUpdate(
+    { _id: id }, 
+    { User_name, Mobile_number, User_group },
+    { new: true }  
+  );
+
+  if (!updatedUser) {
+    return res.status(404).json({
+      success: false,
+      message: 'User not found',
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'User updated successfully',
+    result: updatedUser,
+  });
+} catch (error) {
+  console.error('Error updating user:', error);
+  res.status(500).json({
+    success: false,
+    message: 'Error updating user',
+    error: error.message,
+  });
+}
+});
+
+
+
+router.delete('/DeleteUser/:userUuid', async (req, res) => {
+const { userUuid } = req.params;
+try {
+    const result = await Users.findOneAndDelete({ User_uuid: userUuid });
+    if (!result) {
+        return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    res.json({ success: true, message: 'User deleted successfully' });
+} catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+}
+});
+
+
   module.exports = router;
