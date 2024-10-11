@@ -43,4 +43,77 @@ router.post("/addPriority", async (req, res) => {
     }
   });
 
+  router.get('/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const priority = await Priority.findById(id);
+        if (!priority) {
+            return res.status(404).json({
+                success: false,
+                message: 'Priority not found',
+            });
+        }
+        res.status(200).json({
+            success: true,
+            result: priority,
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching priority',
+            error: error.message,
+        });
+    }
+});
+
+
+router.put('/update/:id', async (req, res) => {
+  const { id } = req.params;  
+  const { Priority_name } = req.body;
+
+  try {
+    const updatedPriority = await Priority.findOneAndUpdate(
+      { _id: id }, 
+      { Priority_name },
+      { new: true }  
+    );
+
+    if (!updatedPriority) {
+      return res.status(404).json({
+        success: false,
+        message: 'Priority not found',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Priority updated successfully',
+      result: updatedPriority,
+    });
+  } catch (error) {
+    console.error('Error updating Priority:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating Priority',
+      error: error.message,
+    });
+  }
+});
+
+
+
+router.delete('/DeletePriority/:priorityUuid', async (req, res) => {
+  const { priorityUuid } = req.params;
+  try {
+      const result = await Priority.findOneAndDelete({ Priority_uuid: priorityUuid });
+      if (!result) {
+          return res.status(404).json({ success: false, message: 'Priority not found' });
+      }
+      res.json({ success: true, message: 'Priority deleted successfully' });
+  } catch (error) {
+      console.error('Error deleting Priority:', error);
+      res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
   module.exports = router;
