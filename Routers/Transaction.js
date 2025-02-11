@@ -13,7 +13,6 @@ router.post("/addTransaction", async (req, res) => {
       Created_by,
       Journal_entry = [{}],
     } = req.body;
-  
     if (!Journal_entry || !Journal_entry.length || !Journal_entry[0].Account_id || !Journal_entry[0].Type || !Journal_entry[0].Amount) {
       return res.status(400).json({
         success: false,

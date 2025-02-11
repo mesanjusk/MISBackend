@@ -17,6 +17,7 @@ const Transaction = require("./Routers/Transaction");
 const Attendance = require("./Routers/Attendance");
 const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
+const Usertasks = require("./Routers/Usertask");
 const app = express()
 
 app.use(express.json())
@@ -41,6 +42,7 @@ app.use("/payment_mode", Payment_mode);
 app.use("/attendance", Attendance);
 app.use("/vendor", Vendors);
 app.use("/note", Note);
+app.use("/usertask", Usertasks)
 
 app.listen(8000,()=>{
     console.log("port connected");
