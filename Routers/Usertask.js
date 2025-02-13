@@ -5,7 +5,7 @@ const { v4: uuid } = require("uuid");
 
 router.post("/addUsertask", async (req, res) => {
   const {
-    Usertask_name, User
+    Usertask_name, User, Deadline, Remark
   } = req.body;
  
   try{
@@ -23,7 +23,10 @@ router.post("/addUsertask", async (req, res) => {
         Usertask_Number: newTaskNumber,
         Date: new Date().toISOString().split("T")[0],
         Time: new Date().toLocaleTimeString("en-US", { hour12: false }),
-        Usertask_uuid: uuid()
+        Usertask_uuid: uuid(),
+        Deadline,
+        Remark,
+        Status: "Pending"
     });
     await newTask.save(); 
     res.json("notexist");
@@ -50,6 +53,29 @@ router.get("/GetUsertaskList", async (req, res) => {
       }
 });
 
+router.put("/update/:id", async (req, res) => {
+  const { id } = req.params;
+  const { Usertask_name, Usertask_Number, Deadline, Remark, Status } = req.body;
+
+  try {
+      const user = await Usertasks.findByIdAndUpdate(id, {
+        Usertask_name,
+        Usertask_Number,
+        Deadline,
+        Remark, 
+        Status
+      }, { new: true }); 
+
+      if (!user) {
+          return res.status(404).json({ success: false, message: "Task not found" });
+      }
+
+      res.json({ success: true, result: user });
+  } catch (error) {
+      console.error(error);
+      res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
 
   module.exports = router;

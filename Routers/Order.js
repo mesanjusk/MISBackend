@@ -218,7 +218,7 @@ router.put("/updateOrder/:id", async (req, res) => {
 
 router.put('/updateDelivery/:id', async (req, res) => {
   const { id } = req.params;
-  const { Customer_uuid, Item, Quantity, Rate, Amount } = req.body;
+  const { Customer_uuid, Item, Quantity, Rate, Amount,Remark } = req.body;
 
   try {
       const order = await Orders.findById(id);
@@ -231,6 +231,7 @@ router.put('/updateDelivery/:id', async (req, res) => {
       order.Quantity = Quantity;
       order.Rate = Rate;
       order.Amount = Amount;
+      order.Remark = Remark;
 
       await order.save();
       res.status(200).json({ success: true, message: 'Order updated successfully' });
