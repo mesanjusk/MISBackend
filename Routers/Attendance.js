@@ -85,6 +85,32 @@ router.get("/GetAttendanceList", async (req, res) => {
     }
 });
 
+router.get('/getLastIn/:userName', async (req, res) => {
+    try {
+        const { userName } = req.params;
+        const user = await User.findOne({ User_name: userName });
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        const lastInRecord = await Attendance.findOne({
+            Employee_uuid: user.User_uuid,
+            "User.Type": "In"
+        })
+        .sort({ "User.Time": -1 })
+        .select("User");
+
+        if (!lastInRecord || lastInRecord.User.length === 0) {
+            return res.status(404).json({ success: false, message: "No 'In' record found" });
+        }
+        const lastIn = lastInRecord.User.filter(entry => entry.Type === "In").pop();
+
+        res.json(lastIn);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
 
  
 
