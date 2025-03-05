@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Attendance = require("../Models/attendance");
 const { v4: uuid } = require("uuid");
-const User = require("../Models/users")
+const User = require("../Models/users");
 
 router.post('/addAttendance', async (req, res) => {
     const { User_name, Type, Status, Time } = req.body;
@@ -10,7 +10,7 @@ router.post('/addAttendance', async (req, res) => {
         return res.status(400).json({ success: false, message: 'All fields are required' });
     }
 
-    const currentDate = new Date().toISOString().split('T')[0]; 
+    const currentDate = new Date().toISOString().split('T')[0];
 
     try {
         const user = await User.findOne({ User_name });
@@ -19,28 +19,27 @@ router.post('/addAttendance', async (req, res) => {
             return res.status(404).json({ success: false, message: "User not found." });
         }
 
-        const lastAttendanceRecord = await Attendance.findOne({ Employee_uuid: user.User_uuid })
+        let todayAttendance = await Attendance.findOne({
+            Employee_uuid: user.User_uuid,
+            Date: currentDate
+        });
+
+        if (todayAttendance) {
+            todayAttendance.User.push({ Type, Time, CreatedAt: new Date().toISOString() });
+            await todayAttendance.save();
+            return res.json({ success: true, message: 'New entry added to today\'s attendance.' });
+        }
+
+        const lastAttendanceRecord = await Attendance.findOne({})
             .sort({ Attendance_Record_ID: -1 });
 
-        let newAttendanceRecordId = 1;
-
-        if (lastAttendanceRecord) {
-            const lastEntryDate = lastAttendanceRecord.Date;
-
-            if (lastEntryDate === currentDate) {
-                lastAttendanceRecord.User.push({ Type, Time, CreatedAt: new Date().toISOString() });
-                await lastAttendanceRecord.save();
-                return res.json({ success: true, message: 'New entry added to today\'s attendance.' });
-            }
-
-            newAttendanceRecordId = lastAttendanceRecord.Attendance_Record_ID + 1;
-        }
+        let newAttendanceRecordId = lastAttendanceRecord ? lastAttendanceRecord.Attendance_Record_ID + 1 : 1;
 
         const newAttendance = new Attendance({
             Attendance_uuid: uuid(),
             Attendance_Record_ID: newAttendanceRecordId, 
             Employee_uuid: user.User_uuid,
-            Date: currentDate, 
+            Date: currentDate,
             Status: Status,
             User: [{ Type, Time, CreatedAt: new Date().toISOString() }]
         });
@@ -53,7 +52,6 @@ router.post('/addAttendance', async (req, res) => {
         res.status(500).json({ success: false, message: 'Error saving attendance: ' + error.message });
     }
 });
-
 
 router.get("/GetAttendanceList", async (req, res) => {
     try {
