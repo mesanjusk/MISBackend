@@ -4,123 +4,110 @@ const Customers = require("../Models/customer");
 const { v4: uuid } = require("uuid");
 
 router.post("/addCustomer", async (req, res) => {
-    const{Customer_name, Mobile_number, Customer_group}=req.body
+    const { Customer_name, Mobile_number, Customer_group } = req.body;
 
-    try{
-        const check=await Customers.findOne({ Mobile_number: Mobile_number })
-       
-        if(check){
-            res.json("exist")
+    try {
+        const check = await Customers.findOne({ Mobile_number });
+
+        if (check) {
+            return res.status(400).json({ success: false, message: "Mobile number already exists" });
         }
-        else{
-          const newCustomer = new Customers({
+
+        const newCustomer = new Customers({
             Customer_name,
             Mobile_number,
             Customer_group,
             Customer_uuid: uuid()
         });
-        await newCustomer.save(); 
-        res.json("notexist");
+
+        await newCustomer.save();
+        res.status(201).json({ success: true, message: "Customer added successfully" });
+
+    } catch (error) {
+        console.error("Error saving customer:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+router.get("/GetCustomersList", async (req, res) => {
+    try {
+        let data = await Customers.find({});
+        if (data.length) {
+            res.json({ success: true, result: data });
+        } else {
+            res.status(404).json({ success: false, message: "No customers found" });
         }
-
+    } catch (error) {
+        console.error("Error fetching customers:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
-    catch(e){
-      console.error("Error saving customer:", e);
-      res.status(500).json("fail");
-    }
-  });
+});
 
+const mongoose = require("mongoose");
 
-
-  router.get("/GetCustomersList", async (req, res) => {
+router.get("/:id", async (req, res) => {
     try {
-      let data = await Customers.find({});
-  
-      if (data.length)
-        res.json({ success: true, result: data.filter((a) => a.Customer_name) });
-      else res.json({ success: false, message: "Customers Not found" });
-    } catch (err) {
-      console.error("Error fetching users:", err);
-        res.status(500).json({ success: false, message: err });
-    }
-  });
+        const { id } = req.params;
 
-  router.get('/:id', async (req, res) => {
-    const { id } = req.params; 
-
-    try {
-        const customer = await Customers.findById(id);  
+        let customer;
+        if (mongoose.Types.ObjectId.isValid(id)) {
+            customer = await Customers.findOne({ _id: id });
+        } else {
+            customer = await Customers.findOne({ Customer_uuid: id });
+        }
 
         if (!customer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Customer not found',
-            });
+            return res.status(404).json({ message: "Customer not found" });
+        }
+        res.json(customer);
+    } catch (error) {
+        console.error("Error fetching customer:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+
+router.put("/update/:id", async (req, res) => {
+    const { Customer_name, Mobile_number, Customer_group } = req.body;
+
+    try {
+        const existingCustomer = await Customers.findOne({ Mobile_number, _id: { $ne: req.params.id } });
+        if (existingCustomer) {
+            return res.status(400).json({ success: false, message: "Mobile number already in use" });
         }
 
-        res.status(200).json({
-            success: true,
-            result: customer,
-        });
+        const updatedCustomer = await Customers.findByIdAndUpdate(
+            req.params.id,
+            { Customer_name, Mobile_number, Customer_group },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedCustomer) {
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+
+        res.status(200).json({ success: true, message: "Customer updated successfully", result: updatedCustomer });
+
     } catch (error) {
-        console.error('Error fetching customer:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching customer',
-            error: error.message,
-        });
+        console.error("Error updating customer:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
 
-router.put('/update/:id', async (req, res) => {
-  const { id } = req.params;  
-  const { Customer_name, Mobile_number, Customer_group } = req.body;
+router.delete("/DeleteCustomer/:customerUuid", async (req, res) => {
+    try {
+        const result = await Customers.findOneAndDelete({ Customer_uuid: req.params.customerUuid });
 
-  try {
-    const updatedCustomer = await Customers.findOneAndUpdate(
-      { _id: id }, 
-      { Customer_name, Mobile_number, Customer_group },
-      { new: true }  
-    );
+        if (!result) {
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
 
-    if (!updatedCustomer) {
-      return res.status(404).json({
-        success: false,
-        message: 'Customer not found',
-      });
+        res.status(200).json({ success: true, message: "Customer deleted successfully" });
+
+    } catch (error) {
+        console.error("Error deleting customer:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
-
-    res.status(200).json({
-      success: true,
-      message: 'Customer updated successfully',
-      result: updatedCustomer,
-    });
-  } catch (error) {
-    console.error('Error updating customer:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating customer',
-      error: error.message,
-    });
-  }
 });
 
-
-
-router.delete('/DeleteCustomer/:customerUuid', async (req, res) => {
-  const { customerUuid } = req.params;
-  try {
-      const result = await Customers.findOneAndDelete({ Customer_uuid: customerUuid });
-      if (!result) {
-          return res.status(404).json({ success: false, message: 'Customer not found' });
-      }
-      res.json({ success: true, message: 'Customer deleted successfully' });
-  } catch (error) {
-      console.error('Error deleting customer:', error);
-      res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
-
-
-  module.exports = router;
+module.exports = router;
