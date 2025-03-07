@@ -43,54 +43,53 @@ router.get("/GetCustomersList", async (req, res) => {
     }
 });
 
-const mongoose = require("mongoose");
+ router.get('/:id', async (req, res) => {
+    const { id } = req.params; 
 
-router.get("/:id", async (req, res) => {
     try {
-        const { id } = req.params;
-
-        let customer;
-        if (mongoose.Types.ObjectId.isValid(id)) {
-            customer = await Customers.findOne({ _id: id });
-        } else {
-            customer = await Customers.findOne({ Customer_uuid: id });
-        }
+        const customer = await Customers.findById(id);  
 
         if (!customer) {
-            return res.status(404).json({ message: "Customer not found" });
+            return res.status(404).json({
+                success: false,
+                message: 'Customer not found',
+            });
         }
-        res.json(customer);
+
+        res.status(200).json({
+            success: true,
+            result: customer,
+        });
     } catch (error) {
-        console.error("Error fetching customer:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        console.error('Error fetching customer:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching customer',
+            error: error.message,
+        });
     }
 });
 
 
 router.put("/update/:id", async (req, res) => {
+    const { id } = req.params;
     const { Customer_name, Mobile_number, Customer_group } = req.body;
 
     try {
-        const existingCustomer = await Customers.findOne({ Mobile_number, _id: { $ne: req.params.id } });
-        if (existingCustomer) {
-            return res.status(400).json({ success: false, message: "Mobile number already in use" });
-        }
+        const user = await Customers.findByIdAndUpdate(id, {
+            Customer_name, 
+            Mobile_number, 
+            Customer_group
+        }, { new: true }); 
 
-        const updatedCustomer = await Customers.findByIdAndUpdate(
-            req.params.id,
-            { Customer_name, Mobile_number, Customer_group },
-            { new: true, runValidators: true }
-        );
-
-        if (!updatedCustomer) {
+        if (!user) {
             return res.status(404).json({ success: false, message: "Customer not found" });
         }
 
-        res.status(200).json({ success: true, message: "Customer updated successfully", result: updatedCustomer });
-
+        res.json({ success: true, result: user });
     } catch (error) {
-        console.error("Error updating customer:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
     }
 });
 
