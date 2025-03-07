@@ -93,20 +93,17 @@ router.put("/update/:id", async (req, res) => {
     }
 });
 
-router.delete("/DeleteCustomer/:customerUuid", async (req, res) => {
-    try {
-        const result = await Customers.findOneAndDelete({ Customer_uuid: req.params.customerUuid });
-
-        if (!result) {
-            return res.status(404).json({ success: false, message: "Customer not found" });
-        }
-
-        res.status(200).json({ success: true, message: "Customer deleted successfully" });
-
-    } catch (error) {
-        console.error("Error deleting customer:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
-    }
+router.delete("/DeleteCustomer/:customerId", async (req, res) => {
+   const { customerId } = req.params;
+     try {
+         const item = await Customers.findByIdAndDelete(customerId);
+         if (!item) {
+             return res.status(404).json({ success: false, message: 'Customer not found' });
+         }
+         return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
+     } catch (error) {
+         return res.status(500).json({ success: false, message: 'Error deleting customer' });
+     }
 });
 
 module.exports = router;
