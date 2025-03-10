@@ -43,5 +43,21 @@ router.post("/addUsergroup", async (req, res) => {
     }
   });
 
-  
+router.get("/getGroup/:userGroup", async (req, res) => {
+    try {
+        const userGroup = req.params.userGroup;
+
+        const group = await Usergroup.findOne({ User_group: userGroup });
+
+        if (!group) {
+            return res.status(404).json({ success: false, message: "User Group not found!" });
+        }
+
+        return res.status(200).json({ success: true, group });
+    } catch (error) {
+        console.error("Error fetching user group:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
   module.exports = router;

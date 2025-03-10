@@ -30,7 +30,7 @@ router.post("/login", async (req, res) => {
 });
 
 router.post("/addUser", async (req, res) => {
-    const{User_name, Password, Mobile_number, User_group}=req.body
+    const{User_name, Password, Mobile_number, Amount, User_group}=req.body
 
     try{
         const check=await Users.findOne({ Mobile_number: Mobile_number })
@@ -44,6 +44,7 @@ router.post("/addUser", async (req, res) => {
             Password,
             Mobile_number,
             User_group,
+            Amount,
             User_uuid: uuid()
         });
         await newUser.save(); 
@@ -184,7 +185,32 @@ try {
 }
 });
 
+router.get('/getUserByName/:username', async (req, res) => {
+  const { username } = req.params;
 
+  try {
+      const user = await Users.findOne({ User_name: username }); 
+
+      if (!user) {
+          return res.status(404).json({
+              success: false,
+              message: 'User not found',
+          });
+      }
+
+      res.status(200).json({
+          success: true,
+          result: user,
+      });
+  } catch (error) {
+      console.error('Error fetching user:', error);
+      res.status(500).json({
+          success: false,
+          message: 'Error fetching user',
+          error: error.message,
+      });
+  }
+});
 
 router.delete('/DeleteUser/:userUuid', async (req, res) => {
 const { userUuid } = req.params;
