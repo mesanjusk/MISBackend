@@ -7,6 +7,7 @@ const { v4: uuid } = require("uuid");
 router.post("/addTransaction", async (req, res) => {
     const {
       Description,
+      Transaction_date,
       Total_Debit,
       Total_Credit,
       Payment_mode,
@@ -27,7 +28,7 @@ router.post("/addTransaction", async (req, res) => {
       const newTransaction = new Transaction({
         Transaction_uuid: uuid(),
         Transaction_id: newTransactionNumber,
-        Transaction_date: new Date().toISOString().split("T")[0],
+        Transaction_date,
         Total_Debit,
         Total_Credit,
         Journal_entry: Journal_entry,
