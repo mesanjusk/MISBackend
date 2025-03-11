@@ -94,6 +94,32 @@ router.get('/getLastIn/:userName', async (req, res) => {
     }
 });
 
- 
+router.get('/getLastAttendance/:userName', async (req, res) => {
+    try {
+        const { userName } = req.params;
+        const user = await User.findOne({ User_name: userName });
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        const lastAttendance = await Attendance.findOne({
+            Employee_uuid: user.User_uuid
+        })
+        .sort({ Date: -1, "User.CreatedAt": -1 })
+        .select("User");
+
+        if (!lastAttendance || lastAttendance.User.length === 0) {
+            return res.status(404).json({ success: false, message: "No attendance record found." });
+        }
+
+        const lastEntry = lastAttendance.User[lastAttendance.User.length - 1];
+        res.json({ success: true, lastState: lastEntry.Type });
+    } catch (error) {
+        console.error("Error fetching last attendance:", error);
+        res.status(500).json({ success: false, message: "Internal Server Error" });
+    }
+});
+
+
 
   module.exports = router;
