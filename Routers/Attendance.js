@@ -94,7 +94,7 @@ router.get('/getLastIn/:userName', async (req, res) => {
     }
 });
 
-router.get('/getLastAttendance/:userName', async (req, res) => {
+router.get('/getTodayAttendance/:userName', async (req, res) => {
     try {
         const { userName } = req.params;
         const user = await User.findOne({ User_name: userName });
@@ -102,26 +102,27 @@ router.get('/getLastAttendance/:userName', async (req, res) => {
             return res.status(404).json({ success: false, message: "User not found." });
         }
 
-        const lastAttendance = await Attendance.findOne({
-            Employee_uuid: user.User_uuid
-        })
-        .sort({ "User.CreatedAt": -1 }) 
-        .select("User");
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
 
-        if (!lastAttendance || lastAttendance.User.length === 0) {
-            return res.status(404).json({ success: false, message: "No attendance record found." });
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const todayAttendance = await Attendance.findOne({
+            Employee_uuid: user.User_uuid,
+            'User.CreatedAt': { $gte: startOfDay, $lte: endOfDay }
+        }).sort({ 'User.CreatedAt': -1 });
+
+        if (!todayAttendance || todayAttendance.User.length === 0) {
+            return res.json({ success: true, lastState: null });
         }
 
-        const lastEntry = lastAttendance.User[0]; 
-
+        const lastEntry = todayAttendance.User[0];
         res.json({ success: true, lastState: lastEntry.Type });
     } catch (error) {
-        console.error("Error fetching last attendance:", error);
+        console.error("Error fetching today's attendance:", error);
         res.status(500).json({ success: false, message: "Internal Server Error" });
     }
 });
-
-
-
 
   module.exports = router;
