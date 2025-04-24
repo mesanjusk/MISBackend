@@ -7,6 +7,7 @@ const UsersSchema=new mongoose.Schema({
     Mobile_number: { type: Number, required: true, unique: true },
     User_group: { type: String, required: true },
     Amount: { type: Number, required: true},
+    AccountID: { type: String}
  })
 
  const Users = mongoose.model("Users", UsersSchema);

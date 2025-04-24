@@ -39,6 +39,31 @@ catch(e){
 }
 });
 
+router.post('/send-message', async (req, res) => {
+  const { mobile, userName, type } = req.body;
+
+  if (!mobile || !userName || !type) {
+    return res.status(400).json({ error: 'Missing required fields: mobile, userName, type' });
+  }
+
+  const apiKey = '9d8db6b2a1584a489e7270a9bbe1b7a0';
+
+  const encodedMobile = encodeURIComponent(mobile);
+  const encodedMsg = encodeURIComponent(`${type} ${userName}`);
+
+  const url = `http://148.251.129.118/wapp/api/send?apikey=${apiKey}&mobile=${encodedMobile}&msg=${encodedMsg}`;
+
+  try {
+    const response = await fetch(url);
+    const data = await response.text(); 
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error('API Error:', error);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
+
 
 router.get("/GetUsertaskList", async (req, res) => {
     try {

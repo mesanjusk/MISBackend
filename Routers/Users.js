@@ -18,7 +18,8 @@ router.post("/login", async (req, res) => {
       if (Password === user.Password) {
           res.json({
               status: "exist",
-              userGroup: user.User_group
+              userGroup: user.User_group,
+              userMobile: user.Mobile_number,
           });
       } else {
           res.json({ status: "invalid", message: "Invalid credentials." });
