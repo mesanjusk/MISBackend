@@ -34,9 +34,11 @@ router.post("/addTaskgroup", async (req, res) => {
     try {
       let data = await Taskgroup.find({});
   
-      if (data.length)
-        res.json({ success: true, result: data.filter((a) => a.Task_group) });
-      else res.json({ success: false, message: "Task Group Not found" });
+      if (data.length) {
+        res.json({ success: true, result: data });
+      } else {
+        res.json({ success: false, message: "Task Group Not found" });
+      }
     } catch (err) {
       console.error("Error fetching group:", err);
         res.status(500).json({ success: false, message: err });
