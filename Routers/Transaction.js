@@ -8,6 +8,7 @@ router.post("/addTransaction", async (req, res) => {
     const {
       Description,
       Transaction_date,
+      Order_id,
       Total_Debit,
       Total_Credit,
       Payment_mode,
