@@ -28,6 +28,7 @@ router.post("/addTransaction", async (req, res) => {
       const newTransaction = new Transaction({
         Transaction_uuid: uuid(),
         Transaction_id: newTransactionNumber,
+        Order_id,
         Transaction_date,
         Total_Debit,
         Total_Credit,
