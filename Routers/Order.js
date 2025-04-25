@@ -255,5 +255,24 @@ router.get('/CheckCustomer/:customerUuid', async (req, res) => {
   }
 });
 
+ router.put("/update/:id", async (req, res) => {
+    const { id } = req.params;
+    const { Customer_uuid } = req.body;
+
+    try {
+        const user = await Orders.findByIdAndUpdate(id, {
+            Customer_uuid
+        }, { new: true }); 
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
+
+        res.json({ success: true, result: user });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
 
   module.exports = router;
