@@ -40,21 +40,16 @@ catch(e){
 });
 
 router.post('/send-message', async (req, res) => {
-// Inside your /usertask/send-message endpoint:
-const { mobile, message, type, userName } = req.body;
+  const { mobile, message, type, userName } = req.body;
 
-if (!mobile || !message || !type || !userName) {
+  if (!mobile || !message || !type || !userName) {
     return res.status(400).json({ error: 'Missing required fields' });
-}
-
-// ✅ Use the actual `message` field, not just `userName`
-sendMessageToWhatsApp(mobile, message);  // or however you're sending messages
+  }
 
   const apiKey = '9d8db6b2a1584a489e7270a9bbe1b7a0';
 
   const encodedMobile = encodeURIComponent(mobile);
   const encodedMsg = encodeURIComponent(message);
-
 
   const url = `http://148.251.129.118/wapp/api/send?apikey=${apiKey}&mobile=${encodedMobile}&msg=${encodedMsg}`;
 
