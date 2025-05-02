@@ -40,16 +40,16 @@ catch(e){
 });
 
 router.post('/send-message', async (req, res) => {
-  const { mobile, userName, type } = req.body;
+  const { mobile, message, type, userName } = req.body;
 
-  if (!mobile || !userName || !type) {
-    return res.status(400).json({ error: 'Missing required fields: mobile, userName, type' });
+  if (!mobile || !message || !type || !userName) {
+    return res.status(400).json({ error: 'Missing required fields' });
   }
 
   const apiKey = '9d8db6b2a1584a489e7270a9bbe1b7a0';
 
   const encodedMobile = encodeURIComponent(mobile);
-  const encodedMsg = encodeURIComponent(`${type} ${userName}`);
+  const encodedMsg = encodeURIComponent(message);
 
   const url = `http://148.251.129.118/wapp/api/send?apikey=${apiKey}&mobile=${encodedMobile}&msg=${encodedMsg}`;
 
