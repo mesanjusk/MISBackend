@@ -48,6 +48,31 @@ router.get("/GetCustomersList", async (req, res) => {
     }
 });
 
+// Check for duplicate customer name
+router.get("/checkDuplicateName", async (req, res) => {
+    try {
+        const { name } = req.query;
+
+        if (!name) {
+            return res.status(400).json({ success: false, message: "Customer name is required" });
+        }
+
+        const existingCustomer = await Customers.findOne({ Customer_name: name.trim() });
+
+        if (existingCustomer) {
+            return res.status(200).json({ success: true, exists: true });
+        } else {
+            return res.status(200).json({ success: true, exists: false });
+        }
+    } catch (error) {
+        console.error("Error in /checkDuplicateName:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+
+
+
 // Get a specific customer
 router.get('/:id', async (req, res) => {
     const { id } = req.params;
