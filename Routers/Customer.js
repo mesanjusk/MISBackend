@@ -7,10 +7,10 @@ router.post("/addCustomer", async (req, res) => {
     const { Customer_name, Mobile_number, Customer_group } = req.body;
 
     try {
-        const check = await Customers.findOne({ Mobile_number });
+        const check = await Customers.findOne({ Customer_name });
 
         if (check) {
-            return res.status(400).json({ success: false, message: "Mobile number already exists" });
+            return res.status(400).json({ success: false, message: "Customer name already exists" });
         }
 
         const newCustomer = new Customers({
