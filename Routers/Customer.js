@@ -7,6 +7,8 @@ const { v4: uuid } = require("uuid");
 router.post("/addCustomer", async (req, res) => {
     const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
 
+    console.log("Request Body:", req.body); // Log the incoming request body for debugging
+
     try {
         const check = await Customers.findOne({ Customer_name });
 
@@ -29,7 +31,7 @@ router.post("/addCustomer", async (req, res) => {
 
     } catch (error) {
         console.error("Error saving customer:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        res.status(500).json({ success: false, message: "Internal server error", error: error.message });
     }
 });
 
@@ -69,9 +71,6 @@ router.get("/checkDuplicateName", async (req, res) => {
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
-
-
-
 
 // Get a specific customer
 router.get('/:id', async (req, res) => {
