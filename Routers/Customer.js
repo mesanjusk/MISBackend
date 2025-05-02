@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const Customers = require('../models/Customer');  // Adjusted import path
+const Customer = require('../Models/customer'); // Corrected path
+
+// Your route handlers here
+
+
+
 
 // Add a new customer
 router.post('/add', async (req, res) => {
