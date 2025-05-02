@@ -1,112 +1,102 @@
 const express = require('express');
 const router = express.Router();
-const Customer = require('../Models/customer'); // Corrected path
+const Customers = require('../models/Customer'); // Adjust the path if needed
 
-// Your route handlers here
-
-
-
-
-// Add a new customer
-router.post('/add', async (req, res) => {
+// Route to check for duplicate customer name
+router.get('/checkDuplicateName', async (req, res) => {
+    const { name } = req.query;
     try {
-        const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
-
-        // Check for duplicate customer names
-        const existingCustomer = await Customers.findOne({ Customer_name });
+        const existingCustomer = await Customers.findOne({
+            Customer_name: { $regex: `^${name}$`, $options: 'i' } // Case-insensitive check
+        });
+        
         if (existingCustomer) {
-            return res.status(400).json({ message: "Customer with this name already exists!" });
+            return res.json({ success: false, message: 'Customer name already exists.' });
         }
+        
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('Error checking duplicate name:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
 
-        // If mobile number is provided, ensure it's valid and unique
-        if (Mobile_number) {
-            const existingMobile = await Customers.findOne({ Mobile_number });
-            if (existingMobile) {
-                return res.status(400).json({ message: "Customer with this mobile number already exists!" });
-            }
-        }
+// Route to add a new customer
+router.post('/addCustomer', async (req, res) => {
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction, mobileNumberOptional } = req.body;
 
-        // Create new customer record
+    // Check if customer name already exists
+    const duplicateCustomer = await Customers.findOne({
+        Customer_name: { $regex: `^${Customer_name}$`, $options: 'i' }
+    });
+
+    if (duplicateCustomer) {
+        return res.json({ success: false, message: 'Customer name already exists.' });
+    }
+
+    // Validate mobile number if not optional
+    if (!mobileNumberOptional && Mobile_number && !/^\d{10}$/.test(Mobile_number)) {
+        return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number.' });
+    }
+
+    try {
         const newCustomer = new Customers({
             Customer_name,
             Mobile_number,
             Customer_group,
             Status,
             Tags,
-            LastInteraction
+            LastInteraction,
+            mobileNumberOptional
         });
 
         await newCustomer.save();
-        res.status(201).json(newCustomer);
+        res.json({ success: true, message: 'Customer added successfully' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error adding customer" });
+        console.error('Error adding customer:', error);
+        res.status(500).json({ success: false, message: 'Error adding customer' });
     }
 });
 
-// Edit an existing customer
-router.put('/edit/:id', async (req, res) => {
+// Route to edit an existing customer
+router.put('/editCustomer/:id', async (req, res) => {
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction, mobileNumberOptional } = req.body;
+    const { id } = req.params;
+
+    // Check if the new customer name already exists (excluding the current customer)
+    const duplicateCustomer = await Customers.findOne({
+        Customer_name: { $regex: `^${Customer_name}$`, $options: 'i' },
+        _id: { $ne: id } // Exclude the current customer
+    });
+
+    if (duplicateCustomer) {
+        return res.json({ success: false, message: 'Customer name already exists.' });
+    }
+
+    // Validate mobile number if not optional
+    if (!mobileNumberOptional && Mobile_number && !/^\d{10}$/.test(Mobile_number)) {
+        return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number.' });
+    }
+
     try {
-        const { id } = req.params;
-        const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
-
-        // Check for duplicate customer names
-        const existingCustomer = await Customers.findOne({ Customer_name, _id: { $ne: id } });
-        if (existingCustomer) {
-            return res.status(400).json({ message: "Customer with this name already exists!" });
-        }
-
-        // If mobile number is provided, ensure it's valid and unique
-        if (Mobile_number) {
-            const existingMobile = await Customers.findOne({ Mobile_number, _id: { $ne: id } });
-            if (existingMobile) {
-                return res.status(400).json({ message: "Customer with this mobile number already exists!" });
-            }
-        }
-
-        // Update customer details
         const updatedCustomer = await Customers.findByIdAndUpdate(id, {
             Customer_name,
             Mobile_number,
             Customer_group,
             Status,
             Tags,
-            LastInteraction
+            LastInteraction,
+            mobileNumberOptional
         }, { new: true });
 
         if (!updatedCustomer) {
-            return res.status(404).json({ message: "Customer not found" });
+            return res.json({ success: false, message: 'Customer not found.' });
         }
 
-        res.status(200).json(updatedCustomer);
+        res.json({ success: true, message: 'Customer updated successfully', updatedCustomer });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error updating customer" });
-    }
-});
-
-// Get all customers
-router.get('/', async (req, res) => {
-    try {
-        const customers = await Customers.find();
-        res.status(200).json(customers);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error fetching customers" });
-    }
-});
-
-// Get a single customer by ID
-router.get('/:id', async (req, res) => {
-    try {
-        const customer = await Customers.findById(req.params.id);
-        if (!customer) {
-            return res.status(404).json({ message: "Customer not found" });
-        }
-        res.status(200).json(customer);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error fetching customer" });
+        console.error('Error updating customer:', error);
+        res.status(500).json({ success: false, message: 'Error updating customer' });
     }
 });
 
