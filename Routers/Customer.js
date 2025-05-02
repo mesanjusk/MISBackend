@@ -1,19 +1,45 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const Customers = require("../Models/customer");
-const { v4: uuid } = require("uuid");
+const Customers = require('../models/Customer'); // Adjust the path if needed
 
-// Add a new customer
-router.post("/addCustomer", async (req, res) => {
-    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
+// Route to check for duplicate customer name
+router.get('/checkDuplicateName', async (req, res) => {
+    const { name } = req.query;
+    try {
+        const existingCustomer = await Customers.findOne({
+            Customer_name: { $regex: `^${name}$`, $options: 'i' } // Case-insensitive check
+        });
+        
+        if (existingCustomer) {
+            return res.json({ success: false, message: 'Customer name already exists.' });
+        }
+        
+        return res.json({ success: true });
+    } catch (error) {
+        console.error('Error checking duplicate name:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Route to add a new customer
+router.post('/addCustomer', async (req, res) => {
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction, mobileNumberOptional } = req.body;
+
+    // Check if customer name already exists
+    const duplicateCustomer = await Customers.findOne({
+        Customer_name: { $regex: `^${Customer_name}$`, $options: 'i' }
+    });
+
+    if (duplicateCustomer) {
+        return res.json({ success: false, message: 'Customer name already exists.' });
+    }
+
+    // Validate mobile number if not optional
+    if (!mobileNumberOptional && Mobile_number && !/^\d{10}$/.test(Mobile_number)) {
+        return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number.' });
+    }
 
     try {
-        const check = await Customers.findOne({ Mobile_number });
-
-        if (check) {
-            return res.status(400).json({ success: false, message: "Mobile number already exists" });
-        }
-
         const newCustomer = new Customers({
             Customer_name,
             Mobile_number,
@@ -21,123 +47,56 @@ router.post("/addCustomer", async (req, res) => {
             Status,
             Tags,
             LastInteraction,
-            Customer_uuid: uuid()
+            mobileNumberOptional
         });
 
         await newCustomer.save();
-        res.status(201).json({ success: true, message: "Customer added successfully" });
-
+        res.json({ success: true, message: 'Customer added successfully' });
     } catch (error) {
-        console.error("Error saving customer:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        console.error('Error adding customer:', error);
+        res.status(500).json({ success: false, message: 'Error adding customer' });
     }
 });
 
-// Get all customers
-router.get("/GetCustomersList", async (req, res) => {
-    try {
-        let data = await Customers.find({});
-        if (data.length) {
-            res.json({ success: true, result: data });
-        } else {
-            res.status(404).json({ success: false, message: "No customers found" });
-        }
-    } catch (error) {
-        console.error("Error fetching customers:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
-    }
-});
-
-// Get a specific customer
-router.get('/:id', async (req, res) => {
+// Route to edit an existing customer
+router.put('/editCustomer/:id', async (req, res) => {
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction, mobileNumberOptional } = req.body;
     const { id } = req.params;
 
-    try {
-        const customer = await Customers.findById(id);
+    // Check if the new customer name already exists (excluding the current customer)
+    const duplicateCustomer = await Customers.findOne({
+        Customer_name: { $regex: `^${Customer_name}$`, $options: 'i' },
+        _id: { $ne: id } // Exclude the current customer
+    });
 
-        if (!customer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Customer not found',
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            result: customer,
-        });
-    } catch (error) {
-        console.error('Error fetching customer:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching customer',
-            error: error.message,
-        });
+    if (duplicateCustomer) {
+        return res.json({ success: false, message: 'Customer name already exists.' });
     }
-});
 
-// Update a customer
-router.put("/update/:id", async (req, res) => {
-    const { id } = req.params;
-    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
+    // Validate mobile number if not optional
+    if (!mobileNumberOptional && Mobile_number && !/^\d{10}$/.test(Mobile_number)) {
+        return res.json({ success: false, message: 'Please enter a valid 10-digit mobile number.' });
+    }
 
     try {
-        const user = await Customers.findByIdAndUpdate(id, {
+        const updatedCustomer = await Customers.findByIdAndUpdate(id, {
             Customer_name,
             Mobile_number,
             Customer_group,
             Status,
             Tags,
-            LastInteraction
+            LastInteraction,
+            mobileNumberOptional
         }, { new: true });
 
-        if (!user) {
-            return res.status(404).json({ success: false, message: "Customer not found" });
+        if (!updatedCustomer) {
+            return res.json({ success: false, message: 'Customer not found.' });
         }
 
-        res.json({ success: true, result: user });
+        res.json({ success: true, message: 'Customer updated successfully', updatedCustomer });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
-});
-
-// Delete a customer
-router.delete("/DeleteCustomer/:customerId", async (req, res) => {
-    const { customerId } = req.params;
-
-    try {
-        const item = await Customers.findByIdAndDelete(customerId);
-        if (!item) {
-            return res.status(404).json({ success: false, message: 'Customer not found' });
-        }
-        return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
-    } catch (error) {
-        return res.status(500).json({ success: false, message: 'Error deleting customer' });
-    }
-});
-
-// Get customer report (with Status, Tags, LastInteraction)
-router.get("/GetCustomerReport", async (req, res) => {
-    try {
-        const data = await Customers.find({});
-        if (data.length) {
-            const report = data.map(customer => ({
-                Customer_name: customer.Customer_name,
-                Mobile_number: customer.Mobile_number,
-                Customer_group: customer.Customer_group,
-                Status: customer.Status,
-                Tags: customer.Tags.join(", "),
-                LastInteraction: customer.LastInteraction ? customer.LastInteraction : "No interaction",
-            }));
-
-            res.json({ success: true, result: report });
-        } else {
-            res.status(404).json({ success: false, message: "No customers found" });
-        }
-    } catch (error) {
-        console.error("Error generating customer report:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        console.error('Error updating customer:', error);
+        res.status(500).json({ success: false, message: 'Error updating customer' });
     }
 });
 
