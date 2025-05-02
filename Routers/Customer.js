@@ -7,8 +7,6 @@ const { v4: uuid } = require("uuid");
 router.post("/addCustomer", async (req, res) => {
     const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
 
-    console.log("Request Body:", req.body); // Log the incoming request body for debugging
-
     try {
         const check = await Customers.findOne({ Customer_name });
 

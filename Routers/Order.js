@@ -260,9 +260,12 @@ router.get('/CheckCustomer/:customerUuid', async (req, res) => {
     const { Customer_uuid } = req.body;
 
     try {
-        const user = await Orders.findByIdAndUpdate(id, {
-            Customer_uuid
-        }, { new: true }); 
+      const user = await Orders.findOneAndUpdate(
+        { Order_uuid: id }, 
+        { Customer_uuid },
+        { new: true }
+    );
+    
 
         if (!user) {
             return res.status(404).json({ success: false, message: "Order not found" });
