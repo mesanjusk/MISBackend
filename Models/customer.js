@@ -1,28 +1,15 @@
 const mongoose = require('mongoose');
 
-const customerSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    unique: true, // Ensures no duplicate names
-    trim: true
-  },
-  mobile: {
-    type: String,
-    validate: {
-      validator: function (v) {
-        return !v || /^\d{10}$/.test(v); // optional but must be 10-digit if provided
-      },
-      message: props => `${props.value} is not a valid 10-digit mobile number!`
-    }
-  },
-  group: String,
-  status: {
-    type: String,
-    default: "Active"
-  },
-  lastInteraction: Date,
-  tags: [String]
+const CustomersSchema = new mongoose.Schema({
+    Customer_uuid: { type: String },
+    Customer_name: { type: String, required: true },
+    Mobile_number: { type: Number, required: true, unique: true },
+    Customer_group: { type: String, required: true },
+    Status: { type: String, default: 'active' }, // New field
+    Tags: { type: [String], default: [] }, // New field
+    LastInteraction: { type: Date, default: Date.now }, // New field
 });
 
-module.exports = mongoose.model('Customer', customerSchema);
+const Customers = mongoose.model("Customers", CustomersSchema);
+
+module.exports = Customers;
