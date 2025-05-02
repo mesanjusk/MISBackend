@@ -16,12 +16,13 @@ router.post("/addCustomer", async (req, res) => {
             return res.status(400).json({ success: false, message: "Customer Name already exists" });
         }
 
-        // Handle the optional Mobile_number field
+        // Ensure Mobile_number is set to null if it's empty
         const mobile = Mobile_number && Mobile_number.trim() ? Mobile_number : null;
 
+        // Create a new customer object
         const newCustomer = new Customers({
             Customer_name,
-            Mobile_number: mobile, // If mobile is empty or undefined, save as null
+            Mobile_number: mobile, // If mobile is blank, store null
             Customer_group,
             Status,
             Tags,
@@ -37,6 +38,7 @@ router.post("/addCustomer", async (req, res) => {
         res.status(500).json({ success: false, message: "Internal server error", error: error.message });
     }
 });
+
 
 
 // Get all customers
