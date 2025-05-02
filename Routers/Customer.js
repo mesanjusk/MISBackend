@@ -1,22 +1,143 @@
-// routes/customer.js
 const express = require("express");
 const router = express.Router();
-const Customer = require("../models/Customer"); // adjust path if needed
+const Customers = require("../Models/customer");
+const { v4: uuid } = require("uuid");
 
-// Check for duplicate customer name
-router.post("/checkName", async (req, res) => {
-    const { Customer_name } = req.body;
+// Add a new customer
+router.post("/addCustomer", async (req, res) => {
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
+
     try {
-        if (!Customer_name || Customer_name.trim() === "") {
-            return res.status(400).json({ exists: false, error: "Customer name is required" });
+        const check = await Customers.findOne({ Mobile_number });
+
+        if (check) {
+            return res.status(400).json({ success: false, message: "Mobile number already exists" });
         }
 
-        const existingCustomer = await Customer.findOne({ Customer_name: Customer_name.trim() });
+        const newCustomer = new Customers({
+            Customer_name,
+            Mobile_number,
+            Customer_group,
+            Status,
+            Tags,
+            LastInteraction,
+            Customer_uuid: uuid()
+        });
 
-        res.json({ exists: !!existingCustomer });
-    } catch (err) {
-        console.error("Error checking customer name:", err);
-        res.status(500).json({ exists: false, error: "Internal server error" });
+        await newCustomer.save();
+        res.status(201).json({ success: true, message: "Customer added successfully" });
+
+    } catch (error) {
+        console.error("Error saving customer:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+// Get all customers
+router.get("/GetCustomersList", async (req, res) => {
+    try {
+        let data = await Customers.find({});
+        if (data.length) {
+            res.json({ success: true, result: data });
+        } else {
+            res.status(404).json({ success: false, message: "No customers found" });
+        }
+    } catch (error) {
+        console.error("Error fetching customers:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+// Get a specific customer
+router.get('/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const customer = await Customers.findById(id);
+
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer not found',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            result: customer,
+        });
+    } catch (error) {
+        console.error('Error fetching customer:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching customer',
+            error: error.message,
+        });
+    }
+});
+
+// Update a customer
+router.put("/update/:id", async (req, res) => {
+    const { id } = req.params;
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
+
+    try {
+        const user = await Customers.findByIdAndUpdate(id, {
+            Customer_name,
+            Mobile_number,
+            Customer_group,
+            Status,
+            Tags,
+            LastInteraction
+        }, { new: true });
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+
+        res.json({ success: true, result: user });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
+// Delete a customer
+router.delete("/DeleteCustomer/:customerId", async (req, res) => {
+    const { customerId } = req.params;
+
+    try {
+        const item = await Customers.findByIdAndDelete(customerId);
+        if (!item) {
+            return res.status(404).json({ success: false, message: 'Customer not found' });
+        }
+        return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Error deleting customer' });
+    }
+});
+
+// Get customer report (with Status, Tags, LastInteraction)
+router.get("/GetCustomerReport", async (req, res) => {
+    try {
+        const data = await Customers.find({});
+        if (data.length) {
+            const report = data.map(customer => ({
+                Customer_name: customer.Customer_name,
+                Mobile_number: customer.Mobile_number,
+                Customer_group: customer.Customer_group,
+                Status: customer.Status,
+                Tags: customer.Tags.join(", "),
+                LastInteraction: customer.LastInteraction ? customer.LastInteraction : "No interaction",
+            }));
+
+            res.json({ success: true, result: report });
+        } else {
+            res.status(404).json({ success: false, message: "No customers found" });
+        }
+    } catch (error) {
+        console.error("Error generating customer report:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
 
