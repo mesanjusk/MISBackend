@@ -3,8 +3,9 @@ const router = express.Router();
 const Customers = require("../Models/customer");
 const { v4: uuid } = require("uuid");
 
+// Add customer
 router.post("/addCustomer", async (req, res) => {
-    const { Customer_name, Mobile_number, Customer_group } = req.body;
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
 
     try {
         const check = await Customers.findOne({ Mobile_number });
@@ -17,6 +18,9 @@ router.post("/addCustomer", async (req, res) => {
             Customer_name,
             Mobile_number,
             Customer_group,
+            Status: Status || 'active',  // Default to 'active'
+            Tags: Tags || [],
+            LastInteraction: LastInteraction || Date.now(),
             Customer_uuid: uuid()
         });
 
@@ -29,6 +33,7 @@ router.post("/addCustomer", async (req, res) => {
     }
 });
 
+// Get all customers
 router.get("/GetCustomersList", async (req, res) => {
     try {
         let data = await Customers.find({});
@@ -43,11 +48,12 @@ router.get("/GetCustomersList", async (req, res) => {
     }
 });
 
- router.get('/:id', async (req, res) => {
-    const { id } = req.params; 
+// Get a customer by ID
+router.get('/:id', async (req, res) => {
+    const { id } = req.params;
 
     try {
-        const customer = await Customers.findById(id);  
+        const customer = await Customers.findById(id);
 
         if (!customer) {
             return res.status(404).json({
@@ -70,40 +76,45 @@ router.get("/GetCustomersList", async (req, res) => {
     }
 });
 
-
+// Update customer
 router.put("/update/:id", async (req, res) => {
     const { id } = req.params;
-    const { Customer_name, Mobile_number, Customer_group } = req.body;
+    const { Customer_name, Mobile_number, Customer_group, Status, Tags, LastInteraction } = req.body;
 
     try {
-        const user = await Customers.findByIdAndUpdate(id, {
+        const customer = await Customers.findByIdAndUpdate(id, {
             Customer_name, 
             Mobile_number, 
-            Customer_group
-        }, { new: true }); 
+            Customer_group, 
+            Status, 
+            Tags, 
+            LastInteraction
+        }, { new: true });
 
-        if (!user) {
+        if (!customer) {
             return res.status(404).json({ success: false, message: "Customer not found" });
         }
 
-        res.json({ success: true, result: user });
+        res.json({ success: true, result: customer });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
 
+// Delete customer
 router.delete("/DeleteCustomer/:customerId", async (req, res) => {
-   const { customerId } = req.params;
-     try {
-         const item = await Customers.findByIdAndDelete(customerId);
-         if (!item) {
-             return res.status(404).json({ success: false, message: 'Customer not found' });
-         }
-         return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
-     } catch (error) {
-         return res.status(500).json({ success: false, message: 'Error deleting customer' });
-     }
+    const { customerId } = req.params;
+
+    try {
+        const item = await Customers.findByIdAndDelete(customerId);
+        if (!item) {
+            return res.status(404).json({ success: false, message: 'Customer not found' });
+        }
+        return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Error deleting customer' });
+    }
 });
 
 module.exports = router;
