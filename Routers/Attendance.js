@@ -3,9 +3,12 @@ const router = express.Router();
 const Attendance = require("../Models/attendance");
 const { v4: uuid } = require("uuid");
 const User = require("../Models/users");
+const authenticateToken = require('../middleware/authMiddleware'); // Import authentication middleware
 
-router.post('/addAttendance', async (req, res) => {
+// Add attendance
+router.post('/addAttendance', authenticateToken, async (req, res) => {
     const { User_name, Type, Status, Time } = req.body;
+
     if (!User_name || !Type || !Status || !Time) {
         return res.status(400).json({ success: false, message: 'All fields are required' });
     }
@@ -30,14 +33,13 @@ router.post('/addAttendance', async (req, res) => {
             return res.json({ success: true, message: 'New entry added to today\'s attendance.' });
         }
 
-        const lastAttendanceRecord = await Attendance.findOne({})
-            .sort({ Attendance_Record_ID: -1 });
+        const lastAttendanceRecord = await Attendance.findOne({}).sort({ Attendance_Record_ID: -1 });
 
         let newAttendanceRecordId = lastAttendanceRecord ? lastAttendanceRecord.Attendance_Record_ID + 1 : 1;
 
         const newAttendance = new Attendance({
             Attendance_uuid: uuid(),
-            Attendance_Record_ID: newAttendanceRecordId, 
+            Attendance_Record_ID: newAttendanceRecordId,
             Employee_uuid: user.User_uuid,
             Date: currentDate,
             Status: Status,
@@ -53,27 +55,42 @@ router.post('/addAttendance', async (req, res) => {
     }
 });
 
-router.get("/GetAttendanceList", async (req, res) => {
+// Get attendance list - Only for admin or the logged-in user
+router.get("/GetAttendanceList", authenticateToken, async (req, res) => {
     try {
-        let data = await Attendance.find({}).populate('User');  
+        if (req.user.role !== 'admin') {
+            // If user is not admin, show only their attendance
+            const data = await Attendance.find({ Employee_uuid: req.user.User_uuid }).populate('User');
+            return res.json({ success: true, result: data });
+        }
 
-        if (data.length)
+        // If admin, show all attendance
+        const data = await Attendance.find({}).populate('User');  
+
+        if (data.length) {
             res.json({ success: true, result: data });
-        else
+        } else {
             res.json({ success: false, message: "Details Not found" });
+        }
     } catch (err) {
         console.error("Error fetching attendance:", err);
         res.status(500).json({ success: false, message: err });
     }
 });
 
-router.get('/getLastIn/:userName', async (req, res) => {
+// Get last "In" record for a user (for admin or logged-in user)
+router.get('/getLastIn/:userName', authenticateToken, async (req, res) => {
     try {
         const { userName } = req.params;
         const user = await User.findOne({ User_name: userName });
 
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        // Check if user is admin or the user requesting is the same user
+        if (req.user.role !== 'admin' && req.user.User_uuid !== user.User_uuid) {
+            return res.status(403).json({ success: false, message: "Access Denied" });
         }
 
         const lastInRecord = await Attendance.findOne({
@@ -94,12 +111,18 @@ router.get('/getLastIn/:userName', async (req, res) => {
     }
 });
 
-router.get('/getTodayAttendance/:userName', async (req, res) => {
+// Get today's attendance for a user (for admin or logged-in user)
+router.get('/getTodayAttendance/:userName', authenticateToken, async (req, res) => {
     try {
         const { userName } = req.params;
         const user = await User.findOne({ User_name: userName });
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        // Check if user is admin or the user requesting is the same user
+        if (req.user.role !== 'admin' && req.user.User_uuid !== user.User_uuid) {
+            return res.status(403).json({ success: false, message: "Access Denied" });
         }
 
         const startOfDay = new Date();
@@ -125,4 +148,4 @@ router.get('/getTodayAttendance/:userName', async (req, res) => {
     }
 });
 
-  module.exports = router;
+module.exports = router;
