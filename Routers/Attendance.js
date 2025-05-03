@@ -5,8 +5,8 @@ const { v4: uuid } = require("uuid");
 const User = require("../Models/users");
 
 router.post('/addAttendance', async (req, res) => {
-const { User_name, Type, Status, Time } = req.body;
-if (!User_name || !Type || !Status || !Time) {
+const { User\_name, Type, Status, Time } = req.body;
+if (!User\_name || !Type || !Status || !Time) {
 return res.status(400).json({ success: false, message: 'All fields are required' });
 }
 
