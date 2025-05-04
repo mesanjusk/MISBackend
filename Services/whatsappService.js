@@ -1,39 +1,38 @@
 // services/whatsappService.js
-const { Client, Buttons, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  },
-});
+function setupWhatsApp(io) {
+  const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    },
+  });
 
-client.on('qr', qr => {
-  qrcode.generate(qr, { small: true });
-  console.log('QR RECEIVED', qr);
-});
+  client.on('qr', (qr) => {
+    console.log('QR RECEIVED', qr);
+    qrcode.generate(qr, { small: true });
+    io.emit('qr', qr);
+  });
 
-client.on('ready', () => {
-  console.log('WhatsApp client is ready!');
-});
+  client.on('ready', () => {
+    console.log('WhatsApp Client is ready!');
+    io.emit('ready', 'WhatsApp Client is ready!');
+  });
 
-client.on('message', async msg => {
-  const messageText = msg.body.toLowerCase();
+  client.on('authenticated', () => {
+    console.log('WhatsApp Authenticated');
+    io.emit('authenticated', 'WhatsApp Authenticated');
+  });
 
-  if (messageText === 'hi' || messageText === 'hello') {
-    const button = new Buttons('Welcome! What would you like to do?', [
-      { body: 'Order Status' },
-      { body: 'Talk to Support' },
-    ]);
-    await client.sendMessage(msg.from, button);
-  } else if (messageText === 'order status') {
-    await client.sendMessage(msg.from, 'Your order is being processed.');
-  } else if (messageText === 'talk to support') {
-    await client.sendMessage(msg.from, 'Our support team will contact you shortly.');
-  }
-});
+  client.on('message', async (message) => {
+    console.log('Message received:', message.body);
+    // Add auto-reply or processing logic if needed
+  });
 
-client.initialize();
+  client.initialize();
+}
 
-module.exports = { client };
+module.exports = { setupWhatsApp };

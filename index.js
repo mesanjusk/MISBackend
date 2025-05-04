@@ -57,18 +57,20 @@ app.use("/calllogs", CallLogs);
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: '*', // Allow cross-origin requests
+    origin: '*',
     methods: ['GET', 'POST'],
   },
 });
 
-// Initialize WhatsApp functionality with WebSocket
+// Initialize WhatsApp functionality
 setupWhatsApp(io);
 
 // API route to send WhatsApp messages
 app.post('/send-message', async (req, res) => {
   const { number, message } = req.body;
-  if (!number || !message) return res.status(400).json({ error: 'Missing number or message' });
+  if (!number || !message) {
+    return res.status(400).json({ error: 'Missing number or message' });
+  }
 
   try {
     const response = await sendMessageToWhatsApp(number, message);
@@ -78,8 +80,8 @@ app.post('/send-message', async (req, res) => {
   }
 });
 
-// Start server
+// Start server (use server.listen, not app.listen)
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
