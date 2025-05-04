@@ -113,17 +113,23 @@ router.get('/getTodayAttendance/:userName', async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const todayAttendance = await Attendance.findOne({
-      Employee_uuid: user.User_uuid,
-      'User.CreatedAt': { $gte: startOfDay, $lte: endOfDay }
-    }).sort({ 'User.CreatedAt': -1 });
+   const todayAttendance = await Attendance.findOne({
+  Employee_uuid: user.User_uuid,
+  Date: currentDate
+});
 
-    if (!todayAttendance || todayAttendance.User.length === 0) {
-      return res.json({ success: true, lastState: null });
-    }
+if (!todayAttendance || !Array.isArray(todayAttendance.User)) {
+  return res.json({ success: true, flow: [] });
+}
 
-    const lastEntry = todayAttendance.User[0];
-    res.json({ success: true, lastState: lastEntry.Type });
+// Sort entries by CreatedAt time
+const sortedEntries = todayAttendance.User.sort((a, b) => new Date(a.CreatedAt) - new Date(b.CreatedAt));
+
+// Extract Type sequence
+const flow = sortedEntries.map(entry => entry.Type);
+
+res.json({ success: true, flow });
+
   } catch (error) {
     console.error("Error fetching today's attendance:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
