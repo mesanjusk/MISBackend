@@ -4,114 +4,109 @@ const Attendance = require("../Models/attendance");
 const { v4: uuid } = require("uuid");
 const User = require("../Models/users");
 
+// Add attendance
 router.post('/addAttendance', async (req, res) => {
-const { User\_name, Type, Status, Time } = req.body;
-if (!User\_name || !Type || !Status || !Time) {
-return res.status(400).json({ success: false, message: 'All fields are required' });
-}
+  const { User_name, Type, Status, Time } = req.body;
 
-```
-const currentDate = new Date().toISOString().split('T')[0];
+  if (!User_name || !Type || !Status || !Time) {
+    return res.status(400).json({ success: false, message: 'All fields are required' });
+  }
 
-try {
+  const currentDate = new Date().toISOString().split('T')[0];
+
+  try {
     const user = await User.findOne({ User_name });
 
     if (!user) {
-        return res.status(404).json({ success: false, message: "User not found." });
+      return res.status(404).json({ success: false, message: "User not found." });
     }
 
     let todayAttendance = await Attendance.findOne({
-        Employee_uuid: user.User_uuid,
-        Date: currentDate
+      Employee_uuid: user.User_uuid,
+      Date: currentDate
     });
 
     if (todayAttendance) {
-        todayAttendance.User.push({ Type, Time, CreatedAt: new Date().toISOString() });
-        await todayAttendance.save();
-        return res.json({ success: true, message: 'New entry added to today\'s attendance.' });
+      todayAttendance.User.push({ Type, Time, CreatedAt: new Date().toISOString() });
+      await todayAttendance.save();
+      return res.json({ success: true, message: "New entry added to today's attendance." });
     }
 
-    const lastAttendanceRecord = await Attendance.findOne({})
-        .sort({ Attendance_Record_ID: -1 });
-
-    let newAttendanceRecordId = lastAttendanceRecord ? lastAttendanceRecord.Attendance_Record_ID + 1 : 1;
+    const lastAttendanceRecord = await Attendance.findOne().sort({ Attendance_Record_ID: -1 });
+    const newAttendanceRecordId = lastAttendanceRecord ? lastAttendanceRecord.Attendance_Record_ID + 1 : 1;
 
     const newAttendance = new Attendance({
-        Attendance_uuid: uuid(),
-        Attendance_Record_ID: newAttendanceRecordId, 
-        Employee_uuid: user.User_uuid,
-        Date: currentDate,
-        Status: Status,
-        User: [{ Type, Time, CreatedAt: new Date().toISOString() }]
+      Attendance_uuid: uuid(),
+      Attendance_Record_ID: newAttendanceRecordId,
+      Employee_uuid: user.User_uuid,
+      Date: currentDate,
+      Status,
+      User: [{ Type, Time, CreatedAt: new Date().toISOString() }]
     });
 
     await newAttendance.save();
-    return res.json({ success: true, message: 'New attendance recorded successfully.' });
+    res.json({ success: true, message: "New attendance recorded successfully." });
 
-} catch (error) {
-    console.error('Error saving attendance:', error);
-    res.status(500).json({ success: false, message: 'Error saving attendance: ' + error.message });
-}
-```
-
+  } catch (error) {
+    console.error("Error saving attendance:", error);
+    res.status(500).json({ success: false, message: "Error saving attendance: " + error.message });
+  }
 });
 
+// Get all attendance records
 router.get("/GetAttendanceList", async (req, res) => {
-try {
-let data = await Attendance.find({}).populate('User');
-
-```
-    if (data.length)
-        res.json({ success: true, result: data });
-    else
-        res.json({ success: false, message: "Details Not found" });
-} catch (err) {
+  try {
+    const data = await Attendance.find({});
+    if (data.length > 0) {
+      res.json({ success: true, result: data });
+    } else {
+      res.json({ success: false, message: "Details not found" });
+    }
+  } catch (err) {
     console.error("Error fetching attendance:", err);
-    res.status(500).json({ success: false, message: err });
-}
-```
-
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
-router.get('/getLastIn/\:userName', async (req, res) => {
-try {
-const { userName } = req.params;
-const user = await User.findOne({ User\_name: userName });
+// Get last 'In' time
+router.get('/getLastIn/:userName', async (req, res) => {
+  try {
+    const { userName } = req.params;
+    const user = await User.findOne({ User_name: userName });
 
-```
     if (!user) {
-        return res.status(404).json({ success: false, message: "User not found." });
+      return res.status(404).json({ success: false, message: "User not found." });
     }
 
     const lastInRecord = await Attendance.findOne({
-        Employee_uuid: user.User_uuid,
-        "User.Type": "In"
+      Employee_uuid: user.User_uuid,
+      "User.Type": "In"
     })
-    .sort({ "User.Time": -1 })
-    .select("User");
+      .sort({ "User.Time": -1 })
+      .select("User");
 
     if (!lastInRecord || lastInRecord.User.length === 0) {
-        return res.status(404).json({ success: false, message: "No 'In' record found" });
+      return res.status(404).json({ success: false, message: "No 'In' record found" });
     }
+
     const lastIn = lastInRecord.User.filter(entry => entry.Type === "In").pop();
 
-    res.json(lastIn);
-} catch (error) {
+    res.json({ success: true, lastIn });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
-}
-```
-
+  }
 });
 
-router.get('/getTodayAttendance/\:userName', async (req, res) => {
-try {
-const { userName } = req.params;
-const user = await User.findOne({ User\_name: userName });
-if (!user) {
-return res.status(404).json({ success: false, message: "User not found." });
-}
+// Get today's attendance for a user
+router.get('/getTodayAttendance/:userName', async (req, res) => {
+  try {
+    const { userName } = req.params;
+    const user = await User.findOne({ User_name: userName });
 
-```
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
@@ -119,22 +114,20 @@ return res.status(404).json({ success: false, message: "User not found." });
     endOfDay.setHours(23, 59, 59, 999);
 
     const todayAttendance = await Attendance.findOne({
-        Employee_uuid: user.User_uuid,
-        'User.CreatedAt': { $gte: startOfDay, $lte: endOfDay }
+      Employee_uuid: user.User_uuid,
+      'User.CreatedAt': { $gte: startOfDay, $lte: endOfDay }
     }).sort({ 'User.CreatedAt': -1 });
 
     if (!todayAttendance || todayAttendance.User.length === 0) {
-        return res.json({ success: true, lastState: null });
+      return res.json({ success: true, lastState: null });
     }
 
     const lastEntry = todayAttendance.User[0];
     res.json({ success: true, lastState: lastEntry.Type });
-} catch (error) {
+  } catch (error) {
     console.error("Error fetching today's attendance:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
-}
-```
-
+  }
 });
 
 module.exports = router;
