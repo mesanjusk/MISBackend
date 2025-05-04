@@ -19,7 +19,7 @@ const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
-const { setupWhatsApp, sendMessageToWhatsApp } = require("./services/whatsappService");
+const { setupWhatsApp, sendMessageToWhatsApp } = require("./Services/whatsappService");
 
 const app = express();
 const http = require('http');
