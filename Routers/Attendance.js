@@ -107,34 +107,28 @@ router.get('/getTodayAttendance/:userName', async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found." });
     }
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const currentDate = new Date().toISOString().split("T")[0]; // ✅ Fix here
 
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const todayAttendance = await Attendance.findOne({
+      Employee_uuid: user.User_uuid,
+      Date: currentDate
+    });
 
-   const todayAttendance = await Attendance.findOne({
-  Employee_uuid: user.User_uuid,
-  Date: currentDate
-});
+    if (!todayAttendance || !Array.isArray(todayAttendance.User)) {
+      return res.json({ success: true, flow: [] });
+    }
 
-if (!todayAttendance || !Array.isArray(todayAttendance.User)) {
-  return res.json({ success: true, flow: [] });
-}
+    const sortedEntries = todayAttendance.User.sort((a, b) => new Date(a.CreatedAt) - new Date(b.CreatedAt));
+    const flow = sortedEntries.map(entry => entry.Type);
 
-// Sort entries by CreatedAt time
-const sortedEntries = todayAttendance.User.sort((a, b) => new Date(a.CreatedAt) - new Date(b.CreatedAt));
-
-// Extract Type sequence
-const flow = sortedEntries.map(entry => entry.Type);
-
-res.json({ success: true, flow });
+    res.json({ success: true, flow });
 
   } catch (error) {
     console.error("Error fetching today's attendance:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
+
 
 // NEW: Set attendance state for the user (to allow persistence across devices)
 router.post('/setAttendanceState', async (req, res) => {
