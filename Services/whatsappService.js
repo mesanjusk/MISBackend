@@ -1,7 +1,7 @@
 const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const io = require('socket.io')(); // Initialize socket.io
-const SessionModel = require('./models/session'); // MongoDB model for session storage
+const SessionModel = require('./models/WhatsAppsession'); // MongoDB model for session storage
 
 // Create a new client instance
 const client = new Client({
