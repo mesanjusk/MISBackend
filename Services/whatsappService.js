@@ -1,7 +1,8 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 
-let client; // Global so we can access it later
+let client; // Global client instance
+let isClientReady = false; // Track if the client is ready
 
 // Initialize WhatsApp client and Socket.io
 function setupWhatsApp(io) {
@@ -24,6 +25,7 @@ function setupWhatsApp(io) {
 
   client.on('ready', () => {
     console.log('WhatsApp Client is ready!');
+    isClientReady = true; // Set client as ready
     io.emit('ready', 'WhatsApp is ready!');
   });
 
@@ -39,6 +41,7 @@ function setupWhatsApp(io) {
 
   client.on('disconnected', (reason) => {
     console.log('WhatsApp disconnected:', reason);
+    isClientReady = false; // Reset client readiness flag
     io.emit('disconnected', reason);
   });
 
@@ -47,18 +50,19 @@ function setupWhatsApp(io) {
 
 // Send message function
 async function sendMessageToWhatsApp(number, message) {
-  if (!client || !client.info) {
-    throw new Error('WhatsApp client is not ready');
+  if (!isClientReady) {
+    throw new Error('WhatsApp client is not ready. Please try again later.');
   }
 
   const formattedNumber = number.includes('@c.us') ? number : `${number}@c.us`;
 
   try {
+    // Send the message to the specified number
     await client.sendMessage(formattedNumber, message);
     return { success: true, message: 'Message sent successfully' };
   } catch (err) {
     console.error('Send Error:', err);
-    throw new Error('Failed to send message');
+    throw new Error('Failed to send message. Please try again later.');
   }
 }
 
