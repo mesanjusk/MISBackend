@@ -1,8 +1,11 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrCodeToImage = require('qrcode'); // For Base64 QR image generation
+const qrcode = require('qrcode');
 
+let client; // Global so we can access it later
+
+// Initialize WhatsApp client and Socket.io
 function setupWhatsApp(io) {
-  const client = new Client({
+  client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
       headless: true,
@@ -10,41 +13,56 @@ function setupWhatsApp(io) {
     },
   });
 
-  // Listen for the QR code event
   client.on('qr', (qr) => {
-    console.log('QR RECEIVED:', qr);
-
-    // Convert the QR code to a base64 PNG image
-    qrCodeToImage.toDataURL(qr, (err, url) => {
-      if (err) {
-        console.error('Error generating QR image:', err);
-      } else {
-        // Emit the base64 image URL to the frontend
-        io.emit('qr', url);
+    console.log('QR RECEIVED');
+    qrcode.toDataURL(qr, (err, url) => {
+      if (!err) {
+        io.emit('qr', url); // Send base64 QR image to frontend
       }
     });
   });
 
-  // When the WhatsApp client is ready
   client.on('ready', () => {
     console.log('WhatsApp Client is ready!');
-    io.emit('ready', 'WhatsApp Client is ready!');
+    io.emit('ready', 'WhatsApp is ready!');
   });
 
-  // When the WhatsApp client is authenticated
   client.on('authenticated', () => {
-    console.log('WhatsApp Authenticated');
-    io.emit('authenticated', 'WhatsApp Authenticated');
+    console.log('WhatsApp authenticated');
+    io.emit('authenticated', 'WhatsApp authenticated');
   });
 
-  // Listen for incoming messages (optional)
-  client.on('message', async (message) => {
-    console.log('Message received:', message.body);
-    // You can add auto-reply or processing logic here if needed
+  client.on('auth_failure', (msg) => {
+    console.error('AUTHENTICATION FAILURE', msg);
+    io.emit('auth_failure', msg);
   });
 
-  // Initialize the WhatsApp client
+  client.on('disconnected', (reason) => {
+    console.log('WhatsApp disconnected:', reason);
+    io.emit('disconnected', reason);
+  });
+
   client.initialize();
 }
 
-module.exports = { setupWhatsApp };
+// Send message function
+async function sendMessageToWhatsApp(number, message) {
+  if (!client || !client.info) {
+    throw new Error('WhatsApp client is not ready');
+  }
+
+  const formattedNumber = number.includes('@c.us') ? number : `${number}@c.us`;
+
+  try {
+    await client.sendMessage(formattedNumber, message);
+    return { success: true, message: 'Message sent successfully' };
+  } catch (err) {
+    console.error('Send Error:', err);
+    throw new Error('Failed to send message');
+  }
+}
+
+module.exports = {
+  setupWhatsApp,
+  sendMessageToWhatsApp,
+};
