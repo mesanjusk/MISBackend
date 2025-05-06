@@ -27,7 +27,7 @@ const socketIO = require('socket.io');
 
 // Define CORS options
 const corsOptions = {
-  origin: 'https://sbsgondia.vercel.app', // Restricting to your frontend URL
+  origin: 'https://sbsgondia.vercel.app', // Your frontend URL
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
 };
@@ -35,7 +35,7 @@ const corsOptions = {
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors(corsOptions)); // Apply CORS globally
+app.use(cors(corsOptions)); // Apply CORS globally for HTTP routes
 
 // Connect to MongoDB
 connectDB();
@@ -64,7 +64,7 @@ app.use("/calllogs", CallLogs);
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: 'https://sbsgondia.vercel.app', // Allow only your frontend to connect
+    origin: 'https://sbsgondia.vercel.app', // Allow WebSocket connections from your frontend
     methods: ['GET', 'POST'],
   },
 });
