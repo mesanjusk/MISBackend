@@ -1,123 +1,90 @@
-<<<<<<< HEAD
-// Services/whatsappService.js
-
 const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
-const SessionModel = require('../Models/WhatsAppSession'); // you'll create this model
+const SessionModel = require('../Models/WhatsAppSession'); // Assuming this model exists
 
 let client;
 
+// Setup WhatsApp Client
 async function setupWhatsApp(io) {
+  // Retrieve any existing session data from MongoDB
   const sessionData = await SessionModel.findOne();
 
+  // Initialize WhatsApp client with the session if exists
   client = new Client({
     session: sessionData?.session,
-=======
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode');
-
-let client; // Global client instance
-let isClientReady = false; // Track if the client is ready
-
-// Initialize WhatsApp client and Socket.io
-function setupWhatsApp(io) {
-  client = new Client({
-    authStrategy: new LocalAuth(),
->>>>>>> f94d9134d2adcf07461ae1a8ebe03ded8c91ad09
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     },
   });
 
-<<<<<<< HEAD
+  // Handle QR Code generation event
   client.on('qr', async (qr) => {
+    // Convert QR code to data URL
     const qrImage = await qrcode.toDataURL(qr);
-    io.emit('qr', qrImage);
+    io.emit('qr', qrImage); // Send QR image to frontend
+
+    // Save the QR session to the database
+    await saveQrSession(qr);
   });
 
+  // Handle authentication event
   client.on('authenticated', async (session) => {
     console.log('✅ Authenticated');
+    // Delete any old session data and save the new session
     await SessionModel.deleteMany();
     await SessionModel.create({ session });
+
     io.emit('authenticated');
   });
 
+  // Handle client readiness
   client.on('ready', () => {
     console.log('✅ WhatsApp client is ready');
     io.emit('ready');
   });
 
+  // Handle authentication failure
   client.on('auth_failure', (msg) => {
     console.error('❌ Authentication failure:', msg);
     io.emit('auth_failure', msg);
   });
 
+  // Handle client disconnection
   client.on('disconnected', async () => {
     console.log('❌ WhatsApp client disconnected');
     await SessionModel.deleteMany();
     io.emit('disconnected');
-=======
-  client.on('qr', (qr) => {
-    console.log('QR RECEIVED');
-    qrcode.toDataURL(qr, (err, url) => {
-      if (!err) {
-        io.emit('qr', url); // Send base64 QR image to frontend
-      }
-    });
   });
 
-  client.on('ready', () => {
-    console.log('WhatsApp Client is ready!');
-    isClientReady = true; // Set client as ready
-    io.emit('ready', 'WhatsApp is ready!');
-  });
-
-  client.on('authenticated', () => {
-    console.log('WhatsApp authenticated');
-    io.emit('authenticated', 'WhatsApp authenticated');
-  });
-
-  client.on('auth_failure', (msg) => {
-    console.error('AUTHENTICATION FAILURE', msg);
-    io.emit('auth_failure', msg);
-  });
-
-  client.on('disconnected', (reason) => {
-    console.log('WhatsApp disconnected:', reason);
-    isClientReady = false; // Reset client readiness flag
-    io.emit('disconnected', reason);
->>>>>>> f94d9134d2adcf07461ae1a8ebe03ded8c91ad09
-  });
-
+  // Initialize the client
   client.initialize();
 }
 
-<<<<<<< HEAD
+// Save the QR session in the MongoDB database
+async function saveQrSession(qr) {
+  const existingSession = await SessionModel.findOne();
+  if (!existingSession) {
+    // Save a new QR session to the database if no session exists
+    const session = new SessionModel({
+      session: { qr },
+      createdAt: new Date(),
+    });
+    await session.save();
+    console.log('QR session saved to MongoDB');
+  } else {
+    console.log('QR session already exists in the database');
+  }
+}
+
+// Function to send messages via WhatsApp client
 function sendMessageToWhatsApp(number, message) {
   if (!client) {
     throw new Error('WhatsApp client not initialized');
   }
+
   const formattedNumber = number.includes('@c.us') ? number : `${number}@c.us`;
   return client.sendMessage(formattedNumber, message);
-=======
-// Send message function
-async function sendMessageToWhatsApp(number, message) {
-  if (!isClientReady) {
-    throw new Error('WhatsApp client is not ready. Please try again later.');
-  }
-
-  const formattedNumber = number.includes('@c.us') ? number : `${number}@c.us`;
-
-  try {
-    // Send the message to the specified number
-    await client.sendMessage(formattedNumber, message);
-    return { success: true, message: 'Message sent successfully' };
-  } catch (err) {
-    console.error('Send Error:', err);
-    throw new Error('Failed to send message. Please try again later.');
-  }
->>>>>>> f94d9134d2adcf07461ae1a8ebe03ded8c91ad09
 }
 
 module.exports = {
