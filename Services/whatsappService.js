@@ -1,71 +1,52 @@
 const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
-const SessionModel = require('../Models/WhatsAppSession');
+const io = require('socket.io')(); // Initialize socket.io
+const SessionModel = require('./models/session'); // MongoDB model for session storage
 
-let client;
+// Create a new client instance
+const client = new Client({
+  puppeteer: {
+    headless: true, // Ensure it's set to true for server-side
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  },
+});
 
-async function setupWhatsApp(io) {
-  const sessionData = await SessionModel.findOne();
+// When the QR code is generated
+client.on('qr', async (qr) => {
+  const qrImage = await qrcode.toDataURL(qr); // Generate the QR code as a data URL
+  io.emit('qr', qrImage); // Emit the QR code to the frontend
+  io.emit('connectionStatus', 'Scan the QR code with your WhatsApp');
+});
 
-  client = new Client({
-    session: sessionData?.session,
-    puppeteer: {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    },
-  });
+// When the client is authenticated
+client.on('authenticated', async (session) => {
+  console.log('✅ Authenticated');
+  await SessionModel.deleteMany(); // Clear previous sessions
+  await SessionModel.create({ session }); // Store the new session in MongoDB
+  io.emit('authenticated');
+  io.emit('connectionStatus', 'Authenticated');
+});
 
-  // Emit the QR code to frontend for scanning
-  client.on('qr', async (qr) => {
-    const qrImage = await qrcode.toDataURL(qr);
-    io.emit('qr', qrImage);  // Emit the QR code to frontend
-    io.emit('status', 'Waiting for WhatsApp...');
-  });
+// When the client is ready (connected)
+client.on('ready', () => {
+  console.log('✅ WhatsApp client is ready');
+  io.emit('ready');
+  io.emit('connectionStatus', 'Connected');
+});
 
-  // Emit event when authenticated
-  client.on('authenticated', async (session) => {
-    console.log('✅ Authenticated');
-    await SessionModel.deleteMany();
-    await SessionModel.create({ session });
-    io.emit('authenticated');
-    io.emit('status', 'WhatsApp authenticated!');
-  });
+// When there's an error
+client.on('auth_failure', (message) => {
+  console.error('❌ Auth failure', message);
+  io.emit('connectionStatus', 'Authentication Failed');
+});
 
-  // Emit event when ready
-  client.on('ready', () => {
-    console.log('✅ WhatsApp client is ready');
-    io.emit('ready');
-    io.emit('status', 'WhatsApp Client is ready!');
-  });
+// When the client is disconnected
+client.on('disconnected', (reason) => {
+  console.log('❌ Disconnected', reason);
+  io.emit('connectionStatus', 'Disconnected');
+});
 
-  // Emit event for authentication failure
-  client.on('auth_failure', (msg) => {
-    console.error('❌ Authentication failure:', msg);
-    io.emit('auth_failure', msg);
-    io.emit('status', 'Authentication failed');
-  });
+// Initialize WhatsApp client
+client.initialize();
 
-  // Emit event for disconnected client
-  client.on('disconnected', async () => {
-    console.log('❌ WhatsApp client disconnected');
-    await SessionModel.deleteMany();
-    io.emit('disconnected');
-    io.emit('status', 'Disconnected from WhatsApp');
-  });
-
-  // Initialize the WhatsApp client
-  client.initialize();
-}
-
-function sendMessageToWhatsApp(number, message) {
-  if (!client) {
-    throw new Error('WhatsApp client not initialized');
-  }
-  const formattedNumber = number.includes('@c.us') ? number : `${number}@c.us`;
-  return client.sendMessage(formattedNumber, message);
-}
-
-module.exports = {
-  setupWhatsApp,
-  sendMessageToWhatsApp,
-};
+module.exports = { client, io };
