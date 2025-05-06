@@ -4,7 +4,7 @@ const Attendance = require("../Models/attendance");
 const { v4: uuid } = require("uuid");
 const User = require("../Models/users");
 
-// Add attendance
+// Add attendance entry (keeps the existing functionality)
 router.post('/addAttendance', async (req, res) => {
   const { User_name, Type, Status, Time } = req.body;
 
@@ -68,7 +68,7 @@ router.get("/GetAttendanceList", async (req, res) => {
   }
 });
 
-// Get last 'In' time
+// Get last 'In' time for the user (to display attendance state)
 router.get('/getLastIn/:userName', async (req, res) => {
   try {
     const { userName } = req.params;
@@ -97,7 +97,7 @@ router.get('/getLastIn/:userName', async (req, res) => {
   }
 });
 
-// Get today's attendance for a user
+// Get today's attendance for a user (to fetch the last attendance status)
 router.get('/getTodayAttendance/:userName', async (req, res) => {
   try {
     const { userName } = req.params;
@@ -107,26 +107,72 @@ router.get('/getTodayAttendance/:userName', async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found." });
     }
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    const currentDate = new Date().toISOString().split("T")[0]; // ✅ Fix here
 
     const todayAttendance = await Attendance.findOne({
       Employee_uuid: user.User_uuid,
-      'User.CreatedAt': { $gte: startOfDay, $lte: endOfDay }
-    }).sort({ 'User.CreatedAt': -1 });
+      Date: currentDate
+    });
 
-    if (!todayAttendance || todayAttendance.User.length === 0) {
-      return res.json({ success: true, lastState: null });
+    if (!todayAttendance || !Array.isArray(todayAttendance.User)) {
+      return res.json({ success: true, flow: [] });
     }
 
-    const lastEntry = todayAttendance.User[0];
-    res.json({ success: true, lastState: lastEntry.Type });
+    const sortedEntries = todayAttendance.User.sort((a, b) => new Date(a.CreatedAt) - new Date(b.CreatedAt));
+    const flow = sortedEntries.map(entry => entry.Type);
+
+    res.json({ success: true, flow });
+
   } catch (error) {
     console.error("Error fetching today's attendance:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+});
+
+
+// NEW: Set attendance state for the user (to allow persistence across devices)
+router.post('/setAttendanceState', async (req, res) => {
+  const { User_name, State } = req.body;
+
+  if (!User_name || !State) {
+    return res.status(400).json({ success: false, message: 'All fields are required' });
+  }
+
+  try {
+    const user = await User.findOne({ User_name });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // Retrieve today's attendance record or create a new one
+    const currentDate = new Date().toISOString().split('T')[0];
+    let todayAttendance = await Attendance.findOne({
+      Employee_uuid: user.User_uuid,
+      Date: currentDate
+    });
+
+    if (!todayAttendance) {
+      todayAttendance = new Attendance({
+        Attendance_uuid: uuid(),
+        Employee_uuid: user.User_uuid,
+        Date: currentDate,
+        Status: "Active", // Assuming Active status, can be updated as required
+        User: []
+      });
+    }
+
+    // Update attendance state ("In" or "Out")
+    todayAttendance.Status = State;
+
+    // Save the attendance record
+    await todayAttendance.save();
+
+    res.json({ success: true, message: `Attendance marked as ${State}` });
+
+  } catch (error) {
+    console.error("Error setting attendance state:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
