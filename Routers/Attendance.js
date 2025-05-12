@@ -54,19 +54,33 @@ router.post('/addAttendance', async (req, res) => {
 });
 
 // Get all attendance records
-router.get("/GetAttendanceList", async (req, res) => {
+router.post("/GetAttendanceList", async (req, res) => {
+  const { userName } = req.body;  // Expect userName from frontend request
+
   try {
-    const data = await Attendance.find({});
-    if (data.length > 0) {
-      res.json({ success: true, result: data });
-    } else {
-      res.json({ success: false, message: "Details not found" });
+    // Find user and check role
+    const user = await User.findOne({ User_name: userName });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
     }
-  } catch (err) {
-    console.error("Error fetching attendance:", err);
-    res.status(500).json({ success: false, message: err.message });
+
+    let data;
+    if (user.Role === "admin") {
+      // Admin sees all attendance records
+      data = await Attendance.find({});
+    } else {
+      // Non-admin sees only their own records
+      data = await Attendance.find({ UserName: userName });
+    }
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Error fetching attendance:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
+
 
 // Get last 'In' time for the user (to display attendance state)
 router.get('/getLastIn/:userName', async (req, res) => {
