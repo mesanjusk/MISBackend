@@ -30,7 +30,6 @@ const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173']
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, Postman, etc.)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -38,9 +37,13 @@ const corsOptions = {
     }
   },
   credentials: true,
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // ✅ Added PUT, DELETE, OPTIONS
+  allowedHeaders: ['Content-Type', 'Authorization'],    // ✅ Added Authorization header
 };
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // ✅ Handle preflight requests
+
 
 // Middleware
 app.use(express.json());
