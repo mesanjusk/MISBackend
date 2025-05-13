@@ -26,8 +26,18 @@ const http = require('http');
 const socketIO = require('socket.io');
 
 // Define CORS options
+const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
+
 const corsOptions = {
-  origin: 'https://sbsgondia.vercel.app', // Your frontend URL
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, etc.)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
 };
@@ -64,10 +74,12 @@ app.use("/calllogs", CallLogs);
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: 'https://sbsgondia.vercel.app', // Allow WebSocket connections from your frontend
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
-  },
+    credentials: true
+  }
 });
+
 
 // Initialize WhatsApp functionality
 setupWhatsApp(io);
