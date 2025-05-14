@@ -69,6 +69,16 @@ router.post("/addOrder", async (req, res) => {
   }
 });
 
+router.post('/CheckMultipleCustomers', async (req, res) => {
+    try {
+        const { ids } = req.body;
+        const linkedOrders = await Order.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
+        res.status(200).json({ linkedIds: linkedOrders });
+    } catch (err) {
+        res.status(500).json({ error: 'Error checking linked orders' });
+    }
+});
+
 
 router.get("/GetOrderList", async (req, res) => {
   try {

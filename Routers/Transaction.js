@@ -116,6 +116,16 @@ router.get('/GetFilteredTransactions', async (req, res) => {
         res.status(500).json({ success: false, message: 'Database query failed' });
     }
 });
+router.post('/CheckMultipleCustomers', async (req, res) => {
+    try {
+        const { ids } = req.body;
+        const linkedTransactions = await Transaction.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
+        res.status(200).json({ linkedIds: linkedTransactions });
+    } catch (err) {
+        res.status(500).json({ error: 'Error checking linked transactions' });
+    }
+});
+
 
 router.get('/CheckCustomer/:customerUuid', async (req, res) => {
   const { customerUuid } = req.params;
