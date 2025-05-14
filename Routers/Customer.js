@@ -132,17 +132,34 @@ router.put("/update/:id", async (req, res) => {
 });
 
 // Delete a customer
-router.delete("/DeleteCustomer/:customerId", async (req, res) => {
-    const { customerId } = req.params;
-
+router.delete('/DeleteCustomer/:id', async (req, res) => {
     try {
-        const item = await Customers.findByIdAndDelete(customerId);
-        if (!item) {
-            return res.status(404).json({ success: false, message: 'Customer not found' });
+        const customerId = req.params.id;
+
+        // Check if customer exists
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            return res.status(404).json({ success: false, message: 'Customer not found.' });
         }
-        return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
+
+        // Check if linked with orders
+        const isLinkedToOrder = await Order.exists({ customerId });
+        if (isLinkedToOrder) {
+            return res.json({ success: false, message: 'Cannot delete: Customer linked with orders.' });
+        }
+
+        // Check if linked with transactions
+        const isLinkedToTransaction = await Transaction.exists({ customerId });
+        if (isLinkedToTransaction) {
+            return res.json({ success: false, message: 'Cannot delete: Customer linked with transactions.' });
+        }
+
+        // Delete customer if not linked
+        await Customer.findByIdAndDelete(customerId);
+        res.json({ success: true, message: 'Customer deleted successfully.' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: 'Error deleting customer' });
+        console.error('Delete customer error:', error);
+        res.status(500).json({ success: false, message: 'Server error while deleting customer.' });
     }
 });
 
