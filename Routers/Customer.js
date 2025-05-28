@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const Customers = require("../Models/customer");
 const { v4: uuid } = require("uuid");
+const Transaction = require("../Models/transaction");
+const Order = require("../Models/order");
 
 // Add a new customer
 router.post("/addCustomer", async (req, res) => {
@@ -137,7 +139,7 @@ router.delete('/DeleteCustomer/:id', async (req, res) => {
         const customerId = req.params.id;
 
         // Check if customer exists
-        const customer = await Customer.findById(customerId);
+        const customer = await Customers.findById(customerId);
         if (!customer) {
             return res.status(404).json({ success: false, message: 'Customer not found.' });
         }
@@ -155,7 +157,7 @@ router.delete('/DeleteCustomer/:id', async (req, res) => {
         }
 
         // Delete customer if not linked
-        await Customer.findByIdAndDelete(customerId);
+        await Customers.findByIdAndDelete(customerId);
         res.json({ success: true, message: 'Customer deleted successfully.' });
     } catch (error) {
         console.error('Delete customer error:', error);
