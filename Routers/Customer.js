@@ -133,6 +133,33 @@ router.put("/update/:id", async (req, res) => {
     }
 });
 
+// Check if customer is used in Order or Transaction collections
+router.get("/checkCustomerUsage/:customer_uuid", async (req, res) => {
+    const { customer_uuid } = req.params;
+
+    try {
+        const isUsedInOrder = await Order.exists({
+            $or: [
+                { Customer_uuid: customer_uuid },
+            ]
+        });
+
+        const isUsedInTransaction = await Transaction.exists({
+            $or: [
+                { Customer_uuid: customer_uuid },
+            ]
+        });
+
+        const isLinked = isUsedInOrder || isUsedInTransaction;
+
+        res.json({ success: true, isLinked });
+    } catch (error) {
+        console.error("Error checking customer usage:", error);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+});
+
+
 // Delete a customer
 router.delete('/DeleteCustomer/:id', async (req, res) => {
     try {
