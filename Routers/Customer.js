@@ -138,11 +138,12 @@ router.get('/GetLinkedCustomerIds', async (req, res) => {
         const orders = await Order.find({}, 'Customer_uuid').lean();
         const transactions = await Transaction.find({}, 'Customer_uuid').lean();
 
-        const orderCustomerIds = new Set(orders.map(o => o.Customer_uuid?.toString()));
-        const transactionCustomerIds = new Set(transactions.map(t => t.Customer_uuid?.toString()));
+        const linkedSet = new Set();
 
-        // Find intersection
-        const linkedCustomerIds = [...orderCustomerIds].filter(uuid => transactionCustomerIds.has(uuid));
+        orders.forEach(o => o.Customer_uuid && linkedSet.add(o.Customer_uuid.toString()));
+        transactions.forEach(t => t.Customer_uuid && linkedSet.add(t.Customer_uuid.toString()));
+
+        const linkedCustomerIds = Array.from(linkedSet);
 
         res.json({ success: true, linkedCustomerIds });
     } catch (err) {
