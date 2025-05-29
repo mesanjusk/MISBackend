@@ -79,6 +79,25 @@ router.get("/checkDuplicateName", async (req, res) => {
     }
 });
 
+router.get('/GetLinkedCustomerIds', async (req, res) => {
+    try {
+        const orders = await Order.find({}, 'Customer_uuid').lean();
+        const transactions = await Transaction.find({}, 'Customer_uuid').lean();
+
+        const linkedSet = new Set();
+
+        orders.forEach(o => o.Customer_uuid && linkedSet.add(o.Customer_uuid.toString()));
+        transactions.forEach(t => t.Customer_uuid && linkedSet.add(t.Customer_uuid.toString()));
+
+        const linkedCustomerIds = Array.from(linkedSet);
+
+        res.json({ success: true, linkedCustomerIds });
+    } catch (err) {
+        console.error('Error fetching linked customer UUIDs:', err);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+});
+
 // Get a specific customer
 router.get('/:id', async (req, res) => {
     const { id } = req.params;
@@ -130,25 +149,6 @@ router.put("/update/:id", async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: "Server error" });
-    }
-});
-
-router.get('/GetLinkedCustomerIds', async (req, res) => {
-    try {
-        const orders = await Order.find({}, 'Customer_uuid').lean();
-        const transactions = await Transaction.find({}, 'Customer_uuid').lean();
-
-        const linkedSet = new Set();
-
-        orders.forEach(o => o.Customer_uuid && linkedSet.add(o.Customer_uuid.toString()));
-        transactions.forEach(t => t.Customer_uuid && linkedSet.add(t.Customer_uuid.toString()));
-
-        const linkedCustomerIds = Array.from(linkedSet);
-
-        res.json({ success: true, linkedCustomerIds });
-    } catch (err) {
-        console.error('Error fetching linked customer UUIDs:', err);
-        res.status(500).json({ success: false, message: 'Server Error' });
     }
 });
 
