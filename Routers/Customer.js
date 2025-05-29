@@ -133,32 +133,23 @@ router.put("/update/:id", async (req, res) => {
     }
 });
 
-// Check if customer is used in Order or Transaction collections
-router.get("/checkCustomerUsage/:customer_uuid", async (req, res) => {
-    const { customer_uuid } = req.params;
-
+router.get('/GetLinkedCustomerIds', async (req, res) => {
     try {
-        const isUsedInOrder = await Order.exists({
-            $or: [
-                { Customer_uuid: customer_uuid },
-            ]
-        });
+        const orders = await Order.find({}, 'Customer_uuid').lean();
+        const transactions = await Transaction.find({}, 'Customer_uuid').lean();
 
-        const isUsedInTransaction = await Transaction.exists({
-            $or: [
-                { Customer_uuid: customer_uuid },
-            ]
-        });
+        const orderCustomerIds = new Set(orders.map(o => o.Customer_uuid?.toString()));
+        const transactionCustomerIds = new Set(transactions.map(t => t.Customer_uuid?.toString()));
 
-        const isLinked = isUsedInOrder || isUsedInTransaction;
+        // Find intersection
+        const linkedCustomerIds = [...orderCustomerIds].filter(uuid => transactionCustomerIds.has(uuid));
 
-        res.json({ success: true, isLinked });
-    } catch (error) {
-        console.error("Error checking customer usage:", error);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        res.json({ success: true, linkedCustomerIds });
+    } catch (err) {
+        console.error('Error fetching linked customer UUIDs:', err);
+        res.status(500).json({ success: false, message: 'Server Error' });
     }
 });
-
 
 // Delete a customer
 router.delete('/DeleteCustomer/:id', async (req, res) => {
