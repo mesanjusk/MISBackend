@@ -45,12 +45,22 @@ router.post("/addCustomer", async (req, res) => {
 // Get all customers
 router.get("/GetCustomersList", async (req, res) => {
     try {
-        let data = await Customers.find({});
-        if (data.length) {
-            res.json({ success: true, result: data });
-        } else {
-            res.status(404).json({ success: false, message: "No customers found" });
-        }
+        const data = await Customers.find({});
+
+        const orders = await Order.find({}, 'Customer_uuid');
+        const transactions = await Transaction.find({}, 'Customer_uuid');
+
+        const usedCustomerIds = new Set([
+            ...orders.map(o => o.Customer_uuid?.toString()),
+            ...transactions.map(t => t.Customer_uuid?.toString())
+        ]);
+
+        const customerWithUsage = data.map((cust) => ({
+            ...cust._doc,
+            isUsed: usedCustomerIds.has(cust.Customer_uuid?.toString())
+        }));
+
+        res.json({ success: true, result: customerWithUsage });
     } catch (error) {
         console.error("Error fetching customers:", error);
         res.status(500).json({ success: false, message: "Internal server error" });
