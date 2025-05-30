@@ -45,34 +45,27 @@ router.post("/addCustomer", async (req, res) => {
 // Get all customers
 router.get("/GetCustomersList", async (req, res) => {
     try {
-        let customers = await Customers.find({});
-        let orders = await Order.find({}, 'Customer_uuid');
-        let transactions = await Transaction.find({}, 'Journal_entry');
+        const data = await Customers.find({});
 
-        const usedFromOrders = new Set(orders.map((l) => l.Customer_uuid));
-        
-        const usedFromTransactions = new Set();
-        for (const tx of transactions) {
-            for (const entry of tx.Journal_entry) {
-                usedFromTransactions.add(entry.Account_id);
-            }
-        }
+        const orders = await Order.find({}, 'Customer_uuid');
+        const transactions = await Transaction.find({}, 'Customer_uuid');
 
-        // Merge both sets
-        const allUsed = new Set([...usedFromOrders, ...usedFromTransactions]);
+        const usedCustomerIds = new Set([
+            ...orders.map(o => o.Customer_uuid?.toString()),
+            ...transactions.map(t => t.Customer_uuid?.toString())
+        ]);
 
-        const customerWithUsage = customers.map((cust) => ({
+        const customerWithUsage = data.map((cust) => ({
             ...cust._doc,
-            isUsed: allUsed.has(cust.Customer_uuid),
+            isUsed: usedCustomerIds.has(cust.Customer_uuid?.toString())
         }));
 
-        res.json(customerWithUsage);
+        res.json({ success: true, result: customerWithUsage });
     } catch (error) {
         console.error("Error fetching customers:", error);
         res.status(500).json({ success: false, message: "Internal server error" });
     }
 });
-
 
 // Check for duplicate customer name
 router.get("/checkDuplicateName", async (req, res) => {
