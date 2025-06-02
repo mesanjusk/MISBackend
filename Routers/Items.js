@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const Items = require("../Models/items");
 const { v4: uuid } = require("uuid");
+const Transaction = require("../Models/transaction");
+const Order = require("../Models/order");
 
 router.post("/addItem", async (req, res) => {
     const{Item_name, Item_group}=req.body
@@ -34,10 +36,23 @@ router.post("/addItem", async (req, res) => {
   router.get("/GetItemList", async (req, res) => {
     try {
       let data = await Items.find({});
+      let orders = await Order.find({}, 'Item');
+      let transactions = await Transaction.find({}, 'Item');
+
+      const usedFromOrders = new Set(orders.map((l) => l.Item));
+      const usedFromTransactions = new Set(transactions.map((t) => t.Item));
+
+      const allUsed = new Set([...usedFromOrders, ...usedFromTransactions]);
+
+      const itemWithUsage = data.map((i) => ({
+            ...i._doc,
+            isUsed: allUsed.has(i.Item_name),
+        }));
   
-      if (data.length)
-        res.json({ success: true, result: data.filter((a) => a.Item_name) });
-      else res.json({ success: false, message: "Item Not found" });
+       res.json({
+            success: true,
+            result: itemWithUsage,
+        });
     } catch (err) {
       console.error("Error fetching Item:", err);
         res.status(500).json({ success: false, message: err });
