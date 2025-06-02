@@ -3,6 +3,8 @@ const router = express.Router();
 const Users = require("../Models/users");
 const { v4: uuid } = require("uuid");
 const jwt = require('jsonwebtoken');
+const Transaction = require("../Models/transaction");
+const Order = require("../Models/order");
 
 
 router.post("/login", async (req, res) => {
@@ -64,10 +66,27 @@ router.post("/addUser", async (req, res) => {
   router.get("/GetUserList", async (req, res) => {
     try {
       let data = await Users.find({});
-  
-      if (data.length)
-        res.json({ success: true, result: data.filter((a) => a.User_name) });
-      else res.json({ success: false, message: "User Not found" });
+      let orders = await Order.find({}, 'Status');
+      let transactions = await Transaction.find({}, 'Created_by');
+
+      const usedFromOrders = new Set();
+        for (const od of orders) {
+            for (const entry of od.Status) {
+                usedFromOrders.add(entry.Assigned);
+            }
+        }
+      const usedFromTransactions = new Set(transactions.map((t) => t.Created_by));
+
+      const allUsed = new Set([...usedFromOrders, ...usedFromTransactions]);
+
+      const userWithUsage = data.map((user) => ({
+            ...user._doc,
+            isUsed: allUsed.has(user.User_name),
+        }));
+     res.json({
+            success: true,
+            result: userWithUsage,
+        });
     } catch (err) {
       console.error("Error fetching users:", err);
         res.status(500).json({ success: false, message: err });
