@@ -142,4 +142,46 @@ router.get('/CheckCustomer/:customerUuid', async (req, res) => {
   }
 });
 
+// Delete a specific Journal Entry inside a Transaction by Transaction_id and Account_id
+router.delete('/deleteEntry/:transactionId/:accountId', async (req, res) => {
+    const { transactionId, accountId } = req.params;
+
+    try {
+        const transaction = await Transaction.findOne({ Transaction_id: parseInt(transactionId) });
+
+        if (!transaction) {
+            return res.status(404).json({ success: false, message: 'Transaction not found' });
+        }
+
+        const originalLength = transaction.Journal_entry.length;
+
+        // Remove the specific journal entry
+        transaction.Journal_entry = transaction.Journal_entry.filter(
+            entry => entry.Account_id !== accountId
+        );
+
+        if (transaction.Journal_entry.length === originalLength) {
+            return res.status(404).json({ success: false, message: 'Entry not found in transaction' });
+        }
+
+        // Optionally update totals if needed
+        transaction.Total_Debit = transaction.Journal_entry
+            .filter(e => e.Type === "debit")
+            .reduce((acc, cur) => acc + (Number(cur.Amount) || 0), 0);
+
+        transaction.Total_Credit = transaction.Journal_entry
+            .filter(e => e.Type === "credit")
+            .reduce((acc, cur) => acc + (Number(cur.Amount) || 0), 0);
+
+        await transaction.save();
+
+        return res.json({ success: true, message: 'Entry deleted successfully' });
+
+    } catch (error) {
+        console.error('Error deleting journal entry:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+
+
 module.exports = router;
