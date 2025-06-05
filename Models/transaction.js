@@ -16,6 +16,7 @@ const TransactionSchema=new mongoose.Schema({
     Total_Credit: { type: Number, required: true },
     Payment_mode: { type: String, required: true},
     Created_by: { type: String, required: true },
+    image: { type: String },
     Journal_entry: [journalSchema],
  },  { timestamps: true })
 
