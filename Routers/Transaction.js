@@ -3,8 +3,23 @@ const router = express.Router();
 const Transaction = require("../Models/transaction");
 const Customer = require("../Models/customer");
 const { v4: uuid } = require("uuid");
+const multer = require("multer");
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('../utils/cloudinary.js');
 
-router.post("/addTransaction", async (req, res) => {
+// Cloudinary Storage for multer
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: 'transactions',
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
+    transformation: [{ width: 1920, height: 1080, crop: 'limit', quality: 'auto:best' }],
+  },
+});
+
+const upload = multer({ storage });
+
+router.post("/addTransaction",upload.single('image'), async (req, res) => {
     const {
       Description,
       Transaction_date,
@@ -15,6 +30,7 @@ router.post("/addTransaction", async (req, res) => {
       Created_by,
       Journal_entry = [{}],
     } = req.body;
+    const file = req.file;
     if (!Journal_entry || !Journal_entry.length || !Journal_entry[0].Account_id || !Journal_entry[0].Type || !Journal_entry[0].Amount) {
       return res.status(400).json({
         success: false,
@@ -25,7 +41,7 @@ router.post("/addTransaction", async (req, res) => {
     try {
       const lastTransaction = await Transaction.findOne().sort({ Transaction_id: -1 });
       const newTransactionNumber = lastTransaction ? lastTransaction.Transaction_id + 1 : 1;
-  
+   const imageUrl = file.path;
       const newTransaction = new Transaction({
         Transaction_uuid: uuid(),
         Transaction_id: newTransactionNumber,
@@ -36,6 +52,7 @@ router.post("/addTransaction", async (req, res) => {
         Journal_entry: Journal_entry,
         Payment_mode,
         Description,
+        image: imageUrl,
         Created_by
       });
   
