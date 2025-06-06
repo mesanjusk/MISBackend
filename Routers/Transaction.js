@@ -19,7 +19,8 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage });
 
-router.post("/addTransaction",upload.single('image'), async (req, res) => {
+router.post("/addTransaction", upload.single("image"), async (req, res) => {
+  try {
     const {
       Description,
       Transaction_date,
@@ -28,41 +29,64 @@ router.post("/addTransaction",upload.single('image'), async (req, res) => {
       Total_Credit,
       Payment_mode,
       Created_by,
-      Journal_entry = [{}],
     } = req.body;
-    const file = req.file;
-    if (!Journal_entry || !Journal_entry.length || !Journal_entry[0].Account_id || !Journal_entry[0].Type || !Journal_entry[0].Amount) {
+
+    let { Journal_entry } = req.body;
+
+    try {
+      if (typeof Journal_entry === "string") {
+        Journal_entry = JSON.parse(Journal_entry);
+      }
+    } catch (parseErr) {
       return res.status(400).json({
         success: false,
-        message: "fields in Journal_entry are required.",
+        message: "Invalid JSON format for Journal_entry",
       });
     }
-  
-    try {
-      const lastTransaction = await Transaction.findOne().sort({ Transaction_id: -1 });
-      const newTransactionNumber = lastTransaction ? lastTransaction.Transaction_id + 1 : 1;
-   const imageUrl = file.path;
-      const newTransaction = new Transaction({
-        Transaction_uuid: uuid(),
-        Transaction_id: newTransactionNumber,
-        Order_uuid,
-        Transaction_date,
-        Total_Debit,
-        Total_Credit,
-        Journal_entry: Journal_entry,
-        Payment_mode,
-        Description,
-        image: imageUrl,
-        Created_by
+
+    if (
+      !Array.isArray(Journal_entry) ||
+      !Journal_entry.length ||
+      !Journal_entry[0].Account_id ||
+      !Journal_entry[0].Type ||
+      !Journal_entry[0].Amount
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Fields in Journal_entry are required.",
       });
-  
-      await newTransaction.save();
-      res.json({ success: true, message: "Transaction added successfully" });
-    } catch (error) {
-      console.error("Error saving Transaction:", error);
-      res.status(500).json({ success: false, message: "Failed to add Transaction" });
     }
-  });
+
+    const file = req.file;
+    const imageUrl = file ? file.path : null;
+
+    // Generate new Transaction ID
+    const lastTransaction = await Transaction.findOne().sort({ Transaction_id: -1 });
+    const newTransactionNumber = lastTransaction ? lastTransaction.Transaction_id + 1 : 1;
+
+    const newTransaction = new Transaction({
+      Transaction_uuid: uuid(),
+      Transaction_id: newTransactionNumber,
+      Order_uuid,
+      Transaction_date,
+      Total_Debit,
+      Total_Credit,
+      Journal_entry,
+      Payment_mode,
+      Description,
+      image: imageUrl,
+      Created_by,
+    });
+
+    await newTransaction.save();
+
+    return res.json({ success: true, message: "Transaction added successfully" });
+
+  } catch (error) {
+    console.error("Error saving Transaction:", error);
+    return res.status(500).json({ success: false, message: "Failed to add Transaction" });
+  }
+});
 
 router.get("/GetTransactionList", async (req, res) => {
     try {
