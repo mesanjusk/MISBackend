@@ -1,7 +1,19 @@
 const express = require("express");
 const cors = require("cors");
-const connectDB = require("./mongo");
+const http = require("http");
+const socketIO = require("socket.io");
+const mongoose = require("mongoose");
+const qrcode = require("qrcode");
 
+const connectDB = require("./mongo");
+const {
+  setupWhatsApp,
+  getLatestQR,
+  isWhatsAppReady,
+  sendMessageToWhatsApp
+} = require("./Services/whatsappService");
+
+// API Routers
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
 const Customers = require("./Routers/Customer");
@@ -21,38 +33,33 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 
-const { setupWhatsApp, sendMessageToWhatsApp, getLatestQR, isWhatsAppReady } = require('./Services/whatsappService');
-const qrcode = require('qrcode');
-
 const app = express();
-const http = require('http');
-const socketIO = require('socket.io');
+const server = http.createServer(app);
+const io = socketIO(server, {
+  cors: {
+    origin: ['https://sbsgondia.vercel.app', 'http://localhost:5173'],
+    methods: ['GET', 'POST'],
+    credentials: true,
+  }
+});
 
-// Define CORS options
-const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
-
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+// Middleware
+app.use(cors({
+  origin: ['https://sbsgondia.vercel.app', 'http://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Connect to MongoDB
+// Connect MongoDB
 connectDB();
 
-// API routes
+// WhatsApp Web.js Setup
+setupWhatsApp(io);
+
+// Routes
 app.use("/customer", Customers);
 app.use("/customergroup", Customergroup);
 app.use("/user", Users);
@@ -72,20 +79,7 @@ app.use("/note", Note);
 app.use("/usertask", Usertasks);
 app.use("/calllogs", CallLogs);
 
-// WebSocket setup
-const server = http.createServer(app);
-const io = socketIO(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
-
-// Initialize WhatsApp
-setupWhatsApp(io);
-
-// QR route
+// QR Route
 app.get('/qr', async (req, res) => {
   const qr = getLatestQR();
   if (!qr) return res.status(404).send("QR code not yet generated");
@@ -93,10 +87,11 @@ app.get('/qr', async (req, res) => {
   res.send(`<img src="${qrImage}" alt="QR Code" />`);
 });
 
-// WhatsApp send message API
+// Send WhatsApp Message Route
 app.post('/send-message', async (req, res) => {
   const { number, message } = req.body;
-  if (!number || !message) return res.status(400).json({ error: 'Missing number or message' });
+  if (!number || !message)
+    return res.status(400).json({ error: 'Missing number or message' });
 
   try {
     if (!isWhatsAppReady()) {
