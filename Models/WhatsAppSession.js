@@ -1,8 +1,8 @@
 const mongoose = require('mongoose');
 
-const WhatsAppSessionSchema = new mongoose.Schema({
-  _id: String, // Typically 'session'
-  data: Object
+const whatsappSessionSchema = new mongoose.Schema({
+  session: { type: Object },
+  createdAt: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model('WhatsAppSession', WhatsAppSessionSchema);
+module.exports = mongoose.model('WhatsAppSession', whatsappSessionSchema);
