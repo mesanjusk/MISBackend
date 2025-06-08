@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./mongo");
+
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
 const Customers = require("./Routers/Customer");
@@ -19,13 +20,13 @@ const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
+
 const { setupWhatsApp, sendMessageToWhatsApp, getLatestQR, isWhatsAppReady } = require('./Services/whatsappService');
 const qrcode = require('qrcode');
 
 const app = express();
 const http = require('http');
 const socketIO = require('socket.io');
-const qrcode = require('qrcode');
 
 // Define CORS options
 const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
@@ -84,6 +85,7 @@ const io = socketIO(server, {
 // Initialize WhatsApp
 setupWhatsApp(io);
 
+// QR route
 app.get('/qr', async (req, res) => {
   const qr = getLatestQR();
   if (!qr) return res.status(404).send("QR code not yet generated");
@@ -91,6 +93,7 @@ app.get('/qr', async (req, res) => {
   res.send(`<img src="${qrImage}" alt="QR Code" />`);
 });
 
+// WhatsApp send message API
 app.post('/send-message', async (req, res) => {
   const { number, message } = req.body;
   if (!number || !message) return res.status(400).json({ error: 'Missing number or message' });
@@ -105,6 +108,7 @@ app.post('/send-message', async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
 // Start server
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
