@@ -1,51 +1,35 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 
+let latestQr = null;
 let client;
 
 function setupWhatsApp(io) {
   client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'client-one' }),
+    authStrategy: new LocalAuth({ clientId: "main-client" }),
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     }
   });
 
-  client.on('qr', (qr) => {
-    qrcode.generate(qr, { small: true });
-    console.log('📲 Scan the QR code shown above to connect.');
-
-    // Optional: emit QR to frontend via socket.io
-    if (io) {
-      io.emit('qr', qr);
-    }
+  client.on('qr', qr => {
+    latestQr = qr;
+    console.log('📲 New QR code generated');
   });
 
   client.on('ready', () => {
-    console.log('✅ WhatsApp client is ready.');
-    if (io) io.emit('ready');
-  });
-
-  client.on('auth_failure', msg => {
-    console.error('❌ Authentication failed:', msg);
-  });
-
-  client.on('disconnected', reason => {
-    console.warn('⚠️ WhatsApp client disconnected:', reason);
-    if (io) io.emit('disconnected', reason);
+    console.log('✅ Client is ready');
   });
 
   client.on('message', async msg => {
-    console.log(`📩 Message from ${msg.from}: ${msg.body}`);
+    console.log('📩 MESSAGE RECEIVED:', msg.body);
+    if (msg.from.includes('@g.us')) return;
 
-    // Example auto-response
-    if (msg.body.toLowerCase() === 'hi') {
-      await msg.reply('Hello 👋');
+    if (msg.body.toLowerCase().includes('hi')) {
+      await msg.reply('Hello! 👋');
     }
 
-    // Optional: forward to your API
     try {
       await axios.post('https://your-api.com/api/new-order', {
         from: msg.from.replace(/\D/g, ''),
@@ -57,17 +41,29 @@ function setupWhatsApp(io) {
     }
   });
 
+  client.on('auth_failure', msg => {
+    console.error('❌ Auth failed:', msg);
+  });
+
+  client.on('disconnected', reason => {
+    console.warn('⚠️ Disconnected:', reason);
+  });
+
   client.initialize();
 }
 
-// Optional: for sending outbound messages
+function getLatestQR() {
+  return latestQr;
+}
+
 async function sendMessageToWhatsApp(number, message) {
-  const chatId = `${number}@c.us`;
-  await client.sendMessage(chatId, message);
-  return { success: true, sentTo: number };
+  const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+  const sentMsg = await client.sendMessage(chatId, message);
+  return { success: true, id: sentMsg.id._serialized };
 }
 
 module.exports = {
   setupWhatsApp,
-  sendMessageToWhatsApp
+  sendMessageToWhatsApp,
+  getLatestQR
 };
