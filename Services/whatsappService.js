@@ -1,17 +1,20 @@
 const { Client } = require('whatsapp-web.js');
-const { MongoStore } = require('wwebjs-mongo');
-const mongoose = require('mongoose');
 const axios = require('axios');
+const fs = require('fs');
 
 let latestQr = null;
 let client;
 
-async function setupWhatsApp(io) {
-  const store = new MongoStore({ mongoose: mongoose });
-  
+function setupWhatsApp(io) {
+  const SESSION_FILE_PATH = './session.json';
+  let sessionData;
+
+  if (fs.existsSync(SESSION_FILE_PATH)) {
+    sessionData = require(SESSION_FILE_PATH);
+  }
 
   client = new Client({
-    authStrategy: store,
+    session: sessionData,
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -21,6 +24,11 @@ async function setupWhatsApp(io) {
   client.on('qr', qr => {
     latestQr = qr;
     console.log('📲 New QR code generated');
+  });
+
+  client.on('authenticated', (session) => {
+    fs.writeFileSync(SESSION_FILE_PATH, JSON.stringify(session));
+    console.log('✅ Authenticated');
   });
 
   client.on('ready', () => {
@@ -46,19 +54,7 @@ async function setupWhatsApp(io) {
     }
   });
 
-  client.on('auth_failure', msg => {
-    console.error('❌ Auth failed:', msg);
-  });
-
-  client.on('disconnected', reason => {
-    console.warn('⚠️ Disconnected:', reason);
-  });
-
   client.initialize();
-}
-
-function getLatestQR() {
-  return latestQr;
 }
 
 async function sendMessageToWhatsApp(number, message) {
@@ -69,6 +65,5 @@ async function sendMessageToWhatsApp(number, message) {
 
 module.exports = {
   setupWhatsApp,
-  sendMessageToWhatsApp,
-  getLatestQR
+  sendMessageToWhatsApp
 };
