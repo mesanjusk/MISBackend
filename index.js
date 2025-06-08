@@ -24,6 +24,7 @@ const { setupWhatsApp, sendMessageToWhatsApp, getLatestQR } = require("./Service
 const app = express();
 const http = require('http');
 const socketIO = require('socket.io');
+const qrcode = require('qrcode');
 
 // Define CORS options
 const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
@@ -49,7 +50,7 @@ app.use(express.urlencoded({ extended: true }));
 // Connect to MongoDB
 connectDB();
 
-// Routes
+// API routes
 app.use("/customer", Customers);
 app.use("/customergroup", Customergroup);
 app.use("/user", Users);
@@ -69,7 +70,7 @@ app.use("/note", Note);
 app.use("/usertask", Usertasks);
 app.use("/calllogs", CallLogs);
 
-// WebSocket server setup
+// WebSocket setup
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
@@ -79,11 +80,10 @@ const io = socketIO(server, {
   }
 });
 
-// Initialize WhatsApp functionality
+// Initialize WhatsApp
 setupWhatsApp(io);
 
-// Route for showing QR Code in browser
-const qrcode = require('qrcode');
+// QR route (for browser-based scanning if needed)
 app.get('/qr', async (req, res) => {
   const qr = getLatestQR();
   if (!qr) return res.status(404).send("QR code not yet generated");
@@ -91,7 +91,7 @@ app.get('/qr', async (req, res) => {
   res.send(`<img src="${qrImage}" alt="QR Code" />`);
 });
 
-// API route to send WhatsApp messages
+// Send WhatsApp message from backend
 app.post('/send-message', async (req, res) => {
   const { number, message } = req.body;
   if (!number || !message) {
@@ -99,14 +99,15 @@ app.post('/send-message', async (req, res) => {
   }
 
   try {
-    const response = await sendMessageToWhatsApp(number, message);
-    return res.status(200).json(response);
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+    const result = await sendMessageToWhatsApp(number, message);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 8000;
+// Start server
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
