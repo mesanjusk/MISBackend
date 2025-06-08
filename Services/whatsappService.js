@@ -1,6 +1,7 @@
 const { Client } = require('whatsapp-web.js');
 const mongoose = require('mongoose');
-const Session = require('../Models/whatsappsession');
+const WhatsAppSession = require('../Models/WhatsAppSession');
+
 
 let client;
 let latestQr = null;
