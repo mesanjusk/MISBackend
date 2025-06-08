@@ -8,7 +8,7 @@ let client;
 
 async function setupWhatsApp(io) {
   const store = new MongoStore({ mongoose: mongoose });
-  await store.connect();
+  
 
   client = new Client({
     authStrategy: store,
