@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const axios = require('axios');
 
 let latestQr = null;
 let client;
@@ -9,14 +8,14 @@ function setupWhatsApp(io) {
     authStrategy: new LocalAuth({ clientId: "main-client" }),
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    },
   });
 
   client.on('qr', qr => {
     latestQr = qr;
     console.log('📲 New QR code generated');
-    io.emit('qr', qr); // emit QR to frontend via socket
+    io.emit('qr', qr);
   });
 
   client.on('ready', () => {
@@ -41,21 +40,10 @@ function setupWhatsApp(io) {
 
   client.on('message', async msg => {
     console.log('📩 MESSAGE RECEIVED:', msg.body);
-    if (msg.from.includes('@g.us')) return; // skip groups
+    if (msg.from.includes('@g.us')) return; // Skip group messages
 
-    // auto reply example
     if (msg.body.toLowerCase().includes('hi')) {
       await msg.reply('Hello! 👋');
-    }
-
-    try {
-      await axios.post('https://your-api.com/api/new-order', {
-        from: msg.from.replace(/\D/g, ''),
-        message: msg.body
-      });
-      console.log('📤 Message forwarded to API');
-    } catch (err) {
-      console.error('❌ Failed to send to API:', err.message);
     }
   });
 
@@ -67,13 +55,23 @@ function getLatestQR() {
 }
 
 async function sendMessageToWhatsApp(number, message) {
+  if (!client || !client.info || !client.info.wid) {
+    throw new Error("WhatsApp client is not ready yet");
+  }
+
   const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
-  const sentMsg = await client.sendMessage(chatId, message);
-  return { success: true, id: sentMsg.id._serialized };
+
+  try {
+    const sentMsg = await client.sendMessage(chatId, message);
+    return { success: true, id: sentMsg.id._serialized };
+  } catch (error) {
+    console.error('❌ Failed to send WhatsApp message:', error.message);
+    throw error;
+  }
 }
 
 module.exports = {
   setupWhatsApp,
   sendMessageToWhatsApp,
-  getLatestQR
+  getLatestQR,
 };
