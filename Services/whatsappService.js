@@ -1,86 +1,98 @@
 const { Client } = require('whatsapp-web.js');
-const { MongoStore } = require('wwebjs-mongo');
 const mongoose = require('mongoose');
-
-const mongoUrl = 'mongodb+srv://sanjuahuja:cY7NtMKm8M10MbUs@cluster0.wdfsd.mongodb.net/framee';
-
-mongoose.connect(mongoUrl, { useNewUrlParser: true, useUnifiedTopology: true });
-
-const store = new MongoStore({ mongoose: mongoose });
+const Session = require('../Models/whatsappsession');
 
 let client;
 let latestQr = null;
-let isReady = false;
+let clientReady = false;
 
 function setupWhatsApp(io) {
-  client = new Client({
-    authStrategy: store,
-    puppeteer: {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  const store = {
+    async save(session) {
+      await Session.deleteMany(); // Single session
+      await new Session({ session }).save();
     },
-  });
+    async get() {
+      const record = await Session.findOne();
+      return record ? record.session : null;
+    },
+    async delete() {
+      await Session.deleteMany();
+    },
+  };
 
-  client.on('qr', (qr) => {
-    latestQr = qr;
-    isReady = false;
-    io.emit('qr', qr);
-    console.log('📲 New QR code generated');
-  });
+  (async () => {
+    const sessionData = await store.get();
 
-  client.on('ready', () => {
-    isReady = true;
-    latestQr = null;
-    io.emit('ready');
-    console.log('✅ Client is ready');
-  });
+    client = new Client({
+      puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      },
+      authStrategy: {
+        setup: (clientInstance) => {
+          clientInstance.on('authenticated', async (session) => {
+            await store.save(session);
+            io.emit('authenticated');
+            clientReady = true;
+            console.log('🔐 Authenticated');
+          });
 
-  client.on('authenticated', () => {
-    io.emit('authenticated');
-    console.log('🔐 Authenticated');
-  });
+          clientInstance.on('auth_failure', () => {
+            io.emit('auth_failure');
+            console.log('❌ Authentication failed');
+          });
 
-  client.on('auth_failure', (msg) => {
-    isReady = false;
-    io.emit('auth_failure');
-    console.error('❌ Auth failed:', msg);
-  });
+          clientInstance.on('disconnected', async () => {
+            await store.delete();
+            io.emit('disconnected');
+            clientReady = false;
+            console.log('⚠️ Disconnected');
+          });
 
-  client.on('disconnected', (reason) => {
-    isReady = false;
-    io.emit('disconnected');
-    console.warn('⚠️ Disconnected:', reason);
-  });
+          if (sessionData) clientInstance.options.session = sessionData;
+        },
+      },
+    });
 
-  // Example auto reply (can remove if not needed)
-  client.on('message', async msg => {
-    if (msg.from.includes('@g.us')) return;
-    if (msg.body.toLowerCase().includes('hi')) {
-      await msg.reply('Hello! 👋');
-    }
-  });
+    client.on('qr', (qr) => {
+      latestQr = qr;
+      io.emit('qr', qr);
+      console.log('📲 New QR code generated');
+    });
 
-  client.initialize();
+    client.on('ready', () => {
+      clientReady = true;
+      console.log('✅ Client is ready');
+      io.emit('ready');
+    });
+
+    client.on('message', async (msg) => {
+      console.log('📩 MESSAGE RECEIVED:', msg.body);
+    });
+
+    await client.initialize();
+  })();
 }
 
 function getLatestQR() {
   return latestQr;
 }
 
+function isWhatsAppReady() {
+  return clientReady;
+}
+
 async function sendMessageToWhatsApp(number, message) {
-  if (!isReady) throw new Error('WhatsApp client is not ready yet');
+  if (!clientReady) throw new Error('WhatsApp client is not ready yet');
   const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
   const sentMsg = await client.sendMessage(chatId, message);
   return { success: true, id: sentMsg.id._serialized };
 }
 
-function isWhatsAppReady() {
-  return isReady;
-}
-
 module.exports = {
   setupWhatsApp,
-  sendMessageToWhatsApp,
   getLatestQR,
   isWhatsAppReady,
+  sendMessageToWhatsApp,
 };
