@@ -118,6 +118,12 @@ app.get('/qr', async (req, res) => {
   }
 });
 
+app.get('/qr-image', async (req, res) => {
+  const qr = getLatestQR();
+  if (!qr) return res.send("❌ QR code not yet generated. Try again shortly.");
+  const imageUrl = await qrcode.toDataURL(qr);
+  res.send(`<h2>Scan WhatsApp QR Code</h2><img src="${imageUrl}" alt="QR Code" />`);
+});
 
 // WhatsApp Send API
 app.post('/send-message', async (req, res) => {
