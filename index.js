@@ -96,10 +96,28 @@ app.use("/calllogs", CallLogs);
 // QR Route
 app.get('/qr', async (req, res) => {
   const qr = getLatestQR();
-  if (!qr) return res.status(404).send("QR code not yet generated");
-  const qrImage = await qrcode.toDataURL(qr);
-  res.send(`<img src="${qrImage}" alt="QR Code" />`);
+  if (!qr) {
+    return res.status(200).json({
+      status: "pending",
+      message: "QR code not yet generated. Please wait..."
+    });
+  }
+
+  try {
+    const qrImage = await qrcode.toDataURL(qr);
+    res.status(200).json({
+      status: "ready",
+      qrImage
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "error",
+      message: "Failed to generate QR code",
+      error: err.message
+    });
+  }
 });
+
 
 // WhatsApp Send API
 app.post('/send-message', async (req, res) => {
