@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const qrcode = require("qrcode");
 
 const connectDB = require("./mongo");
+
 const {
   setupWhatsApp,
   getLatestQR,
@@ -13,7 +14,7 @@ const {
   sendMessageToWhatsApp
 } = require("./Services/whatsappService");
 
-// API Routers
+// Routers
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
 const Customers = require("./Routers/Customer");
@@ -44,22 +45,35 @@ const io = socketIO(server, {
 });
 
 // Middleware
+const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
+
 app.use(cors({
-  origin: ['https://sbsgondia.vercel.app', 'http://localhost:5173'],
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Connect MongoDB
-connectDB();
+// MongoDB connection and WhatsApp init
+(async () => {
+  try {
+    await connectDB();
+    setupWhatsApp(io); // run only after DB is ready
+  } catch (err) {
+    console.error('❌ Failed to initialize:', err);
+  }
+})();
 
-// WhatsApp Web.js Setup
-setupWhatsApp(io);
-
-// Routes
+// API Routes
 app.use("/customer", Customers);
 app.use("/customergroup", Customergroup);
 app.use("/user", Users);
@@ -87,7 +101,7 @@ app.get('/qr', async (req, res) => {
   res.send(`<img src="${qrImage}" alt="QR Code" />`);
 });
 
-// Send WhatsApp Message Route
+// WhatsApp Send API
 app.post('/send-message', async (req, res) => {
   const { number, message } = req.body;
   if (!number || !message)
@@ -107,5 +121,5 @@ app.post('/send-message', async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`✅ Server is running on port ${PORT}`);
 });
