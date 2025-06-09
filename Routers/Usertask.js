@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const Usertasks = require("../Models/usertask");
 const { v4: uuid } = require("uuid");
-const { sendMessageToWhatsApp } = require("../Services/whatsappService"); // <-- import this
+const { sendMessageToWhatsApp } = require("../Services/whatsappService");
+const normalizeWhatsAppNumber = require("../utils/normalizeNumber"); // ✅ New import
 
 // Add new user task and optionally send WhatsApp message to user
 router.post("/addUsertask", async (req, res) => {
@@ -29,11 +30,13 @@ router.post("/addUsertask", async (req, res) => {
       });
       await newTask.save();
 
-      // OPTIONAL: Send WhatsApp message to user on new task creation
-      // You can comment out if you do not want this feature
+      // ✅ Format number before sending message
       try {
-        // Ensure `User` contains the mobile number in international format, e.g. "919876543210"
-        await sendMessageToWhatsApp(User, `Hello! Your task "${Usertask_name}" has been created and is pending. Deadline: ${Deadline || "N/A"}`);
+        const formattedNumber = normalizeWhatsAppNumber(User);
+        await sendMessageToWhatsApp(
+          formattedNumber,
+          `Hello! Your task "${Usertask_name}" has been created and is pending. Deadline: ${Deadline || "N/A"}`
+        );
       } catch (err) {
         console.error("Failed to send WhatsApp message:", err.message);
       }
@@ -46,7 +49,7 @@ router.post("/addUsertask", async (req, res) => {
   }
 });
 
-// Send WhatsApp message directly from your client session
+// Direct WhatsApp message route
 router.post('/send-message', async (req, res) => {
   const { mobile, message } = req.body;
 
@@ -55,8 +58,8 @@ router.post('/send-message', async (req, res) => {
   }
 
   try {
-    // Send WhatsApp message using your own authenticated session!
-    const response = await sendMessageToWhatsApp(mobile, message);
+    const formattedMobile = normalizeWhatsAppNumber(mobile); // ✅ Format mobile number
+    const response = await sendMessageToWhatsApp(formattedMobile, message);
     res.status(200).json(response);
   } catch (error) {
     console.error('WhatsApp Send Error:', error);
