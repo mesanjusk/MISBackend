@@ -1,79 +1,87 @@
-const { Client } = require('whatsapp-web.js');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
+const MongoStore = require('wwebjs-mongo');
 const mongoose = require('mongoose');
 const WhatsAppSession = require('../Models/WhatsAppSession');
+const qrcode = require('qrcode');
 
-
-let client;
 let latestQr = null;
-let clientReady = false;
+let client;
+let ready = false;
 
 function setupWhatsApp(io) {
-  const store = {
-    async save(session) {
-      await Session.deleteMany(); // Single session
-      await new Session({ session }).save();
+  const store = new MongoStore({
+    mongoose: mongoose,
+    collectionName: 'sessions',
+    idField: 'session',
+
+    get: async () => {
+      const record = await WhatsAppSession.findOne();
+      return record ? record.data : null;
     },
-    async get() {
-      const record = await Session.findOne();
-      return record ? record.session : null;
+
+    set: async (session, data) => {
+      await WhatsAppSession.findOneAndUpdate(
+        { session },
+        { session, data },
+        { upsert: true }
+      );
     },
-    async delete() {
-      await Session.deleteMany();
-    },
-  };
 
-  (async () => {
-    const sessionData = await store.get();
+    delete: async (session) => {
+      await WhatsAppSession.deleteOne({ session });
+    }
+  });
 
-    client = new Client({
-      puppeteer: {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      },
-      authStrategy: {
-        setup: (clientInstance) => {
-          clientInstance.on('authenticated', async (session) => {
-            await store.save(session);
-            io.emit('authenticated');
-            clientReady = true;
-            console.log('🔐 Authenticated');
-          });
+  client = new Client({
+    authStrategy: new RemoteAuth({
+      store,
+      backupSyncIntervalMs: 300000,
+      clientId: 'main-client'
+    }),
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    }
+  });
 
-          clientInstance.on('auth_failure', () => {
-            io.emit('auth_failure');
-            console.log('❌ Authentication failed');
-          });
+  client.on('qr', (qr) => {
+    latestQr = qr;
+    console.log('📲 New QR code generated');
+    io.emit('qr', qr);
+  });
 
-          clientInstance.on('disconnected', async () => {
-            await store.delete();
-            io.emit('disconnected');
-            clientReady = false;
-            console.log('⚠️ Disconnected');
-          });
+  client.on('authenticated', () => {
+    console.log('🔐 Authenticated');
+    io.emit('authenticated');
+  });
 
-          if (sessionData) clientInstance.options.session = sessionData;
-        },
-      },
-    });
+  client.on('ready', () => {
+    console.log('✅ Client is ready');
+    ready = true;
+    io.emit('ready');
+  });
 
-    client.on('qr', (qr) => {
-      latestQr = qr;
-      io.emit('qr', qr);
-      console.log('📲 New QR code generated');
-    });
+  client.on('auth_failure', msg => {
+    console.error('❌ Auth failed:', msg);
+    io.emit('auth_failure');
+  });
 
-    client.on('ready', () => {
-      clientReady = true;
-      console.log('✅ Client is ready');
-      io.emit('ready');
-    });
+  client.on('disconnected', reason => {
+    console.warn('⚠️ Disconnected:', reason);
+    ready = false;
+    io.emit('disconnected');
+  });
 
-    client.on('message', async (msg) => {
-      console.log('📩 MESSAGE RECEIVED:', msg.body);
-    });
+  client.on('message', async (msg) => {
+    console.log('📩 MESSAGE RECEIVED:', msg.body);
+    if (msg.from.includes('@g.us')) return;
 
-    await client.initialize();
-  })();
+    if (msg.body.toLowerCase().includes('hi')) {
+      await msg.reply('Hello! 👋');
+    }
+  });
+
+  client.initialize();
 }
 
 function getLatestQR() {
@@ -81,11 +89,11 @@ function getLatestQR() {
 }
 
 function isWhatsAppReady() {
-  return clientReady;
+  return ready;
 }
 
 async function sendMessageToWhatsApp(number, message) {
-  if (!clientReady) throw new Error('WhatsApp client is not ready yet');
+  if (!ready) throw new Error('WhatsApp client is not ready yet');
   const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
   const sentMsg = await client.sendMessage(chatId, message);
   return { success: true, id: sentMsg.id._serialized };
@@ -95,5 +103,5 @@ module.exports = {
   setupWhatsApp,
   getLatestQR,
   isWhatsAppReady,
-  sendMessageToWhatsApp,
+  sendMessageToWhatsApp
 };
