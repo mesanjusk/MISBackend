@@ -142,6 +142,11 @@ app.post('/send-message', async (req, res) => {
   }
 });
 
+app.get('/whatsapp-status', (req, res) => {
+  res.json({ status: isWhatsAppReady() ? 'connected' : 'disconnected' });
+});
+
+
 // Start server
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
