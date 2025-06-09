@@ -21,7 +21,8 @@ async function setupWhatsApp(io) {
     await mongoose.connection.asPromise();
 
     // Create MongoStore for RemoteAuth
-    const store = new MongoStore({ mongoose: mongoose.connection });
+    const store = new MongoStore({ mongoose });
+
 
     client = new Client({
       authStrategy: new RemoteAuth({
