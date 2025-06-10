@@ -2,7 +2,7 @@ const { Client, RemoteAuth } = require('whatsapp-web.js');
 const { MongoStore } = require('wwebjs-mongo');
 const mongoose = require('mongoose');
 const qrcodeTerminal = require('qrcode-terminal');
-const Message = require('../Models/Message'); // make sure this is imported at top
+const Message = require('../Models/Message');
 
 let client;
 let latestQR = null;
@@ -18,18 +18,16 @@ function isWhatsAppReady() {
 
 async function setupWhatsApp(io) {
   try {
-    // Ensure MongoDB connection is ready
-    await mongoose.connection.asPromise();
+    if (client) {
+      console.log("⚠️ WhatsApp client already initialized");
+      return;
+    }
 
-    // Create MongoStore for RemoteAuth
+    await mongoose.connection.asPromise();
     const store = new MongoStore({ mongoose });
 
-
     client = new Client({
-      authStrategy: new RemoteAuth({
-        store,
-        backupSyncIntervalMs: 300000, // optional
-      }),
+      authStrategy: new RemoteAuth({ store, backupSyncIntervalMs: 300000 }),
       puppeteer: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -59,31 +57,21 @@ async function setupWhatsApp(io) {
       io.emit('auth_failure', msg);
     });
 
-    const Message = require('../Models/Message'); // Add at top
+    client.on('message', async (msg) => {
+      const from = msg.from.replace('@c.us', '');
+      const text = msg.body;
+      const time = new Date();
 
-client.on('message', async (msg) => {
-  const from = msg.from.replace('@c.us', '');
-  const text = msg.body;
-  const time = new Date();
+      await Message.create({ from, to: 'me', text, time });
 
-  // Save to MongoDB
-  await Message.create({
-    from,
-    to: 'me',
-    text,
-    time
-  });
+      io.emit('message', {
+        number: from,
+        message: text,
+        time
+      });
 
-  // Emit to frontend
-  io.emit('message', {
-    number: from,
-    message: text,
-    time
-  });
-
-  console.log("📩 MESSAGE RECEIVED:", text);
-});
-
+      console.log("📩 MESSAGE RECEIVED:", text);
+    });
 
     client.initialize();
   } catch (err) {
@@ -97,7 +85,6 @@ async function sendMessageToWhatsApp(number, message) {
   const chatId = number.includes('@c.us') ? number : number + "@c.us";
   const sentMessage = await client.sendMessage(chatId, message);
 
-  // Save to MongoDB
   await Message.create({
     from: 'me',
     to: number,
