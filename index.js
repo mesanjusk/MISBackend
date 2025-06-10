@@ -34,6 +34,7 @@ const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
+const ChatRoutes = require("./Routers/chat"); // ✅ NEW CHAT ROUTES
 
 const app = express();
 const server = http.createServer(app);
@@ -68,7 +69,7 @@ app.use(express.urlencoded({ extended: true }));
 (async () => {
   try {
     await connectDB();
-    setupWhatsApp(io); // run only after DB is ready
+    setupWhatsApp(io);
   } catch (err) {
     console.error('❌ Failed to initialize:', err);
   }
@@ -93,6 +94,7 @@ app.use("/vendor", Vendors);
 app.use("/note", Note);
 app.use("/usertask", Usertasks);
 app.use("/calllogs", CallLogs);
+app.use(ChatRoutes); // ✅ Enable chatlist + customer-by-number
 
 // QR Route
 app.get('/qr', async (req, res) => {
@@ -126,6 +128,7 @@ app.get('/qr-image', async (req, res) => {
   res.send(`<h2>Scan WhatsApp QR Code</h2><img src="${imageUrl}" alt="QR Code" />`);
 });
 
+// Message History
 app.get('/messages/:number', async (req, res) => {
   const number = req.params.number;
   const messages = await Message.find({
@@ -138,8 +141,7 @@ app.get('/messages/:number', async (req, res) => {
   res.json({ success: true, messages });
 });
 
-
-// WhatsApp Send API
+// Send WhatsApp Message
 app.post('/send-message', async (req, res) => {
   const { number, message } = req.body;
   if (!number || !message)
@@ -156,10 +158,10 @@ app.post('/send-message', async (req, res) => {
   }
 });
 
+// WhatsApp Status
 app.get('/whatsapp-status', (req, res) => {
   res.json({ status: isWhatsAppReady() ? 'connected' : 'disconnected' });
 });
-
 
 // Start server
 const PORT = process.env.PORT || 10000;
