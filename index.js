@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const qrcode = require("qrcode");
 
 const connectDB = require("./mongo");
+const Message = require('./Models/Message');
 
 const {
   setupWhatsApp,
@@ -124,6 +125,19 @@ app.get('/qr-image', async (req, res) => {
   const imageUrl = await qrcode.toDataURL(qr);
   res.send(`<h2>Scan WhatsApp QR Code</h2><img src="${imageUrl}" alt="QR Code" />`);
 });
+
+app.get('/messages/:number', async (req, res) => {
+  const number = req.params.number;
+  const messages = await Message.find({
+    $or: [
+      { from: number, to: 'me' },
+      { from: 'me', to: number }
+    ]
+  }).sort({ time: 1 });
+
+  res.json({ success: true, messages });
+});
+
 
 // WhatsApp Send API
 app.post('/send-message', async (req, res) => {
