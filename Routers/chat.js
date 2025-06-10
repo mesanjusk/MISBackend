@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Message = require('../Models/Message');     // Adjust if needed
-const Customer = require('../Models/Customer');   // Adjust if needed
+const Customer = require('../Models/customer');   // Adjust if needed
+
 
 /**
  * GET /chatlist
