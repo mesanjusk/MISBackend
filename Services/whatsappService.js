@@ -37,10 +37,17 @@ async function setupWhatsApp(io, sessionId = 'default') {
       },
     });
 
-    sessions[sessionId] = { client, latestQR: null, ready: false };
+    sessions[sessionId] = {
+      client,
+      latestQR: null,
+      ready: false,
+      lastQRTime: null,
+      lastMessageTime: null,
+    };
 
     client.on('qr', (qr) => {
       sessions[sessionId].latestQR = qr;
+      sessions[sessionId].lastQRTime = Date.now();
       console.log(`📲 New QR code generated for ${sessionId}`);
       qrcodeTerminal.generate(qr, { small: true });
       io.emit('qr', { sessionId, qr });
@@ -53,6 +60,7 @@ async function setupWhatsApp(io, sessionId = 'default') {
     });
 
     client.on('authenticated', () => {
+      sessions[sessionId].latestQR = null;
       console.log(`🔐 Authenticated ${sessionId}`);
       io.emit('authenticated', sessionId);
     });
@@ -66,6 +74,8 @@ async function setupWhatsApp(io, sessionId = 'default') {
       const from = msg.from.replace('@c.us', '');
       const text = msg.body;
       const time = new Date();
+
+      sessions[sessionId].lastMessageTime = Date.now();
 
       await Message.create({ from, to: sessionId, text, time });
 
@@ -108,6 +118,8 @@ function listSessions() {
   return Object.keys(sessions).map((id) => ({
     sessionId: id,
     ready: sessions[id].ready,
+    lastQRTime: sessions[id].lastQRTime,
+    lastMessageTime: sessions[id].lastMessageTime,
   }));
 }
 
