@@ -60,7 +60,7 @@ app.use(express.urlencoded({ extended: true }));
 (async () => {
   try {
     await connectDB();
-    app.use(WhatsAppRoutes(io)); // ✅ WhatsApp routes initialized with IO
+   app.use("/whatsapp", WhatsAppRoutes(io));
   } catch (err) {
     console.error('❌ Failed to initialize:', err);
   }
