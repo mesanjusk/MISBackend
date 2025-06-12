@@ -9,37 +9,47 @@ module.exports = (io) => {
     sendMessageToWhatsApp,
     setupWhatsApp,
     listSessions,
-    logoutSession,
+    logoutSession
   } = require('../Services/whatsappService');
 
-  // Initialize a session
-  router.post('/whatsapp/session/:id/init', async (req, res) => {
+  // 🔄 Start a session
+  router.post('/start-session', async (req, res) => {
+    const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+
     try {
-      await setupWhatsApp(io, req.params.id);
-      res.json({ success: true });
+      await setupWhatsApp(io, sessionId);
+      res.json({ success: true, message: `Started session ${sessionId}` });
     } catch (err) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, message: err.message });
     }
   });
 
-  // List sessions
-  router.get('/whatsapp/sessions', (req, res) => {
+  // 🔁 Reset session
+  router.post('/reset-session', async (req, res) => {
+    const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+
+    const success = await logoutSession(sessionId);
+    if (success) {
+      res.json({ success: true, message: `Session ${sessionId} reset. Restart or call /start-session to re-init.` });
+    } else {
+      res.status(404).json({ success: false, message: `Session ${sessionId} not found.` });
+    }
+  });
+
+  // 📋 Get all session statuses
+  router.get('/sessions', (req, res) => {
     res.json({ success: true, sessions: listSessions() });
   });
 
-  // Delete a session
-  router.delete('/whatsapp/session/:id', async (req, res) => {
-    const ok = await logoutSession(req.params.id);
-    res.json({ success: ok });
-  });
-
-  // Get QR code data
+  // 🔍 Get QR code for a session
   router.get('/whatsapp/session/:id/qr', async (req, res) => {
     const qr = getLatestQR(req.params.id);
     if (!qr) {
       return res.status(200).json({
         status: 'pending',
-        message: 'QR code not yet generated. Please wait...'
+        message: 'QR code not yet generated. Please wait...',
       });
     }
 
@@ -58,15 +68,15 @@ module.exports = (io) => {
     }
   });
 
-  // QR Image page
+  // 🖼️ QR as image for browser view
   router.get('/whatsapp/session/:id/qr-image', async (req, res) => {
     const qr = getLatestQR(req.params.id);
     if (!qr) return res.send('❌ QR code not yet generated. Try again shortly.');
     const imageUrl = await qrcode.toDataURL(qr);
-    res.send(`<h2>Scan WhatsApp QR Code</h2><img src="${imageUrl}" alt="QR Code" />`);
+    res.send(`<h2>Scan WhatsApp QR Code (${req.params.id})</h2><img src="${imageUrl}" alt="QR Code" />`);
   });
 
-  // Message history for a session
+  // ✉️ Message history
   router.get('/whatsapp/session/:id/messages/:number', async (req, res) => {
     const sessionId = req.params.id;
     const number = req.params.number;
@@ -80,7 +90,7 @@ module.exports = (io) => {
     res.json({ success: true, messages });
   });
 
-  // Send a message via a specific session
+  // 🚀 Send message via session
   router.post('/whatsapp/session/:id/send-message', async (req, res) => {
     const sessionId = req.params.id;
     const { number, message } = req.body;
@@ -99,30 +109,30 @@ module.exports = (io) => {
     }
   });
 
-  // Status of a session
+  // 📡 Session status check
   router.get('/whatsapp/session/:id/status', (req, res) => {
     const sessionId = req.params.id;
     res.json({ status: isWhatsAppReady(sessionId) ? 'connected' : 'disconnected' });
   });
 
-  // Simple management page
+  // 🌐 Simple QR viewer for quick scan
   router.get('/whatsapp/manage', (req, res) => {
     const sessions = listSessions();
     let html = '<h2>WhatsApp Sessions</h2><ul>';
     sessions.forEach(s => {
-      html += `<li>${s.sessionId} - ${s.ready ? 'Connected' : 'Pending'} - <a href="/whatsapp/session/${s.sessionId}/qr-image" target="_blank">QR</a></li>`;
+      html += `<li>${s.sessionId} - ${s.ready ? '✅ Connected' : '🕓 Pending'} - <a href="/whatsapp/session/${s.sessionId}/qr-image" target="_blank">QR</a></li>`;
     });
     html += '</ul>';
     res.send(html);
   });
 
-  // Legacy routes (default session)
+  // 📦 Legacy fallback for "default" session (optional)
   router.get('/qr', async (req, res) => {
     const qr = getLatestQR();
     if (!qr) {
       return res.status(200).json({
         status: 'pending',
-        message: 'QR code not yet generated. Please wait...'
+        message: 'QR code not yet generated. Please wait...',
       });
     }
 
@@ -148,6 +158,7 @@ module.exports = (io) => {
     res.send(`<h2>Scan WhatsApp QR Code</h2><img src="${imageUrl}" alt="QR Code" />`);
   });
 
+  // 💬 Legacy message history (default session)
   router.get('/messages/:number', async (req, res) => {
     const number = req.params.number;
     const messages = await Message.find({
@@ -160,6 +171,7 @@ module.exports = (io) => {
     res.json({ success: true, messages });
   });
 
+  // ✉️ Legacy send-message (default session)
   router.post('/send-message', async (req, res) => {
     const { number, message } = req.body;
     if (!number || !message) {
@@ -177,6 +189,7 @@ module.exports = (io) => {
     }
   });
 
+  // ⚙️ Status for frontend polling
   router.get('/whatsapp-status', (req, res) => {
     res.json({ status: isWhatsAppReady() ? 'connected' : 'disconnected' });
   });
