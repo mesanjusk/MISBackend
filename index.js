@@ -29,7 +29,7 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat"); // ✅ NEW CHAT ROUTES
-const WhatsAppRoutes = require("./Routers/WhatsApp");
+const WhatsAppRoutes = require("./Routers/WhatsApp")(io);
 
 const app = express();
 const server = http.createServer(app);
@@ -64,7 +64,7 @@ app.use(express.urlencoded({ extended: true }));
 (async () => {
   try {
     await connectDB();
-    setupWhatsApp(io);
+    setupWhatsApp(io, 'default');
   } catch (err) {
     console.error('❌ Failed to initialize:', err);
   }

@@ -4,57 +4,62 @@ const mongoose = require('mongoose');
 const qrcodeTerminal = require('qrcode-terminal');
 const Message = require('../Models/Message');
 
-let client;
-let latestQR = null;
-let ready = false;
+// In-memory map of all active WhatsApp clients
+const sessions = {};
 
-function getLatestQR() {
-  return latestQR;
+function getLatestQR(sessionId = 'default') {
+  return sessions[sessionId]?.latestQR || null;
 }
 
-function isWhatsAppReady() {
-  return ready;
+function isWhatsAppReady(sessionId = 'default') {
+  return sessions[sessionId]?.ready || false;
 }
 
-async function setupWhatsApp(io) {
+async function setupWhatsApp(io, sessionId = 'default') {
   try {
-    if (client) {
-      console.log("⚠️ WhatsApp client already initialized");
+    if (sessions[sessionId]) {
+      console.log(`⚠️ WhatsApp client ${sessionId} already initialized`);
       return;
     }
 
     await mongoose.connection.asPromise();
     const store = new MongoStore({ mongoose });
 
-    client = new Client({
-      authStrategy: new RemoteAuth({ store, backupSyncIntervalMs: 300000 }),
+    const client = new Client({
+      authStrategy: new RemoteAuth({
+        store,
+        clientId: sessionId,
+        backupSyncIntervalMs: 300000,
+      }),
       puppeteer: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       },
     });
 
+    sessions[sessionId] = { client, latestQR: null, ready: false };
+
     client.on('qr', (qr) => {
-      latestQR = qr;
-      console.log("📲 New QR code generated");
+      sessions[sessionId].latestQR = qr;
+      console.log(`📲 New QR code generated for ${sessionId}`);
       qrcodeTerminal.generate(qr, { small: true });
-      io.emit('qr', qr);
+      io.emit('qr', { sessionId, qr });
     });
 
     client.on('ready', () => {
-      ready = true;
-      console.log("✅ Client is ready");
-      io.emit('ready');
+      sessions[sessionId].ready = true;
+      console.log(`✅ Client ${sessionId} is ready`);
+      io.emit('ready', sessionId);
     });
 
     client.on('authenticated', () => {
-      console.log("🔐 Authenticated");
-      io.emit('authenticated');
+      console.log(`🔐 Authenticated ${sessionId}`);
+      io.emit('authenticated', sessionId);
     });
 
     client.on('auth_failure', (msg) => {
-      console.error("❌ Authentication failed:", msg);
-      io.emit('auth_failure', msg);
+      console.error(`❌ Authentication failed for ${sessionId}:`, msg);
+      io.emit('auth_failure', { sessionId, msg });
     });
 
     client.on('message', async (msg) => {
@@ -62,37 +67,62 @@ async function setupWhatsApp(io) {
       const text = msg.body;
       const time = new Date();
 
-      await Message.create({ from, to: 'me', text, time });
+      await Message.create({ from, to: sessionId, text, time });
 
       io.emit('message', {
+        sessionId,
         number: from,
         message: text,
-        time
+        time,
       });
 
-      console.log("📩 MESSAGE RECEIVED:", text);
+      console.log(`📩 MESSAGE RECEIVED (${sessionId}):`, text);
     });
 
     client.initialize();
   } catch (err) {
-    console.error("❌ Failed to initialize:", err);
+    console.error(`❌ Failed to initialize ${sessionId}:`, err);
   }
 }
 
-async function sendMessageToWhatsApp(number, message) {
-  if (!client || !ready) throw new Error("WhatsApp client is not ready yet");
+async function sendMessageToWhatsApp(number, message, sessionId = 'default') {
+  const session = sessions[sessionId];
+  if (!session || !session.ready) {
+    throw new Error('WhatsApp client is not ready yet');
+  }
 
-  const chatId = number.includes('@c.us') ? number : number + "@c.us";
-  const sentMessage = await client.sendMessage(chatId, message);
+  const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+  const sentMessage = await session.client.sendMessage(chatId, message);
 
   await Message.create({
-    from: 'me',
+    from: sessionId,
     to: number,
     text: message,
-    time: new Date()
+    time: new Date(),
   });
 
   return { success: true, id: sentMessage.id._serialized };
+}
+
+function listSessions() {
+  return Object.keys(sessions).map((id) => ({
+    sessionId: id,
+    ready: sessions[id].ready,
+  }));
+}
+
+async function logoutSession(sessionId) {
+  const session = sessions[sessionId];
+  if (!session) return false;
+
+  try {
+    await session.client.destroy();
+  } catch (e) {
+    console.error(`Failed to destroy client ${sessionId}:`, e);
+  }
+
+  delete sessions[sessionId];
+  return true;
 }
 
 module.exports = {
@@ -100,4 +130,6 @@ module.exports = {
   getLatestQR,
   isWhatsAppReady,
   sendMessageToWhatsApp,
+  listSessions,
+  logoutSession,
 };
