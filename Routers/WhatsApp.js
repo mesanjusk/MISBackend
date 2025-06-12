@@ -69,7 +69,7 @@ module.exports = (io) => {
   });
 
   // 🖼️ QR as image for browser view
-  router.get('/whatsapp/session/:id/qr-image', async (req, res) => {
+  router.get('/session/:id/qr-image', async (req, res) => {
     const qr = getLatestQR(req.params.id);
     if (!qr) return res.send('❌ QR code not yet generated. Try again shortly.');
     const imageUrl = await qrcode.toDataURL(qr);
