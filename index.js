@@ -29,7 +29,6 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat"); // ✅ NEW CHAT ROUTES
-const WhatsAppRoutes = require("./Routers/WhatsApp")(io);
 
 const app = express();
 const server = http.createServer(app);
@@ -40,6 +39,8 @@ const io = socketIO(server, {
     credentials: true,
   }
 });
+
+const WhatsAppRoutes = require("./Routers/WhatsApp")(io);
 
 // Middleware
 const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
