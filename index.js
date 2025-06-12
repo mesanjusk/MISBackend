@@ -2,17 +2,11 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const socketIO = require("socket.io");
-const mongoose = require("mongoose");
-const qrcode = require("qrcode");
 
 const connectDB = require("./mongo");
-const Message = require('./Models/Message');
 
 const {
   setupWhatsApp,
-  getLatestQR,
-  isWhatsAppReady,
-  sendMessageToWhatsApp
 } = require("./Services/whatsappService");
 
 // Routers
@@ -35,6 +29,7 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat"); // ✅ NEW CHAT ROUTES
+const WhatsAppRoutes = require("./Routers/WhatsApp");
 
 const app = express();
 const server = http.createServer(app);
@@ -95,73 +90,7 @@ app.use("/note", Note);
 app.use("/usertask", Usertasks);
 app.use("/calllogs", CallLogs);
 app.use(ChatRoutes); // ✅ Enable chatlist + customer-by-number
-
-// QR Route
-app.get('/qr', async (req, res) => {
-  const qr = getLatestQR();
-  if (!qr) {
-    return res.status(200).json({
-      status: "pending",
-      message: "QR code not yet generated. Please wait..."
-    });
-  }
-
-  try {
-    const qrImage = await qrcode.toDataURL(qr);
-    res.status(200).json({
-      status: "ready",
-      qrImage
-    });
-  } catch (err) {
-    res.status(500).json({
-      status: "error",
-      message: "Failed to generate QR code",
-      error: err.message
-    });
-  }
-});
-
-app.get('/qr-image', async (req, res) => {
-  const qr = getLatestQR();
-  if (!qr) return res.send("❌ QR code not yet generated. Try again shortly.");
-  const imageUrl = await qrcode.toDataURL(qr);
-  res.send(`<h2>Scan WhatsApp QR Code</h2><img src="${imageUrl}" alt="QR Code" />`);
-});
-
-// Message History
-app.get('/messages/:number', async (req, res) => {
-  const number = req.params.number;
-  const messages = await Message.find({
-    $or: [
-      { from: number, to: 'me' },
-      { from: 'me', to: number }
-    ]
-  }).sort({ time: 1 });
-
-  res.json({ success: true, messages });
-});
-
-// Send WhatsApp Message
-app.post('/send-message', async (req, res) => {
-  const { number, message } = req.body;
-  if (!number || !message)
-    return res.status(400).json({ error: 'Missing number or message' });
-
-  try {
-    if (!isWhatsAppReady()) {
-      return res.status(400).json({ success: false, error: 'WhatsApp not ready. Scan QR in backend first.' });
-    }
-    const response = await sendMessageToWhatsApp(number, message);
-    return res.status(200).json(response);
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// WhatsApp Status
-app.get('/whatsapp-status', (req, res) => {
-  res.json({ status: isWhatsAppReady() ? 'connected' : 'disconnected' });
-});
+app.use(WhatsAppRoutes);
 
 // Start server
 const PORT = process.env.PORT || 10000;
