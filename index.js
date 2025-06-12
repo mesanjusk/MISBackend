@@ -5,10 +5,6 @@ const socketIO = require("socket.io");
 
 const connectDB = require("./mongo");
 
-const {
-  setupWhatsApp,
-} = require("./Services/whatsappService");
-
 // Routers
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
@@ -28,7 +24,8 @@ const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
-const ChatRoutes = require("./Routers/chat"); // ✅ NEW CHAT ROUTES
+const ChatRoutes = require("./Routers/chat"); // ✅ Chat
+const WhatsAppRoutes = require("./Routers/WhatsApp");
 
 const app = express();
 const server = http.createServer(app);
@@ -39,8 +36,6 @@ const io = socketIO(server, {
     credentials: true,
   }
 });
-
-const WhatsAppRoutes = require("./Routers/WhatsApp")(io);
 
 // Middleware
 const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
@@ -61,11 +56,11 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB connection and WhatsApp init
+// MongoDB connection and WhatsApp routes
 (async () => {
   try {
     await connectDB();
-    setupWhatsApp(io, 'default');
+    app.use(WhatsAppRoutes(io)); // ✅ WhatsApp routes initialized with IO
   } catch (err) {
     console.error('❌ Failed to initialize:', err);
   }
@@ -90,8 +85,7 @@ app.use("/vendor", Vendors);
 app.use("/note", Note);
 app.use("/usertask", Usertasks);
 app.use("/calllogs", CallLogs);
-app.use(ChatRoutes); // ✅ Enable chatlist + customer-by-number
-app.use(WhatsAppRoutes);
+app.use(ChatRoutes); // ✅ Chat API
 
 // Start server
 const PORT = process.env.PORT || 10000;
