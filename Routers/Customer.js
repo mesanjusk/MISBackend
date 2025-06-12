@@ -45,9 +45,11 @@ router.post("/addCustomer", async (req, res) => {
 // Get all customers
 router.get("/GetCustomersList", async (req, res) => {
     try {
-        let customers = await Customers.find({});
-        let orders = await Order.find({}, 'Customer_uuid');
-        let transactions = await Transaction.find({}, 'Journal_entry');
+        const [customers, orders, transactions] = await Promise.all([
+            Customers.find({}),
+            Order.find({}, 'Customer_uuid'),
+            Transaction.find({}, 'Journal_entry')
+        ]);
 
         const usedFromOrders = new Set(orders.map((l) => l.Customer_uuid));
         

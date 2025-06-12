@@ -118,14 +118,6 @@ router.get('/GetFilteredTransactions', async (req, res) => {
 
         endDate.setHours(23, 59, 59, 999);
 
-        const customers = await Customer.find({});
-        const customerMap = customers.reduce((map, customer) => {
-            map[customer.Customer_uuid] = customer.Customer_name;
-            return map;
-        }, {});
-
-        console.log('Customer Map:', customerMap);
-
         const query = {
             Transaction_date: {
                 $gte: startDate,
@@ -133,7 +125,17 @@ router.get('/GetFilteredTransactions', async (req, res) => {
             }
         };
 
-        const transactions = await Transaction.find(query);
+        const [customers, transactions] = await Promise.all([
+            Customer.find({}),
+            Transaction.find(query)
+        ]);
+
+        const customerMap = customers.reduce((map, customer) => {
+            map[customer.Customer_uuid] = customer.Customer_name;
+            return map;
+        }, {});
+
+        console.log('Customer Map:', customerMap);
 
         const filteredTransactions = transactions.filter(transaction => {
             const journalEntries = transaction.Journal_entry || [];

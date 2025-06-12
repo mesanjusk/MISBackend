@@ -35,9 +35,11 @@ router.post("/addItem", async (req, res) => {
 
   router.get("/GetItemList", async (req, res) => {
     try {
-      let data = await Items.find({});
-      let orders = await Order.find({}, 'Item');
-      let transactions = await Transaction.find({}, 'Item');
+      const [data, orders, transactions] = await Promise.all([
+        Items.find({}),
+        Order.find({}, 'Item'),
+        Transaction.find({}, 'Item')
+      ]);
 
       const usedFromOrders = new Set(orders.map((l) => l.Item));
       const usedFromTransactions = new Set(transactions.map((t) => t.Item));

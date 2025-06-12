@@ -65,9 +65,11 @@ router.post("/addUser", async (req, res) => {
 
   router.get("/GetUserList", async (req, res) => {
     try {
-      let data = await Users.find({});
-      let orders = await Order.find({}, 'Status');
-      let transactions = await Transaction.find({}, 'Created_by');
+      const [data, orders, transactions] = await Promise.all([
+        Users.find({}),
+        Order.find({}, 'Status'),
+        Transaction.find({}, 'Created_by')
+      ]);
 
       const usedFromOrders = new Set();
         for (const od of orders) {
