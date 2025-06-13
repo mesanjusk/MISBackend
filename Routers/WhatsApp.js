@@ -125,6 +125,26 @@ module.exports = (io) => {
     html += '</ul>';
     res.send(html);
   });
+  
+router.post('/send', async (req, res) => {
+  const { sessionId, to, message } = req.body;
+
+  if (!sessionId || !to || !message) {
+    return res.status(400).json({ success: false, message: 'Missing sessionId, to or message' });
+  }
+
+  try {
+    if (!isWhatsAppReady(sessionId)) {
+      return res.status(400).json({ success: false, error: 'WhatsApp not ready. Scan QR first.' });
+    }
+
+    const result = await sendMessageToWhatsApp(to, message, sessionId);
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error('❌ Failed to send message:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
   return router;
 };
