@@ -38,7 +38,11 @@ const io = socketIO(server, {
 });
 
 // Middleware
-const allowedOrigins = ['https://sbsgondia.vercel.app', 'http://localhost:5173'];
+const allowedOrigins = [
+  'https://sbsgondia.vercel.app',
+  'http://localhost:5173',
+  'https://dash.sanjusk.in'  // ✅ Added
+];
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -52,6 +56,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
