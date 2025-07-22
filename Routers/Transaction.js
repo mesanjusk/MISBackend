@@ -184,6 +184,47 @@ router.get('/CheckCustomer/:customerUuid', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
+router.put('/updateByTransactionId/:transactionId', async (req, res) => {
+  const { transactionId } = req.params;
+  const {
+    updatedDescription,
+    updatedAmount,
+    updatedDate,
+    creditAccountId,
+    debitAccountId
+  } = req.body;
+
+  try {
+    const txn = await Transaction.findOne({ Transaction_id: parseInt(transactionId) });
+
+    if (!txn) {
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+
+    txn.Description = updatedDescription;
+    txn.Transaction_date = updatedDate;
+
+    txn.Journal_entry = txn.Journal_entry.map((entry) => {
+      if (entry.Type.toLowerCase() === 'credit') {
+        return { ...entry, Account_id: creditAccountId, Amount: updatedAmount };
+      } else if (entry.Type.toLowerCase() === 'debit') {
+        return { ...entry, Account_id: debitAccountId, Amount: updatedAmount };
+      }
+      return entry;
+    });
+
+    txn.Total_Credit = updatedAmount;
+    txn.Total_Debit = updatedAmount;
+
+    await txn.save();
+
+    res.json({ success: true, message: 'Transaction updated successfully' });
+  } catch (error) {
+    console.error('Update error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 
 // Delete a specific Journal Entry inside a Transaction by Transaction_id and Account_id
 router.delete('/deleteEntry/:transactionId/:accountId', async (req, res) => {
@@ -224,6 +265,15 @@ router.delete('/deleteEntry/:transactionId/:accountId', async (req, res) => {
         console.error('Error deleting journal entry:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
+});
+
+router.get('/distinctPaymentModes', async (req, res) => {
+  try {
+    const modes = await Transaction.distinct("Payment_mode");
+    res.json({ success: true, result: modes });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch modes" });
+  }
 });
 
 
