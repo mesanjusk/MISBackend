@@ -1,200 +1,175 @@
-module.exports = (io) => {
-  const express = require('express');
-  const router = express.Router();
-  const qrcode = require('qrcode');
-  const Message = require('../Models/Message');
-  const {
-    getLatestQR,
-    isWhatsAppReady,
-    sendMessageToWhatsApp,
-    setupWhatsApp,
-    listSessions,
-    logoutSession,
-  } = require('../Services/whatsappService');
-  const {
-    scheduleMessage,
-    getPendingMessages,
-    cancelScheduledMessage,
-  } = require('../Services/messageScheduler');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { MongoStore } = require('wwebjs-mongo');
+const mongoose = require('mongoose');
+const qrcodeTerminal = require('qrcode-terminal');
+const Message = require('../Models/Message');
 
-  // 🔄 Start a session
-  router.post('/start-session', async (req, res) => {
-    const { sessionId } = req.body;
-    if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+// In-memory map of all active WhatsApp clients
+const sessions = {};
 
-    try {
-      await setupWhatsApp(io, sessionId);
-      res.json({ success: true, message: `Started session ${sessionId}` });
-    } catch (err) {
-      res.status(500).json({ success: false, message: err.message });
-    }
-  });
+function getLatestQR(sessionId = 'default') {
+  return sessions[sessionId]?.latestQR || null;
+}
 
-  // 🔁 Reset session
-  router.post('/reset-session', async (req, res) => {
-    const { sessionId } = req.body;
-    if (!sessionId) return res.status(400).json({ success: false, message: 'Missing sessionId' });
+function isWhatsAppReady(sessionId = 'default') {
+  return sessions[sessionId]?.ready || false;
+}
 
-    const success = await logoutSession(sessionId);
-    if (success) {
-      res.json({ success: true, message: `Session ${sessionId} reset. Restart or call /start-session to re-init.` });
-    } else {
-      res.status(404).json({ success: false, message: `Session ${sessionId} not found.` });
-    }
-  });
+async function setupWhatsApp(io, sessionId = 'default') {
+  try {
+    // If session already exists, check if it’s stale
+    if (sessions[sessionId]) {
+      const session = sessions[sessionId];
 
-  // 📋 Get all session statuses
-  router.get('/sessions', (req, res) => {
-    res.json({ success: true, sessions: listSessions() });
-  });
+      const isStale =
+        !session.client?.info || !session.client.info?.wid || !session.ready;
 
-  // 🔍 Get QR code for a session
-  router.get('/session/:id/qr', async (req, res) => {
-    const qr = getLatestQR(req.params.id);
-    if (!qr) {
-      return res.status(200).json({
-        status: 'pending',
-        message: 'QR code not yet generated. Please wait...',
-      });
-    }
-
-    try {
-      const qrImage = await qrcode.toDataURL(qr);
-      res.status(200).json({
-        status: 'ready',
-        qrImage,
-      });
-    } catch (err) {
-      res.status(500).json({
-        status: 'error',
-        message: 'Failed to generate QR code',
-        error: err.message,
-      });
-    }
-  });
-
-  // 🖼️ QR as image for browser view
-  router.get('/session/:id/qr-image', async (req, res) => {
-    const qr = getLatestQR(req.params.id);
-    if (!qr) return res.send('❌ QR code not yet generated. Try again shortly.');
-    const imageUrl = await qrcode.toDataURL(qr);
-    res.send(`<h2>Scan WhatsApp QR Code (${req.params.id})</h2><img src="${imageUrl}" alt="QR Code" />`);
-  });
-
-  // ✉️ Message history
-  router.get('/session/:id/messages/:number', async (req, res) => {
-    const sessionId = req.params.id;
-    const number = req.params.number;
-    const messages = await Message.find({
-      $or: [
-        { from: number, to: sessionId },
-        { from: sessionId, to: number },
-      ],
-    }).sort({ time: 1 });
-
-    res.json({ success: true, messages });
-  });
-
-  // 🚀 Send message via session
-  router.post('/session/:id/send-message', async (req, res) => {
-    const sessionId = req.params.id;
-    const { number, message } = req.body;
-    if (!number || !message) {
-      return res.status(400).json({ error: 'Missing number or message' });
-    }
-
-    try {
-      if (!isWhatsAppReady(sessionId)) {
-        return res.status(400).json({ success: false, error: 'WhatsApp not ready. Scan QR first.' });
-      }
-      const response = await sendMessageToWhatsApp(number, message, sessionId);
-      return res.status(200).json(response);
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  // ⏰ Schedule message for later
-  router.post('/session/:id/schedule-message', async (req, res) => {
-    const sessionId = req.params.id;
-    const { number, message, sendAt } = req.body;
-
-    if (!number || !message || !sendAt) {
-      return res.status(400).json({ success: false, message: 'Missing number, message or sendAt' });
-    }
-
-    try {
-      const scheduleDate = new Date(sendAt);
-      if (isNaN(scheduleDate.getTime())) {
-        return res.status(400).json({ success: false, message: 'Invalid sendAt' });
+      if (!isStale) {
+        console.log(`⚠️ WhatsApp client ${sessionId} already initialized`);
+        // Re-emit QR or ready status to frontend
+        if (session.latestQR) io.emit('qr', { sessionId, qr: session.latestQR });
+        else if (session.ready) io.emit('ready', sessionId);
+        return;
       }
 
-      await scheduleMessage(sessionId, number, message, scheduleDate);
-      res.json({ success: true, message: 'Message scheduled' });
-    } catch (err) {
-      res.status(500).json({ success: false, message: err.message });
+      console.log(`🔁 Detected stale session. Resetting ${sessionId}...`);
+      await logoutSession(sessionId);
     }
-  });
 
-  // 📅 List pending scheduled messages
-  router.get('/session/:id/scheduled-messages', async (req, res) => {
-    try {
-      const messages = await getPendingMessages(req.params.id);
-      res.json({ success: true, messages });
-    } catch (err) {
-      res.status(500).json({ success: false, message: err.message });
-    }
-  });
+    // Mongo and store setup
+    await mongoose.connection.asPromise();
+    const store = new MongoStore({ mongoose });
 
-  // ❌ Cancel a scheduled message
-  router.delete('/session/:id/scheduled-message/:msgId', async (req, res) => {
-    try {
-      const { deletedCount } = await cancelScheduledMessage(req.params.msgId);
-      if (deletedCount === 0) {
-        return res.status(404).json({ success: false, message: 'Message not found or already processed' });
-      }
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  // 📡 Session status check
-  router.get('/session/:id/status', (req, res) => {
-    const sessionId = req.params.id;
-    res.json({ status: isWhatsAppReady(sessionId) ? 'connected' : 'disconnected' });
-  });
-
-  // 🌐 Simple QR viewer for quick scan
-  router.get('/manage', (req, res) => {
-    const sessions = listSessions();
-    let html = '<h2>WhatsApp Sessions</h2><ul>';
-    sessions.forEach((s) => {
-      html += `<li>${s.sessionId} - ${s.ready ? '✅ Connected' : '🕓 Pending'} - <a href="/whatsapp/session/${s.sessionId}/qr-image" target="_blank">QR</a></li>`;
+    const client = new Client({
+      authStrategy: new RemoteAuth({
+        store,
+        clientId: sessionId,
+        backupSyncIntervalMs: 300000,
+      }),
+      puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      },
     });
-    html += '</ul>';
-    res.send(html);
-  });
-  
-router.post('/send', async (req, res) => {
-  const { sessionId, to, message } = req.body;
 
-  if (!sessionId || !to || !message) {
-    return res.status(400).json({ success: false, message: 'Missing sessionId, to or message' });
+    // Save session reference
+    sessions[sessionId] = {
+      client,
+      latestQR: null,
+      ready: false,
+      lastQRTime: null,
+      lastMessageTime: null,
+    };
+
+    // Event: QR
+    client.on('qr', (qr) => {
+      sessions[sessionId].latestQR = qr;
+      sessions[sessionId].lastQRTime = Date.now();
+      console.log(`📲 New QR code generated for ${sessionId}`);
+      qrcodeTerminal.generate(qr, { small: true });
+      io.emit('qr', { sessionId, qr });
+    });
+
+    // Event: Ready
+    client.on('ready', () => {
+      sessions[sessionId].ready = true;
+      console.log(`✅ WhatsApp ${sessionId} is ready`);
+      io.emit('ready', sessionId);
+    });
+
+    // Event: Authenticated
+    client.on('authenticated', () => {
+      sessions[sessionId].latestQR = null;
+      console.log(`🔐 Authenticated ${sessionId}`);
+      io.emit('authenticated', sessionId);
+    });
+
+    // Event: Auth failure
+    client.on('auth_failure', (msg) => {
+      console.error(`❌ Authentication failed for ${sessionId}:`, msg);
+      io.emit('auth_failure', { sessionId, msg });
+    });
+
+    // Event: Disconnected
+    client.on('disconnected', (reason) => {
+      console.warn(`🔌 WhatsApp ${sessionId} disconnected: ${reason}`);
+      sessions[sessionId].ready = false;
+      io.emit('disconnected', { sessionId, reason });
+    });
+
+    // Event: Incoming message
+    client.on('message', async (msg) => {
+      const from = msg.from.replace('@c.us', '');
+      const text = msg.body;
+      const time = new Date();
+
+      sessions[sessionId].lastMessageTime = Date.now();
+
+      await Message.create({ from, to: sessionId, text, time });
+
+      io.emit('message', {
+        sessionId,
+        number: from,
+        message: text,
+        time,
+      });
+
+      console.log(`📩 MESSAGE RECEIVED (${sessionId}):`, text);
+    });
+
+    client.initialize();
+  } catch (err) {
+    console.error(`❌ Failed to initialize ${sessionId}:`, err);
   }
+}
+
+async function sendMessageToWhatsApp(number, message, sessionId = 'default') {
+  const session = sessions[sessionId];
+  if (!session || !session.ready) {
+    throw new Error('WhatsApp client is not ready yet');
+  }
+
+  const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+  const sentMessage = await session.client.sendMessage(chatId, message);
+
+  await Message.create({
+    from: sessionId,
+    to: number,
+    text: message,
+    time: new Date(),
+  });
+
+  return { success: true, id: sentMessage.id._serialized };
+}
+
+function listSessions() {
+  return Object.keys(sessions).map((id) => ({
+    sessionId: id,
+    ready: sessions[id].ready,
+    lastQRTime: sessions[id].lastQRTime,
+    lastMessageTime: sessions[id].lastMessageTime,
+  }));
+}
+
+async function logoutSession(sessionId) {
+  const session = sessions[sessionId];
+  if (!session) return false;
 
   try {
-    if (!isWhatsAppReady(sessionId)) {
-      return res.status(400).json({ success: false, error: 'WhatsApp not ready. Scan QR first.' });
-    }
-
-    const result = await sendMessageToWhatsApp(to, message, sessionId);
-    res.json({ success: true, result });
-  } catch (err) {
-    console.error('❌ Failed to send message:', err);
-    res.status(500).json({ success: false, message: err.message });
+    await session.client.destroy();
+  } catch (e) {
+    console.error(`⚠️ Failed to destroy client ${sessionId}:`, e);
   }
-});
 
-  return router;
+  delete sessions[sessionId];
+  return true;
+}
+
+module.exports = {
+  setupWhatsApp,
+  getLatestQR,
+  isWhatsAppReady,
+  sendMessageToWhatsApp,
+  listSessions,
+  logoutSession,
 };
