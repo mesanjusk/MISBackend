@@ -67,7 +67,8 @@ app.use(express.urlencoded({ extended: true }));
   try {
     await connectDB();
     initScheduler();
-    app.use("/whatsapp", WhatsAppRoutes(io));
+    app.use("/whatsapp", WhatsAppRoutes); // pass the router, not a function
+
   } catch (err) {
     console.error('❌ Failed to initialize:', err);
   }
