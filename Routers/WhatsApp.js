@@ -11,6 +11,7 @@ module.exports = (io) => {
     listSessions,
     logoutSession,
   } = require('../Services/whatsappService');
+  const { scheduleMessage } = require('../Services/messageScheduler');
 
   // 🔄 Start a session
   router.post('/start-session', async (req, res) => {
@@ -106,6 +107,28 @@ module.exports = (io) => {
       return res.status(200).json(response);
     } catch (error) {
       return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ⏰ Schedule message for later
+  router.post('/session/:id/schedule-message', async (req, res) => {
+    const sessionId = req.params.id;
+    const { number, message, sendAt } = req.body;
+
+    if (!number || !message || !sendAt) {
+      return res.status(400).json({ success: false, message: 'Missing number, message or sendAt' });
+    }
+
+    try {
+      const scheduleDate = new Date(sendAt);
+      if (isNaN(scheduleDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid sendAt' });
+      }
+
+      await scheduleMessage(sessionId, number, message, scheduleDate);
+      res.json({ success: true, message: 'Message scheduled' });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
     }
   });
 

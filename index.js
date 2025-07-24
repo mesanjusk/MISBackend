@@ -26,6 +26,7 @@ const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat"); // ✅ Chat
 const WhatsAppRoutes = require("./Routers/WhatsApp");
+const { initScheduler } = require("./Services/messageScheduler");
 
 const app = express();
 const server = http.createServer(app);
@@ -65,7 +66,8 @@ app.use(express.urlencoded({ extended: true }));
 (async () => {
   try {
     await connectDB();
-   app.use("/whatsapp", WhatsAppRoutes(io));
+    initScheduler();
+    app.use("/whatsapp", WhatsAppRoutes(io));
   } catch (err) {
     console.error('❌ Failed to initialize:', err);
   }
