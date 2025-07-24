@@ -1,52 +1,165 @@
-const express = require('express');
-const qrcode = require('qrcode');
-const {
+const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { MongoStore } = require('wwebjs-mongo');
+const mongoose = require('mongoose');
+const qrcodeTerminal = require('qrcode-terminal');
+const Message = require('../Models/Message');
+
+const sessions = {};
+
+function getLatestQR(sessionId = 'default') {
+  return sessions[sessionId]?.latestQR || null;
+}
+
+function isWhatsAppReady(sessionId = 'default') {
+  return sessions[sessionId]?.ready || false;
+}
+
+async function setupWhatsApp(io, sessionId = 'default') {
+  try {
+    // Check for stale session
+    if (sessions[sessionId]) {
+      const session = sessions[sessionId];
+      const isStale = !session.client?.info || !session.client.info?.wid || !session.ready;
+
+      if (!isStale) {
+        console.log(`⚠️ WhatsApp client ${sessionId} already initialized`);
+        if (session.latestQR) io.emit('qr', { sessionId, qr: session.latestQR });
+        else if (session.ready) io.emit('ready', sessionId);
+        return;
+      }
+
+      console.log(`🔁 Detected stale session. Resetting ${sessionId}...`);
+      await logoutSession(sessionId);
+    }
+
+    // Mongo and store setup
+    await mongoose.connection.asPromise();
+    const store = new MongoStore({ mongoose });
+    store.mongoose = mongoose; // ✅ PATCH: manually assign to fix crash
+
+    const client = new Client({
+      authStrategy: new RemoteAuth({
+        store,
+        clientId: sessionId,
+        backupSyncIntervalMs: 300000,
+      }),
+      puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      },
+    });
+
+    sessions[sessionId] = {
+      client,
+      latestQR: null,
+      ready: false,
+      lastQRTime: null,
+      lastMessageTime: null,
+    };
+
+    client.on('qr', (qr) => {
+      sessions[sessionId].latestQR = qr;
+      sessions[sessionId].lastQRTime = Date.now();
+      console.log(`📲 New QR code generated for ${sessionId}`);
+      qrcodeTerminal.generate(qr, { small: true });
+      io.emit('qr', { sessionId, qr });
+    });
+
+    client.on('ready', () => {
+      sessions[sessionId].ready = true;
+      console.log(`✅ WhatsApp ${sessionId} is ready`);
+      io.emit('ready', sessionId);
+    });
+
+    client.on('authenticated', () => {
+      sessions[sessionId].latestQR = null;
+      console.log(`🔐 Authenticated ${sessionId}`);
+      io.emit('authenticated', sessionId);
+    });
+
+    client.on('auth_failure', (msg) => {
+      console.error(`❌ Authentication failed for ${sessionId}:`, msg);
+      io.emit('auth_failure', { sessionId, msg });
+    });
+
+    client.on('disconnected', (reason) => {
+      console.warn(`🔌 WhatsApp ${sessionId} disconnected: ${reason}`);
+      sessions[sessionId].ready = false;
+      io.emit('disconnected', { sessionId, reason });
+    });
+
+    client.on('message', async (msg) => {
+      const from = msg.from.replace('@c.us', '');
+      const text = msg.body;
+      const time = new Date();
+
+      sessions[sessionId].lastMessageTime = Date.now();
+
+      await Message.create({ from, to: sessionId, text, time });
+
+      io.emit('message', {
+        sessionId,
+        number: from,
+        message: text,
+        time,
+      });
+
+      console.log(`📩 MESSAGE RECEIVED (${sessionId}):`, text);
+    });
+
+    client.initialize();
+  } catch (err) {
+    console.error(`❌ Failed to initialize ${sessionId}:`, err);
+  }
+}
+
+async function sendMessageToWhatsApp(number, message, sessionId = 'default') {
+  const session = sessions[sessionId];
+  if (!session || !session.ready) {
+    throw new Error('WhatsApp client is not ready yet');
+  }
+
+  const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+  const sentMessage = await session.client.sendMessage(chatId, message);
+
+  await Message.create({
+    from: sessionId,
+    to: number,
+    text: message,
+    time: new Date(),
+  });
+
+  return { success: true, id: sentMessage.id._serialized };
+}
+
+function listSessions() {
+  return Object.keys(sessions).map((id) => ({
+    sessionId: id,
+    ready: sessions[id].ready,
+    lastQRTime: sessions[id].lastQRTime,
+    lastMessageTime: sessions[id].lastMessageTime,
+  }));
+}
+
+async function logoutSession(sessionId) {
+  const session = sessions[sessionId];
+  if (!session) return false;
+
+  try {
+    await session.client.destroy();
+  } catch (e) {
+    console.error(`⚠️ Failed to destroy client ${sessionId}:`, e);
+  }
+
+  delete sessions[sessionId];
+  return true;
+}
+
+module.exports = {
   setupWhatsApp,
   getLatestQR,
   isWhatsAppReady,
   sendMessageToWhatsApp,
+  listSessions,
   logoutSession,
-} = require('../Services/whatsappService');
-
-const router = express.Router();
-const sessionId = 'default';
-
-// Automatically initialize on import (no socket.io needed here)
-setupWhatsApp({ emit: () => {} }, sessionId);
-
-// Serve QR as image in browser
-router.get('/scan', async (req, res) => {
-  const qr = getLatestQR(sessionId);
-  if (!qr) return res.send(`<h2>QR not ready. Please wait and refresh.</h2>`);
-
-  const image = await qrcode.toDataURL(qr);
-  res.send(`
-    <h2>Scan this QR to login WhatsApp</h2>
-    <img src="${image}" />
-  `);
-});
-
-// Send message to WhatsApp
-router.post('/send', async (req, res) => {
-  const { number, message } = req.body;
-  if (!number || !message) return res.status(400).json({ success: false, message: 'Missing number or message' });
-
-  try {
-    if (!isWhatsAppReady(sessionId)) {
-      return res.status(400).json({ success: false, message: 'WhatsApp not ready. Scan QR first.' });
-    }
-
-    const result = await sendMessageToWhatsApp(number, message, sessionId);
-    return res.json({ success: true, result });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// Logout session
-router.post('/logout', async (req, res) => {
-  const ok = await logoutSession(sessionId);
-  return res.json({ success: ok });
-});
-
-module.exports = router;
+};
