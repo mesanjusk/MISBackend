@@ -24,9 +24,10 @@ const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
-const ChatRoutes = require("./Routers/chat"); // ✅ Chat
-const WhatsAppRoutes = require("./Routers/WhatsApp");
+const ChatRoutes = require("./Routers/chat");
+const WhatsAppRouter = require("./Routers/WhatsApp");
 const { initScheduler } = require("./Services/messageScheduler");
+const { setupWhatsApp } = require("./Services/whatsappService");
 
 const app = express();
 const server = http.createServer(app);
@@ -35,14 +36,14 @@ const io = socketIO(server, {
     origin: ['https://sbsgondia.vercel.app', 'http://localhost:5173'],
     methods: ['GET', 'POST'],
     credentials: true,
-  }
+  },
 });
 
-// Middleware
+// CORS Setup
 const allowedOrigins = [
   'https://sbsgondia.vercel.app',
   'http://localhost:5173',
-  'https://dash.sanjusk.in'  // ✅ Added
+  'https://dash.sanjusk.in'
 ];
 
 app.use(cors({
@@ -58,23 +59,26 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB connection and WhatsApp routes
+// MongoDB and WhatsApp init
 (async () => {
   try {
     await connectDB();
     initScheduler();
-    app.use("/whatsapp", WhatsAppRoutes); // pass the router, not a function
 
+    // ✅ Initialize WhatsApp in background (for browser QR login)
+    await setupWhatsApp({ emit: () => {} }, 'default');
+
+    // ✅ Register WhatsApp route
+    app.use("/whatsapp", WhatsAppRouter);
   } catch (err) {
-    console.error('❌ Failed to initialize:', err);
+    console.error("❌ Failed to initialize services:", err);
   }
 })();
 
-// API Routes
+// Other API Routes
 app.use("/customer", Customers);
 app.use("/customergroup", Customergroup);
 app.use("/user", Users);
@@ -93,9 +97,9 @@ app.use("/vendor", Vendors);
 app.use("/note", Note);
 app.use("/usertask", Usertasks);
 app.use("/calllogs", CallLogs);
-app.use(ChatRoutes); // ✅ Chat API
+app.use(ChatRoutes);
 
-// Start server
+// Start Server
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`✅ Server is running on port ${PORT}`);
