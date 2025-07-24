@@ -11,7 +11,11 @@ module.exports = (io) => {
     listSessions,
     logoutSession,
   } = require('../Services/whatsappService');
-  const { scheduleMessage } = require('../Services/messageScheduler');
+  const {
+    scheduleMessage,
+    getPendingMessages,
+    cancelScheduledMessage,
+  } = require('../Services/messageScheduler');
 
   // 🔄 Start a session
   router.post('/start-session', async (req, res) => {
@@ -127,6 +131,29 @@ module.exports = (io) => {
 
       await scheduleMessage(sessionId, number, message, scheduleDate);
       res.json({ success: true, message: 'Message scheduled' });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 📅 List pending scheduled messages
+  router.get('/session/:id/scheduled-messages', async (req, res) => {
+    try {
+      const messages = await getPendingMessages(req.params.id);
+      res.json({ success: true, messages });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // ❌ Cancel a scheduled message
+  router.delete('/session/:id/scheduled-message/:msgId', async (req, res) => {
+    try {
+      const { deletedCount } = await cancelScheduledMessage(req.params.msgId);
+      if (deletedCount === 0) {
+        return res.status(404).json({ success: false, message: 'Message not found or already processed' });
+      }
+      res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
     }

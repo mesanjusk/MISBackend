@@ -30,4 +30,17 @@ async function scheduleMessage(sessionId, to, message, sendAt) {
   return ScheduledMessage.create({ sessionId, to, message, sendAt });
 }
 
-module.exports = { initScheduler, scheduleMessage };
+async function getPendingMessages(sessionId) {
+  return ScheduledMessage.find({ sessionId, status: 'scheduled' }).sort({ sendAt: 1 });
+}
+
+async function cancelScheduledMessage(id) {
+  return ScheduledMessage.deleteOne({ _id: id, status: 'scheduled' });
+}
+
+module.exports = {
+  initScheduler,
+  scheduleMessage,
+  getPendingMessages,
+  cancelScheduledMessage,
+};
