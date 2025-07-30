@@ -18,6 +18,7 @@ router.post("/addOrder", async (req, res) => {
     Item = "New Order",  
     Status = [{}],
     Remark,
+    Steps_data = [], // ✅ NEW: array of steps per task group
   } = req.body;
 
   const statusDefaults = {
@@ -30,7 +31,7 @@ router.post("/addOrder", async (req, res) => {
 
   const updatedStatus = Status.map((status) => ({
     ...statusDefaults,
-    ...status, 
+    ...status,
   }));
 
   if (
@@ -46,8 +47,15 @@ router.post("/addOrder", async (req, res) => {
       });
   }
 
+  // ✅ Flatten all steps from all groups
+  const flatSteps = Steps_data.reduce((acc, group) => {
+    if (Array.isArray(group.steps)) {
+      return acc.concat(group.steps);
+    }
+    return acc;
+  }, []);
+
   try {
-  
     const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
 
@@ -57,7 +65,8 @@ router.post("/addOrder", async (req, res) => {
       Customer_uuid,
       Priority,
       Item,
-      Status: updatedStatus, 
+      Status: updatedStatus,
+      Steps: flatSteps, // ✅ Save flattened steps
       Remark,
     });
 
@@ -68,6 +77,7 @@ router.post("/addOrder", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to add order" });
   }
 });
+
 
 router.post('/CheckMultipleCustomers', async (req, res) => {
     try {
