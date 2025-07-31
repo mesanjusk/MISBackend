@@ -32,7 +32,7 @@ router.post("/addPriority", async (req, res) => {
 
   router.get("/GetPriorityList", async (req, res) => {
     try {
-      let data = await Priority.find({});
+      let data = await Priority.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.Priority_name) });

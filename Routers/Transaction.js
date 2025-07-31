@@ -90,7 +90,7 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
 
 router.get("/GetTransactionList", async (req, res) => {
     try {
-        const data = await Transaction.find({});
+        const data = await Transaction.find({}).lean();
         if (data.length) {
             res.json({ success: true, result: data.filter(a => a.Description) });
         } else {
@@ -126,8 +126,8 @@ router.get('/GetFilteredTransactions', async (req, res) => {
         };
 
         const [customers, transactions] = await Promise.all([
-            Customer.find({}),
-            Transaction.find(query)
+            Customer.find({}).lean(),
+            Transaction.find(query).lean()
         ]);
 
         const customerMap = customers.reduce((map, customer) => {

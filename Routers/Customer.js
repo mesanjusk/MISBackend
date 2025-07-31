@@ -46,9 +46,9 @@ router.post("/addCustomer", async (req, res) => {
 router.get("/GetCustomersList", async (req, res) => {
     try {
         const [customers, orders, transactions] = await Promise.all([
-            Customers.find({}),
-            Order.find({}, 'Customer_uuid'),
-            Transaction.find({}, 'Journal_entry')
+            Customers.find({}).lean(),
+            Order.find({}, 'Customer_uuid').lean(),
+            Transaction.find({}, 'Journal_entry').lean()
         ]);
 
         const usedFromOrders = new Set(orders.map((l) => l.Customer_uuid));
@@ -205,7 +205,7 @@ router.delete('/DeleteCustomer/:id', async (req, res) => {
 // Get customer report (with Status, Tags, LastInteraction)
 router.get("/GetCustomerReport", async (req, res) => {
     try {
-        const data = await Customers.find({});
+        const data = await Customers.find({}).lean();
         if (data.length) {
             const report = data.map(customer => ({
                 Customer_name: customer.Customer_name,

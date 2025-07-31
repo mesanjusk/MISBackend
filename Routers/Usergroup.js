@@ -32,7 +32,7 @@ router.post("/addUsergroup", async (req, res) => {
 
   router.get("/GetUsergroupList", async (req, res) => {
     try {
-      let data = await Usergroup.find({});
+      let data = await Usergroup.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.User_group) });

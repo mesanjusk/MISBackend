@@ -32,7 +32,7 @@ router.post("/addTaskgroup", async (req, res) => {
 
   router.get("/GetTaskgroupList", async (req, res) => {
     try {
-      let data = await Taskgroup.find({});
+      let data = await Taskgroup.find({}).lean();
   
       if (data.length) {
         res.json({ success: true, result: data });

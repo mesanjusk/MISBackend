@@ -4,7 +4,11 @@ const TasksSchema=new mongoose.Schema({
     Task_uuid: { type: String },
     Task_name: { type: String, required: true },
     Task_group: { type: String, required: true },
- })
+})
+
+// Index important fields
+TasksSchema.index({ Task_name: 1 });
+TasksSchema.index({ Task_uuid: 1 });
 
  const Tasks = mongoose.model("Tasks", TasksSchema);
 

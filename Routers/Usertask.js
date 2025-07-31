@@ -70,7 +70,7 @@ router.post('/send-message', async (req, res) => {
 // Get all user tasks
 router.get("/GetUsertaskList", async (req, res) => {
   try {
-    let data = await Usertasks.find({});
+    let data = await Usertasks.find({}).lean();
     if (data.length)
       res.json({ success: true, result: data.filter((a) => a.Usertask_name) });
     else res.json({ success: false, message: "Task Not found" });

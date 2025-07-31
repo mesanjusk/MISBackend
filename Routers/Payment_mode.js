@@ -31,7 +31,7 @@ router.post("/addPayment", async (req, res) => {
 
   router.get("/GetPaymentList", async (req, res) => {
     try {
-      let data = await Payment_mode.find({});
+      let data = await Payment_mode.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.Payment_name) });

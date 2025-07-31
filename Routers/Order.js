@@ -97,7 +97,7 @@ router.post('/CheckMultipleCustomers', async (req, res) => {
 router.get("/GetOrderList", async (req, res) => {
   try {
    
-    let data = await Orders.find({});
+    let data = await Orders.find({}).lean();
 
     if (data.length) {
    
@@ -138,7 +138,7 @@ router.get("/GetOrderList", async (req, res) => {
 
 router.get("/GetDeliveredList", async (req, res) => {
   try {
-    let data = await Orders.find({});
+    let data = await Orders.find({}).lean();
 
     if (data.length) {
       const filteredData = data.filter(order => {
@@ -165,7 +165,7 @@ router.get("/GetDeliveredList", async (req, res) => {
 
 router.get("/GetBillList", async (req, res) => {
   try {
-    let data = await Orders.find({});
+    let data = await Orders.find({}).lean();
 
     if (data.length) {
       const filteredData = data.filter(order => {

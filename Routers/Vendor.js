@@ -41,7 +41,7 @@ router.post("/addVendor", async (req, res) => {
 
   router.get("/GetVendorList", async (req, res) => {
     try {
-      let data = await Vendors.find({});
+      let data = await Vendors.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.Order_Number) });

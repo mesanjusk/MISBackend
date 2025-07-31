@@ -56,7 +56,7 @@ router.post('/addAttendance', async (req, res) => {
 // Get all attendance records
 router.get("/GetAttendanceList", async (req, res) => {
   try {
-    const data = await Attendance.find({});
+    const data = await Attendance.find({}).lean();
     if (data.length > 0) {
       res.json({ success: true, result: data });
     } else {
