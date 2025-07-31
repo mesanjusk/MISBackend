@@ -16,6 +16,7 @@ CustomersSchema.index({ Mobile_number: 1 });
 CustomersSchema.index({ Customer_group: 1 });
 CustomersSchema.index({ Status: 1 });
 CustomersSchema.index({ Customer_uuid: 1 });
+CustomersSchema.index({ LastInteraction: -1 });
 
 const Customers = mongoose.model("Customers", CustomersSchema);
 
