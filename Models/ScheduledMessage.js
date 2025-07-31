@@ -9,4 +9,10 @@ const ScheduledMessageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Indexes to manage scheduled message queue
+ScheduledMessageSchema.index({ sessionId: 1 });
+ScheduledMessageSchema.index({ to: 1 });
+ScheduledMessageSchema.index({ sendAt: 1 });
+ScheduledMessageSchema.index({ status: 1 });
+
 module.exports = mongoose.model('ScheduledMessage', ScheduledMessageSchema);

@@ -20,6 +20,13 @@ const TransactionSchema=new mongoose.Schema({
     Journal_entry: [journalSchema],
  },  { timestamps: true })
 
+// Indexes for efficient financial queries
+TransactionSchema.index({ Transaction_id: 1 });
+TransactionSchema.index({ Order_uuid: 1 });
+TransactionSchema.index({ Transaction_date: 1 });
+TransactionSchema.index({ Payment_mode: 1 });
+TransactionSchema.index({ Created_by: 1 });
+
  const Transaction = mongoose.model("Transaction", TransactionSchema);
 
 module.exports = Transaction;

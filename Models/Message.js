@@ -7,4 +7,9 @@ const MessageSchema = new mongoose.Schema({
   time: { type: Date, default: Date.now }
 });
 
+// Indexes to speed up chat history searches
+MessageSchema.index({ from: 1 });
+MessageSchema.index({ to: 1 });
+MessageSchema.index({ time: -1 });
+
 module.exports = mongoose.model('Message', MessageSchema);

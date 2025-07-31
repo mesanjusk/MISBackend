@@ -16,6 +16,12 @@ const UsersSchema = new mongoose.Schema({
   }
 });
 
+// Index definitions to help user lookups and population
+UsersSchema.index({ User_name: 1 });
+UsersSchema.index({ Mobile_number: 1 });
+UsersSchema.index({ User_group: 1 });
+UsersSchema.index({ User_uuid: 1 });
+
 const Users = mongoose.model("Users", UsersSchema);
 
 module.exports = Users;

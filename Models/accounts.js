@@ -11,6 +11,12 @@ const AccountsSchema=new mongoose.Schema({
     Updated_at: { type: Date, required: true },
  },  { timestamps: true })
 
+// Indexes for account management
+AccountsSchema.index({ Account_name: 1 });
+AccountsSchema.index({ Account_type: 1 });
+AccountsSchema.index({ Account_code: 1 });
+AccountsSchema.index({ Account_uuid: 1 });
+
  const Accounts = mongoose.model("Accounts", AccountsSchema);
 
 module.exports = Accounts;

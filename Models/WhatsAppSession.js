@@ -5,4 +5,7 @@ const WhatsAppSessionSchema = new mongoose.Schema({
   data: Object
 });
 
+// Index to quickly find sessions
+WhatsAppSessionSchema.index({ session: 1 });
+
 module.exports = mongoose.model('WhatsAppSession', WhatsAppSessionSchema);

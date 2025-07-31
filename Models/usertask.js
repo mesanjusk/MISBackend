@@ -12,6 +12,13 @@ const UsertasksSchema=new mongoose.Schema({
     Status: { type: String, required: true}
  },  { timestamps: true })
 
+// Indexes for common query fields
+UsertasksSchema.index({ Usertask_Number: 1 });
+UsertasksSchema.index({ User: 1 });
+UsertasksSchema.index({ Date: 1 });
+UsertasksSchema.index({ Deadline: 1 });
+UsertasksSchema.index({ Status: 1 });
+
  const Usertasks = mongoose.model("Usertasks", UsertasksSchema);
 
 module.exports = Usertasks;
