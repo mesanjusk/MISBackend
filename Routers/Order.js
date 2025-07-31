@@ -18,7 +18,7 @@ router.post("/addOrder", async (req, res) => {
     Item = "New Order",  
     Status = [{}],
     Remark,
-    Steps_data = [], // ✅ NEW: array of steps per task group
+    Steps = [], // ✅ NEW: array of steps per task group
   } = req.body;
 
   const statusDefaults = {
@@ -48,16 +48,18 @@ router.post("/addOrder", async (req, res) => {
   }
 
   // ✅ Flatten all steps from all groups
-  const flatSteps = Steps_data.reduce((acc, group) => {
-    if (Array.isArray(group.steps)) {
-      return acc.concat(group.steps);
-    }
-    return acc;
-  }, []);
+  const flatSteps = Steps.reduce((acc, step) => {
+  if (step && typeof step.label === "string") {
+    acc.push({ label: step.label, checked: !!step.checked });
+  }
+  return acc;
+}, []);
 
   try {
     const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
+
+    console.log("🧪 Steps to be saved:", flatSteps);
 
     const newOrder = new Orders({
       Order_uuid: uuid(),
@@ -71,6 +73,8 @@ router.post("/addOrder", async (req, res) => {
     });
 
     await newOrder.save();
+console.log("✅ Order saved:", newOrder);
+
     res.json({ success: true, message: "Order added successfully" });
   } catch (error) {
     console.error("Error saving order:", error);
