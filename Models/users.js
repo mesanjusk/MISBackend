@@ -16,6 +16,10 @@ const UsersSchema = new mongoose.Schema({
   }
 });
 
+// Useful indexes
+UsersSchema.index({ User_name: 1 });
+UsersSchema.index({ User_uuid: 1 });
+
 const Users = mongoose.model("Users", UsersSchema);
 
 module.exports = Users;

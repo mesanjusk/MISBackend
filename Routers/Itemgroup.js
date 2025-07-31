@@ -33,7 +33,7 @@ router.post("/addItemgroup", async (req, res) => {
 
   router.get("/GetItemgroupList", async (req, res) => {
     try {
-      let data = await Itemgroup.find({});
+      let data = await Itemgroup.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.Item_group) });

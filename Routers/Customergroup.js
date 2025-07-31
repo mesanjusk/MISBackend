@@ -32,7 +32,7 @@ router.post("/addCustomergroup", async (req, res) => {
 
   router.get("/GetCustomergroupList", async (req, res) => {
     try {
-      let data = await Customergroup.find({});
+      let data = await Customergroup.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.Customer_group) });

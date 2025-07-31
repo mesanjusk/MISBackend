@@ -33,7 +33,7 @@ router.post("/addTask", async (req, res) => {
 
   router.get("/GetTaskList", async (req, res) => {
     try {
-      let data = await Tasks.find({});
+      let data = await Tasks.find({}).lean();
   
       if (data.length)
         res.json({ success: true, result: data.filter((a) => a.Task_name) });
