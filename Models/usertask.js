@@ -13,7 +13,6 @@ const UsertasksSchema=new mongoose.Schema({
  },  { timestamps: true })
 
 // Indexes for common query fields
-UsertasksSchema.index({ Usertask_Number: 1 });
 UsertasksSchema.index({ User: 1 });
 UsertasksSchema.index({ Date: 1 });
 UsertasksSchema.index({ Deadline: 1 });

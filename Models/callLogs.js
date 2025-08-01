@@ -10,7 +10,6 @@ const CallLogsSchema=new mongoose.Schema({
  })
 
 // Indexes to optimise frequent call log operations
-CallLogsSchema.index({ Mobile_number: 1 });
 CallLogsSchema.index({ Name: 1 });
 CallLogsSchema.index({ Type: 1 });
 CallLogsSchema.index({ Status: 1 });

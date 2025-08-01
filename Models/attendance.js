@@ -16,7 +16,6 @@ const AttendanceSchema = new mongoose.Schema({
 });
 
 // Indexes to speed up lookups and sorting
-AttendanceSchema.index({ Attendance_Record_ID: 1 });
 AttendanceSchema.index({ Employee_uuid: 1 });
 AttendanceSchema.index({ Date: 1 });
 AttendanceSchema.index({ Status: 1 });

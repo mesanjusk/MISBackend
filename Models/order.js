@@ -31,7 +31,6 @@ const OrdersSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Indexes for faster querying and sorting
-OrdersSchema.index({ Order_Number: 1 });
 OrdersSchema.index({ Customer_uuid: 1 });
 OrdersSchema.index({ Item: 1 });
 OrdersSchema.index({ Priority: 1 });

@@ -13,7 +13,6 @@ const EnquirySchema=new mongoose.Schema({
  },  { timestamps: true })
 
 // Index definitions to improve query speed
-EnquirySchema.index({ Enquiry_Number: 1 });
 EnquirySchema.index({ Customer_name: 1 });
 EnquirySchema.index({ Priority: 1 });
 EnquirySchema.index({ Item: 1 });
