@@ -18,7 +18,8 @@ const stepSchema = new mongoose.Schema({
 
 // Item Schema ✅
 const itemSchema = new mongoose.Schema({
-  Item: { type: String, required: true },
+  Item: { type: String }, // ❌ remove required since we're using Items[]
+
   Quantity: { type: Number, required: true },
   Rate: { type: Number, required: true },
   Amount: { type: Number, required: true }
