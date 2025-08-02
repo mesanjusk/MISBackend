@@ -1,4 +1,5 @@
-const mongoose = require('mongoose'); 
+// Models/order.js
+const mongoose = require('mongoose');
 
 // Status Schema
 const statusSchema = new mongoose.Schema({
@@ -9,10 +10,18 @@ const statusSchema = new mongoose.Schema({
   CreatedAt: { type: Date, required: true }
 });
 
-// Step Schema (new)
+// Step Schema
 const stepSchema = new mongoose.Schema({
   label: { type: String, required: true },
   checked: { type: Boolean, default: false }
+});
+
+// Item Schema ✅
+const itemSchema = new mongoose.Schema({
+  Item: { type: String, required: true },
+  Quantity: { type: Number, required: true },
+  Rate: { type: Number, required: true },
+  Amount: { type: Number, required: true }
 });
 
 // Orders Schema
@@ -21,16 +30,17 @@ const OrdersSchema = new mongoose.Schema({
   Order_Number: { type: Number, required: true, unique: true },
   Customer_uuid: { type: String, required: true },
   Priority: { type: String, required: true },
-  Item: { type: String, required: true },
+  Item: { type: String, required: true }, // legacy field for single item (optional to keep)
+  Items: [itemSchema], // ✅ NEW field for multiple items
   Status: [statusSchema],
-  Steps: [stepSchema], // ✅ NEW FIELD
+  Steps: [stepSchema],
   Remark: { type: String, required: true },
   Rate: { type: Number, default: 0 }, 
   Quantity: { type: Number, default: 0 }, 
-  Amount: { type: Number, default: 0 },
+  Amount: { type: Number, default: 0 }
 }, { timestamps: true });
 
-// Indexes for faster querying and sorting
+// Indexes
 OrdersSchema.index({ Customer_uuid: 1 });
 OrdersSchema.index({ Item: 1 });
 OrdersSchema.index({ Priority: 1 });
