@@ -279,6 +279,7 @@ router.get('/CheckCustomer/:customerUuid', async (req, res) => {
   }
 });
 
+// routes/order.js
 router.put('/updateDelivery/:id', async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items, Remark } = req.body;
@@ -289,18 +290,19 @@ router.put('/updateDelivery/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // ✅ Update all fields properly
     order.Customer_uuid = Customer_uuid;
-    order.Items = Items; // now supports full array of item lines
+    order.Items = Items; // ✅ Now properly saved
     order.Remark = Remark;
 
     await order.save();
+
     res.status(200).json({ success: true, message: 'Order updated successfully' });
   } catch (error) {
-    console.error('❌ Error updating order:', error);
+    console.error('Error updating order:', error);
     res.status(500).json({ success: false, message: 'Error updating order', error });
   }
 });
+
 
 
   module.exports = router;
