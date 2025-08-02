@@ -1,4 +1,3 @@
-// Models/order.js
 const mongoose = require('mongoose');
 
 // Status Schema
@@ -18,8 +17,7 @@ const stepSchema = new mongoose.Schema({
 
 // Item Schema ✅
 const itemSchema = new mongoose.Schema({
-  Item: { type: String }, // ❌ remove required since we're using Items[]
-
+  Item: { type: String, required: true }, // each line item still requires Item name
   Quantity: { type: Number, required: true },
   Rate: { type: Number, required: true },
   Amount: { type: Number, required: true }
@@ -31,8 +29,8 @@ const OrdersSchema = new mongoose.Schema({
   Order_Number: { type: Number, required: true, unique: true },
   Customer_uuid: { type: String, required: true },
   Priority: { type: String, required: true },
-  Item: { type: String, required: true }, // legacy field for single item (optional to keep)
-  Items: [itemSchema], // ✅ NEW field for multiple items
+  Item: { type: String }, // ✅ made optional (was: required: true)
+  Items: [itemSchema],
   Status: [statusSchema],
   Steps: [stepSchema],
   Remark: { type: String, required: true },
