@@ -106,15 +106,17 @@ app.get("/whatsapp/status", (req, res) => {
 });
 
 app.post("/whatsapp/send-test", async (req, res) => {
-  const { number, message } = req.body;
+  const { number, message, mediaUrl } = req.body;
+
   try {
-    const result = await sendMessageToWhatsApp(number, message);
-    res.status(200).json(result); // ✅ consistent response
+    const result = await sendMessageToWhatsApp(number, message, mediaUrl);
+    res.status(200).json(result);
   } catch (err) {
-    console.error("❌ Failed to send test message:", err.message);
+    console.error("❌ Failed to send message:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 
 // ✅ Init DB + WhatsApp Session
