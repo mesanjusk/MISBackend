@@ -25,9 +25,15 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat");
-const WhatsAppRouter = require("./Routers/WhatsApp");
+
+const {
+  setupWhatsApp,
+  getQR,
+  getReadyStatus,
+  sendTestMessage
+} = require("./Services/whatsappService");
+
 const { initScheduler } = require("./Services/messageScheduler");
-const { setupWhatsApp } = require("./Services/whatsappService");
 
 const app = express();
 const server = http.createServer(app);
@@ -62,23 +68,44 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB and WhatsApp init
+// MongoDB + WhatsApp Initialization
 (async () => {
   try {
     await connectDB();
     initScheduler();
 
-    // ✅ Initialize WhatsApp in background (for browser QR login)
-    await setupWhatsApp({ emit: () => {} }, 'default');
+    // ✅ Initialize WhatsApp
+    await setupWhatsApp(io, 'default');
 
-    // ✅ Register WhatsApp route
-    app.use("/whatsapp", WhatsAppRouter);
+    // ✅ QR Render Endpoint
+    app.get("/whatsapp/qr", (req, res) => {
+      const qr = getQR();
+      if (!qr) return res.status(404).send("QR not available");
+      res.send(`<img src="${qr}" style="width:300px;" />`);
+    });
+
+    // ✅ Status Check
+    app.get("/whatsapp/status", (req, res) => {
+      res.json({ ready: getReadyStatus() });
+    });
+
+    // ✅ Send Test Message
+    app.post("/whatsapp/send-test", async (req, res) => {
+      const { number, message } = req.body;
+      try {
+        const result = await sendTestMessage(number, message);
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
   } catch (err) {
     console.error("❌ Failed to initialize services:", err);
   }
 })();
 
-// Other API Routes
+// API Routes
 app.use("/customer", Customers);
 app.use("/customergroup", Customergroup);
 app.use("/user", Users);

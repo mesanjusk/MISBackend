@@ -1,48 +1,117 @@
-const express = require('express');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
+const { MongoStore } = require('wwebjs-mongo');
+const mongoose = require('mongoose');
 const qrcode = require('qrcode');
-const {
-  getLatestQR,
-  isWhatsAppReady,
-  sendMessageToWhatsApp,
-  logoutSession,
-} = require('../Services/whatsappService');
+const Message = require('../Models/Message');
 
-const router = express.Router();
-const sessionId = 'default';
+let client;
+let latestQR = null;
+let isReady = false;
 
-// Serve QR as image in browser
-router.get('/scan', async (req, res) => {
-  const qr = getLatestQR(sessionId);
-  if (!qr) return res.send(`<h2>QR not ready. Please wait and refresh.</h2>`);
-
-  const image = await qrcode.toDataURL(qr);
-  res.send(`
-    <h2>Scan this QR to login WhatsApp</h2>
-    <img src="${image}" />
-  `);
-});
-
-// Send message
-router.post('/send', async (req, res) => {
-  const { number, message } = req.body;
-  if (!number || !message) return res.status(400).json({ success: false, message: 'Missing number or message' });
-
-  try {
-    if (!isWhatsAppReady(sessionId)) {
-      return res.status(400).json({ success: false, message: 'WhatsApp not ready. Scan QR first.' });
-    }
-
-    const result = await sendMessageToWhatsApp(number, message, sessionId);
-    return res.json({ success: true, result });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+/**
+ * Initialize WhatsApp client with MongoDB RemoteAuth
+ */
+async function setupWhatsApp(io, sessionId = 'default') {
+  if (client) {
+    console.log(`⚠️ WhatsApp client already initialized`);
+    return;
   }
-});
 
-// Logout
-router.post('/logout', async (req, res) => {
-  const ok = await logoutSession(sessionId);
-  return res.json({ success: ok });
-});
+  await mongoose.connection.asPromise();
+  const store = new MongoStore({ mongoose });
 
-module.exports = router;
+  client = new Client({
+    authStrategy: new RemoteAuth({
+      store,
+      clientId: sessionId,
+      backupSyncIntervalMs: 300000,
+    }),
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    },
+  });
+
+  client.on('qr', async (qr) => {
+    latestQR = await qrcode.toDataURL(qr); // Convert to base64
+    console.log(`📲 New QR code generated`);
+    io.emit('qr', latestQR); // optional if using socket frontend
+  });
+
+  client.on('ready', () => {
+    isReady = true;
+    latestQR = null;
+    console.log('✅ WhatsApp client is ready');
+    io.emit('ready');
+  });
+
+  client.on('authenticated', () => {
+    console.log('🔐 Authenticated');
+  });
+
+  client.on('auth_failure', (msg) => {
+    console.error('❌ Authentication failed:', msg);
+    io.emit('auth_failure', msg);
+  });
+
+  client.on('message', async (msg) => {
+    const from = msg.from.replace('@c.us', '');
+    const text = msg.body;
+    const time = new Date();
+
+    await Message.create({ from, to: sessionId, text, time });
+
+    io.emit('message', { from, message: text, time });
+    console.log(`📩 Message received from ${from}: ${text}`);
+  });
+
+  client.on('disconnected', (reason) => {
+    console.warn('🔌 WhatsApp disconnected:', reason);
+    isReady = false;
+    latestQR = null;
+  });
+
+  await client.initialize();
+}
+
+/**
+ * Get latest base64 QR string
+ */
+function getQR() {
+  return latestQR;
+}
+
+/**
+ * Get whether WhatsApp is ready
+ */
+function getReadyStatus() {
+  return isReady;
+}
+
+/**
+ * Send a test message to a WhatsApp number
+ */
+async function sendTestMessage(number, message) {
+  if (!client || !isReady) {
+    throw new Error('WhatsApp client is not ready yet');
+  }
+
+  const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
+  const sent = await client.sendMessage(chatId, message);
+
+  await Message.create({
+    from: 'default',
+    to: number,
+    text: message,
+    time: new Date(),
+  });
+
+  return { success: true, id: sent.id._serialized };
+}
+
+module.exports = {
+  setupWhatsApp,
+  getQR,
+  getReadyStatus,
+  sendTestMessage,
+};
