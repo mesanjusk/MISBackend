@@ -88,8 +88,11 @@ function isWhatsAppReady() {
 async function sendMessageToWhatsApp(number, message) {
   if (!client || !isReady) throw new Error("WhatsApp client not ready");
 
-  const chatId = number.includes("@c.us") ? number : `${number}@c.us`;
-  const sent = await client.sendMessage(chatId, message);
+  // Normalize number if only 10 digits
+  const normalized = number.length === 10 ? `91${number}` : number;
+  const chatId = normalized.includes("@c.us") ? normalized : `${normalized}@c.us`;
+
+  const sent = await client.sendMessage(chatId, { text: message });
 
   await Message.create({
     from: "admin",
@@ -98,8 +101,12 @@ async function sendMessageToWhatsApp(number, message) {
     time: new Date(),
   });
 
-  return { success: true, id: sent.id._serialized };
+  return {
+    success: true,
+    messageId: sent?.id?._serialized || null, // ✅ critical change
+  };
 }
+
 
 module.exports = {
   setupWhatsApp,
