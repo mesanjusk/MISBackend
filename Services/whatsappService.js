@@ -101,10 +101,13 @@ async function sendMessageToWhatsApp(number, message) {
     time: new Date(),
   });
 
-  return {
-    success: true,
-    messageId: sent?.id?._serialized || null,
-  };
+  console.log("✅ Sent message object:", sent); // <== ADD THIS LINE
+
+return {
+  success: true,
+  messageId: sent?.id?._serialized || sent?.id || "sent",  // fallback added
+};
+
 }
 
 
