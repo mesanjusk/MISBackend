@@ -26,32 +26,29 @@ async function setupWhatsApp(io, sessionId = 'default') {
     },
   });
 
-  client.on('qr', (qr) => {
-    qrcode.toDataURL(qr)
-      .then((qrImage) => {
-        latestQR = qrImage;
-        console.log("📲 QR code generated");
-        io.emit("qr", latestQR);
-      })
-      .catch((err) => {
-        console.error("❌ Error converting QR to base64:", err);
-        latestQR = null;
-      });
+  client.on('qr', async (qr) => {
+    try {
+      const imageUrl = await qrcode.toDataURL(qr);
+      latestQR = imageUrl;
+      io.emit("qr", imageUrl);
+    } catch (err) {
+      console.error("QR Conversion Error:", err);
+      latestQR = null;
+    }
   });
 
   client.on('ready', () => {
     isReady = true;
     latestQR = null;
-    console.log('✅ WhatsApp client is ready');
     io.emit('ready');
   });
 
   client.on('authenticated', () => {
-    console.log('🔐 Authenticated');
+    console.log('✅ WhatsApp authenticated');
   });
 
   client.on('auth_failure', (msg) => {
-    console.error('❌ Authentication failed:', msg);
+    console.error('❌ Auth failure:', msg);
     io.emit('auth_failure', msg);
   });
 
@@ -62,25 +59,18 @@ async function setupWhatsApp(io, sessionId = 'default') {
 
     await Message.create({ from, to: sessionId, text, time });
     io.emit('message', { from, message: text, time });
-    console.log(`📩 Message from ${from}: ${text}`);
   });
 
-  client.on('disconnected', (reason) => {
-    console.warn('🔌 WhatsApp disconnected:', reason);
+  client.on('disconnected', () => {
     isReady = false;
     latestQR = null;
+    io.emit('disconnected');
   });
 
-  try {
-    await client.initialize();
-  } catch (err) {
-    console.error("❌ WhatsApp initialize failed:", err);
-    throw err;
-  }
+  await client.initialize();
 }
 
 function getQR() {
-  console.log("🔍 getQR called:", !!latestQR);
   return latestQR;
 }
 
@@ -90,7 +80,7 @@ function getReadyStatus() {
 
 async function sendTestMessage(number, message) {
   if (!client || !isReady) {
-    throw new Error('WhatsApp client is not ready yet');
+    throw new Error('WhatsApp client not ready');
   }
 
   const chatId = number.includes('@c.us') ? number : `${number}@c.us`;

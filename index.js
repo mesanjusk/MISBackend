@@ -24,13 +24,13 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat");
-
 const {
   setupWhatsApp,
   getQR,
   getReadyStatus,
   sendTestMessage,
 } = require("./Services/whatsappService");
+
 
 const { initScheduler } = require("./Services/messageScheduler");
 
