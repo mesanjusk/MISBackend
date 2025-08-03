@@ -89,16 +89,22 @@ async function sendMessageToWhatsApp(number, message) {
   if (!client || !isReady) throw new Error("WhatsApp client not ready");
 
   const chatId = number.includes("@c.us") ? number : `${number}@c.us`;
-  const sent = await client.sendMessage(chatId, message);
 
-  await Message.create({
-    from: "admin",
-    to: number,
-    text: message,
-    time: new Date(),
-  });
+  try {
+    const sent = await client.sendMessage(chatId, { text: message });
 
-  return { success: true, id: sent.id._serialized };
+    await Message.create({
+      from: "admin",
+      to: number,
+      text: message,
+      time: new Date(),
+    });
+
+    return { success: true, messageId: sent?.id?._serialized || null };
+  } catch (error) {
+    console.error("❌ sendMessageToWhatsApp error:", error.message);
+    throw new Error("Failed to send message via WhatsApp");
+  }
 }
 
 module.exports = {
