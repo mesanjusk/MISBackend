@@ -27,12 +27,14 @@ async function setupWhatsApp(io, sessionId = "default") {
   });
 
   client.on("qr", async (qr) => {
+    console.log("📸 QR received!");
     try {
       const imageUrl = await qrcode.toDataURL(qr);
       latestQR = imageUrl;
       io.emit("qr", imageUrl);
+      console.log("✅ QR base64 image stored and emitted");
     } catch (err) {
-      console.error("QR Conversion Error:", err);
+      console.error("❌ QR Conversion Error:", err);
       latestQR = null;
     }
   });
@@ -41,6 +43,7 @@ async function setupWhatsApp(io, sessionId = "default") {
     isReady = true;
     latestQR = null;
     io.emit("ready");
+    console.log("✅ WhatsApp client is ready");
   });
 
   client.on("authenticated", () => {
@@ -66,9 +69,12 @@ async function setupWhatsApp(io, sessionId = "default") {
     latestQR = null;
     client = null;
     io.emit("disconnected");
+    console.log("🔌 WhatsApp client disconnected");
   });
 
+  console.log("⚡ Initializing WhatsApp client...");
   await client.initialize();
+  console.log("🚀 WhatsApp client initialized");
 }
 
 function getLatestQR() {
