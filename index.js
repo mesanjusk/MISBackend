@@ -2,7 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const socketIO = require("socket.io");
-
 const connectDB = require("./mongo");
 
 // Routers
@@ -26,13 +25,12 @@ const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat");
 
-const whatsappService = require("./Services/whatsappService");
-
-const setupWhatsApp = whatsappService.setupWhatsApp;
-const getQR = whatsappService.getQR;
-const getReadyStatus = whatsappService.getReadyStatus;
-const sendTestMessage = whatsappService.sendTestMessage;
-
+const {
+  setupWhatsApp,
+  getQR,
+  getReadyStatus,
+  sendTestMessage,
+} = require("./Services/whatsappService");
 
 const { initScheduler } = require("./Services/messageScheduler");
 
@@ -50,7 +48,7 @@ const io = socketIO(server, {
 const allowedOrigins = [
   'https://sbsgondia.vercel.app',
   'http://localhost:5173',
-  'https://dash.sanjusk.in'
+  'https://dash.sanjusk.in',
 ];
 
 app.use(cors({
@@ -74,39 +72,37 @@ app.use(express.urlencoded({ extended: true }));
   try {
     await connectDB();
     initScheduler();
+    await setupWhatsApp(io); // ✅ Required to initialize WhatsApp client
 
-   app.get("/whatsapp/qr", (req, res) => {
-  const qr = getQR();
-  console.log("🧪 Serving /whatsapp/qr - latestQR:", !!qr);
+    app.get("/whatsapp/qr", (req, res) => {
+      const qr = getQR();
+      console.log("🧪 Serving /whatsapp/qr - latestQR:", !!qr);
 
-  if (!qr) {
-    return res.status(200).send(`
-      <html>
-        <body>
-          <h3>QR not ready. Auto-reloading...</h3>
-          <script>setTimeout(() => window.location.reload(), 3000);</script>
-        </body>
-      </html>
-    `);
-  }
+      if (!qr) {
+        return res.status(200).send(`
+          <html>
+            <body>
+              <h3>QR not ready. Auto-reloading...</h3>
+              <script>setTimeout(() => window.location.reload(), 3000);</script>
+            </body>
+          </html>
+        `);
+      }
 
-  res.status(200).send(`
-    <html>
-      <body>
-        <h3>Scan WhatsApp QR:</h3>
-        <img src="${qr}" width="300" />
-      </body>
-    </html>
-  `);
-});
+      res.status(200).send(`
+        <html>
+          <body>
+            <h3>Scan WhatsApp QR:</h3>
+            <img src="${qr}" width="300" />
+          </body>
+        </html>
+      `);
+    });
 
-
-    // ✅ Status Check
     app.get("/whatsapp/status", (req, res) => {
       res.json({ ready: getReadyStatus() });
     });
 
-    // ✅ Send Test Message
     app.post("/whatsapp/send-test", async (req, res) => {
       const { number, message } = req.body;
       try {
