@@ -74,30 +74,31 @@ app.use(express.urlencoded({ extended: true }));
     initScheduler();
     await setupWhatsApp(io); // ✅ Required to initialize WhatsApp client
 
-    app.get("/whatsapp/qr", (req, res) => {
-      const qr = getQR();
-      console.log("🧪 Serving /whatsapp/qr - latestQR:", !!qr);
+   app.get("/whatsapp/qr", (req, res) => {
+  const qr = getQR();
+  console.log("🧪 Serving /whatsapp/qr - latestQR exists?", !!qr);
 
-      if (!qr) {
-        return res.status(200).send(`
-          <html>
-            <body>
-              <h3>QR not ready. Auto-reloading...</h3>
-              <script>setTimeout(() => window.location.reload(), 3000);</script>
-            </body>
-          </html>
-        `);
-      }
+  if (!qr) {
+    return res.status(200).send(`
+      <html>
+        <body>
+          <h3>QR not ready. Auto-reloading...</h3>
+          <script>setTimeout(() => window.location.reload(), 3000);</script>
+        </body>
+      </html>
+    `);
+  }
 
-      res.status(200).send(`
-        <html>
-          <body>
-            <h3>Scan WhatsApp QR:</h3>
-            <img src="${qr}" width="300" />
-          </body>
-        </html>
-      `);
-    });
+  res.status(200).send(`
+    <html>
+      <body>
+        <h3>Scan WhatsApp QR:</h3>
+        <img src="${qr}" width="300" />
+      </body>
+    </html>
+  `);
+});
+
 
     app.get("/whatsapp/status", (req, res) => {
       res.json({ ready: getReadyStatus() });

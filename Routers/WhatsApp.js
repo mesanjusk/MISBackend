@@ -9,10 +9,7 @@ let latestQR = null;
 let isReady = false;
 
 async function setupWhatsApp(io, sessionId = 'default') {
-  if (client) {
-    console.log(`⚠️ WhatsApp client already initialized`);
-    return;
-  }
+  if (client) return;
 
   await mongoose.connection.asPromise();
   const store = new MongoStore({ mongoose });
@@ -64,9 +61,8 @@ async function setupWhatsApp(io, sessionId = 'default') {
     const time = new Date();
 
     await Message.create({ from, to: sessionId, text, time });
-
     io.emit('message', { from, message: text, time });
-    console.log(`📩 Message received from ${from}: ${text}`);
+    console.log(`📩 Message from ${from}: ${text}`);
   });
 
   client.on('disconnected', (reason) => {
@@ -75,10 +71,16 @@ async function setupWhatsApp(io, sessionId = 'default') {
     latestQR = null;
   });
 
-  await client.initialize();
+  try {
+    await client.initialize();
+  } catch (err) {
+    console.error("❌ WhatsApp initialize failed:", err);
+    throw err;
+  }
 }
 
 function getQR() {
+  console.log("🔍 getQR called:", !!latestQR);
   return latestQR;
 }
 
