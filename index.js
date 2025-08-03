@@ -42,7 +42,7 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// API Routes
+// ✅ API Routes (namespaced)
 app.use("/api/users", Users);
 app.use("/api/usergroup", Usergroup);
 app.use("/api/customers", Customers);
@@ -60,6 +60,25 @@ app.use("/api/attendance", Attendance);
 app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
+
+// ✅ Legacy Routes (non-namespaced, to match frontend)
+app.use("/user", Users);
+app.use("/usergroup", Usergroup);
+app.use("/customer", Customers);
+app.use("/customergroup", Customergroup);
+app.use("/tasks", Tasks);
+app.use("/taskgroup", Taskgroup);
+app.use("/items", Items);
+app.use("/itemgroup", Itemgroup);
+app.use("/priority", Priority);
+app.use("/order", Orders);
+app.use("/enquiry", Enquiry);
+app.use("/payment_mode", Payment_mode);
+app.use("/transaction", Transaction);
+app.use("/attendance", Attendance);
+app.use("/vendors", Vendors);
+app.use("/note", Note);
+app.use("/usertasks", Usertasks);
 
 // WhatsApp Routes
 app.get("/whatsapp/qr", (req, res) => {
