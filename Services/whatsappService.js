@@ -88,32 +88,34 @@ function isWhatsAppReady() {
 async function sendMessageToWhatsApp(number, message, mediaUrl = '') {
   if (!client || !isReady) throw new Error("WhatsApp client not ready");
 
-  const normalized = number.length === 10 ? `91${number}` : number;
+  const normalized = number.replace(/[^\d]/g, '').replace(/^0/, '91');
   const chatId = normalized.includes("@c.us") ? normalized : `${normalized}@c.us`;
 
-  // 1️⃣ Send text first (optional)
   let sent;
-  if (message) {
-    sent = await client.sendMessage(chatId, message);
-  }
 
-  // 2️⃣ Then send media if provided
   if (mediaUrl) {
     const { MessageMedia } = require("whatsapp-web.js");
     const media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
-    await client.sendMessage(chatId, media, { caption: "🧾 Invoice PDF" });
+
+    sent = await client.sendMessage(chatId, media, {
+      caption: message || "🧾 Invoice attached",
+    });
+  } else if (message) {
+    sent = await client.sendMessage(chatId, message);
   }
 
+  // Save message to MongoDB
   await Message.create({
     from: "admin",
     to: number,
-    text: message || "PDF sent",
+    text: message || "Media sent",
+    media: mediaUrl || null,
     time: new Date(),
   });
 
   return {
     success: true,
-    messageId: sent?.id?._serialized || "sent"
+    messageId: sent?.id?._serialized || "sent",
   };
 }
 
