@@ -29,6 +29,9 @@ const {
   getQR,
   getReadyStatus,
   sendTestMessage,
+  getLatestQR: getQR,
+  isWhatsAppReady: getReadyStatus,
+  sendMessageToWhatsApp: sendTestMessage,
 } = require("./Services/whatsappService");
 
 
