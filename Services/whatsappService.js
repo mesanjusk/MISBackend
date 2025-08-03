@@ -17,7 +17,7 @@ async function setupWhatsApp(io, sessionId = "default") {
   client = new Client({
     authStrategy: new RemoteAuth({
       store,
-      clientId: sessionId, // <<<<< using passed sessionId
+      clientId: sessionId,
       backupSyncIntervalMs: 300000,
     }),
     puppeteer: {

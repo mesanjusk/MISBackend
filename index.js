@@ -3,8 +3,9 @@ const cors = require("cors");
 const http = require("http");
 const socketIO = require("socket.io");
 const connectDB = require("./mongo");
+require("dotenv").config();
 
-// Routers (unchanged)
+// Routers
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
 const Customers = require("./Routers/Customer");
@@ -89,13 +90,14 @@ app.post("/whatsapp/send-test", async (req, res) => {
     const result = await sendMessageToWhatsApp(number, message);
     res.json(result);
   } catch (err) {
+    console.error("❌ Failed to send test message:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // DB + WhatsApp Init
 connectDB().then(() => {
-  setupWhatsApp(io, "admin"); // <<< changed sessionId here
+  setupWhatsApp(io, process.env.SESSION_ID || "admin");
 });
 
 const PORT = process.env.PORT || 10000;
