@@ -77,35 +77,29 @@ app.use(express.urlencoded({ extended: true }));
     // ✅ Initialize WhatsApp client
     await setupWhatsApp(io, 'default');
 
-    // ✅ Render QR Code
-    app.get("/whatsapp/qr", async (req, res) => {
-      try {
-        const qr = getQR();
-        if (!qr) {
-          return res.send(`
-            <html>
-              <body style="text-align:center; font-family:sans-serif; margin-top:50px;">
-                <h2>🔄 QR Not Ready</h2>
-                <p>Reloading in 3 seconds...</p>
-                <script>setTimeout(() => window.location.reload(), 3000);</script>
-              </body>
-            </html>
-          `);
-        }
+    app.get("/whatsapp/qr", (req, res) => {
+  const qr = getQR();
+  if (!qr) {
+    return res.status(200).send(`
+      <html>
+        <body>
+          <h3>QR not ready yet. Auto-reloading every 3 seconds...</h3>
+          <script>setTimeout(() => window.location.reload(), 3000);</script>
+        </body>
+      </html>
+    `);
+  }
 
-        res.send(`
-          <html>
-            <body style="text-align:center; margin-top:50px;">
-              <h2>📲 Scan the WhatsApp QR</h2>
-              <img src="${qr}" width="300" />
-            </body>
-          </html>
-        `);
-      } catch (err) {
-        console.error("QR Route Error:", err);
-        res.status(500).send("Internal Server Error");
-      }
-    });
+  return res.status(200).send(`
+    <html>
+      <body>
+        <h3>Scan WhatsApp QR:</h3>
+        <img src="${qr}" width="300" />
+      </body>
+    </html>
+  `);
+});
+
 
     // ✅ Status Check
     app.get("/whatsapp/status", (req, res) => {

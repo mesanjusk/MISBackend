@@ -8,9 +8,6 @@ let client;
 let latestQR = null;
 let isReady = false;
 
-/**
- * Initialize WhatsApp client with MongoDB RemoteAuth
- */
 async function setupWhatsApp(io, sessionId = 'default') {
   if (client) {
     console.log(`⚠️ WhatsApp client already initialized`);
@@ -33,9 +30,14 @@ async function setupWhatsApp(io, sessionId = 'default') {
   });
 
   client.on('qr', async (qr) => {
-    latestQR = await qrcode.toDataURL(qr); // Convert to base64
-    console.log(`📲 New QR code generated`);
-    io.emit('qr', latestQR); // optional if using socket frontend
+    try {
+      latestQR = await qrcode.toDataURL(qr);
+      console.log(`📲 New QR code generated`);
+      io.emit('qr', latestQR);
+    } catch (err) {
+      console.error("❌ Failed to generate QR image:", err);
+      latestQR = null;
+    }
   });
 
   client.on('ready', () => {
@@ -74,23 +76,14 @@ async function setupWhatsApp(io, sessionId = 'default') {
   await client.initialize();
 }
 
-/**
- * Get latest base64 QR string
- */
 function getQR() {
   return latestQR;
 }
 
-/**
- * Get whether WhatsApp is ready
- */
 function getReadyStatus() {
   return isReady;
 }
 
-/**
- * Send a test message to a WhatsApp number
- */
 async function sendTestMessage(number, message) {
   if (!client || !isReady) {
     throw new Error('WhatsApp client is not ready yet');
