@@ -1,4 +1,4 @@
-const { Client, RemoteAuth } = require("whatsapp-web.js");
+const { Client, RemoteAuth, MessageMedia } = require("whatsapp-web.js");
 const { MongoStore } = require("wwebjs-mongo");
 const mongoose = require("mongoose");
 const qrcode = require("qrcode");
@@ -91,16 +91,25 @@ async function sendMessageToWhatsApp(number, message, mediaUrl = '') {
   const normalized = number.replace(/[^\d]/g, '').replace(/^0/, '91');
   const chatId = normalized.includes("@c.us") ? normalized : `${normalized}@c.us`;
 
+  console.log("➡️ Sending to:", chatId);
+  console.log("➡️ Message:", message);
+  console.log("➡️ Media URL:", mediaUrl);
+
   let sent;
 
-  if (mediaUrl) {
-    const { MessageMedia } = require("whatsapp-web.js");
-    const media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
-
-    sent = await client.sendMessage(chatId, media, {
-      caption: message || "🧾 Invoice attached",
-    });
-  } else if (message) {
+  try {
+    if (mediaUrl) {
+      const media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
+      sent = await client.sendMessage(chatId, media, {
+        caption: message || "🧾 Invoice attached",
+      });
+    } else {
+      sent = await client.sendMessage(chatId, message);
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to send media message. Falling back to text.");
+    console.error(err);
+    // Fallback: plain text message
     sent = await client.sendMessage(chatId, message);
   }
 
@@ -118,9 +127,6 @@ async function sendMessageToWhatsApp(number, message, mediaUrl = '') {
     messageId: sent?.id?._serialized || "sent",
   };
 }
-
-
-
 
 module.exports = {
   setupWhatsApp,
