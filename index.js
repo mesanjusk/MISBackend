@@ -22,129 +22,79 @@ const Attendance = require("./Routers/Attendance");
 const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
-const CallLogs = require("./Routers/CallLogs");
-const ChatRoutes = require("./Routers/chat");
+
+// WhatsApp Services
 const {
   setupWhatsApp,
-  getQR,
-  getReadyStatus,
-  sendTestMessage,
-  getLatestQR: getQR,
-  isWhatsAppReady: getReadyStatus,
-  sendMessageToWhatsApp: sendTestMessage,
+  getQR: getLatestQR,
+  getReadyStatus: isWhatsAppReady,
+  sendTestMessage: sendMessageToWhatsApp,
 } = require("./Services/whatsappService");
 
-
-const { initScheduler } = require("./Services/messageScheduler");
-
+// App setup
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
   cors: {
-    origin: ['https://sbsgondia.vercel.app', 'http://localhost:5173'],
-    methods: ['GET', 'POST'],
-    credentials: true,
+    origin: "*",
   },
 });
 
-// CORS Setup
-const allowedOrigins = [
-  'https://sbsgondia.vercel.app',
-  'http://localhost:5173',
-  'https://dash.sanjusk.in',
-];
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+// Routes
+app.use("/api/users", Users);
+app.use("/api/usergroup", Usergroup);
+app.use("/api/customers", Customers);
+app.use("/api/customergroup", Customergroup);
+app.use("/api/tasks", Tasks);
+app.use("/api/taskgroup", Taskgroup);
+app.use("/api/items", Items);
+app.use("/api/itemgroup", Itemgroup);
+app.use("/api/priority", Priority);
+app.use("/api/orders", Orders);
+app.use("/api/enquiry", Enquiry);
+app.use("/api/payment_mode", Payment_mode);
+app.use("/api/transaction", Transaction);
+app.use("/api/attendance", Attendance);
+app.use("/api/vendors", Vendors);
+app.use("/api/note", Note);
+app.use("/api/usertasks", Usertasks);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// WhatsApp Routes
+app.get("/whatsapp/qr", (req, res) => {
+  const qr = getLatestQR();
+  if (qr) {
+    res.status(200).json({ qr });
+  } else {
+    res.status(404).json({ message: "QR not ready" });
+  }
+});
 
-// MongoDB + WhatsApp Initialization
-(async () => {
+app.get("/whatsapp/status", (req, res) => {
+  res.json({ ready: isWhatsAppReady() });
+});
+
+app.post("/whatsapp/send-test", async (req, res) => {
+  const { number, message } = req.body;
   try {
-    await connectDB();
-    initScheduler();
-    await setupWhatsApp(io); // ✅ Required to initialize WhatsApp client
-
-   app.get("/whatsapp/qr", (req, res) => {
-  const qr = getQR();
-  console.log("🧪 Serving /whatsapp/qr - latestQR exists?", !!qr);
-
-  if (!qr) {
-    return res.status(200).send(`
-      <html>
-        <body>
-          <h3>QR not ready. Auto-reloading...</h3>
-          <script>setTimeout(() => window.location.reload(), 3000);</script>
-        </body>
-      </html>
-    `);
+    const result = await sendMessageToWhatsApp(number, message);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.status(200).send(`
-    <html>
-      <body>
-        <h3>Scan WhatsApp QR:</h3>
-        <img src="${qr}" width="300" />
-      </body>
-    </html>
-  `);
 });
 
+// MongoDB & WhatsApp Initialization
+connectDB().then(() => {
+  setupWhatsApp(io);
+});
 
-    app.get("/whatsapp/status", (req, res) => {
-      res.json({ ready: getReadyStatus() });
-    });
-
-    app.post("/whatsapp/send-test", async (req, res) => {
-      const { number, message } = req.body;
-      try {
-        const result = await sendTestMessage(number, message);
-        res.json(result);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
-
-  } catch (err) {
-    console.error("❌ Failed to initialize services:", err);
-  }
-})();
-
-// API Routes
-app.use("/customer", Customers);
-app.use("/customergroup", Customergroup);
-app.use("/user", Users);
-app.use("/usergroup", Usergroup);
-app.use("/item", Items);
-app.use("/itemgroup", Itemgroup);
-app.use("/task", Tasks);
-app.use("/taskgroup", Taskgroup);
-app.use("/priority", Priority);
-app.use("/order", Orders);
-app.use("/enquiry", Enquiry);
-app.use("/transaction", Transaction);
-app.use("/payment_mode", Payment_mode);
-app.use("/attendance", Attendance);
-app.use("/vendor", Vendors);
-app.use("/note", Note);
-app.use("/usertask", Usertasks);
-app.use("/calllogs", CallLogs);
-app.use(ChatRoutes);
-
-// Start Server
-const PORT = process.env.PORT || 10000;
+// Start server
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`✅ Server is running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
