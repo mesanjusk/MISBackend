@@ -85,30 +85,38 @@ function isWhatsAppReady() {
   return isReady;
 }
 
-async function sendMessageToWhatsApp(number, message) {
+async function sendMessageToWhatsApp(number, message, mediaUrl = '') {
   if (!client || !isReady) throw new Error("WhatsApp client not ready");
 
-  // Normalize number if only 10 digits
   const normalized = number.length === 10 ? `91${number}` : number;
   const chatId = normalized.includes("@c.us") ? normalized : `${normalized}@c.us`;
 
-  const sent = await client.sendMessage(chatId, message);  // ✅ FIXED here
+  // 1️⃣ Send text first (optional)
+  let sent;
+  if (message) {
+    sent = await client.sendMessage(chatId, message);
+  }
+
+  // 2️⃣ Then send media if provided
+  if (mediaUrl) {
+    const { MessageMedia } = require("whatsapp-web.js");
+    const media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
+    await client.sendMessage(chatId, media, { caption: "🧾 Invoice PDF" });
+  }
 
   await Message.create({
     from: "admin",
     to: number,
-    text: message,
+    text: message || "PDF sent",
     time: new Date(),
   });
 
-  console.log("✅ Sent message object:", sent); // <== ADD THIS LINE
-
-return {
-  success: true,
-  messageId: sent?.id?._serialized || sent?.id || "sent",  // fallback added
-};
-
+  return {
+    success: true,
+    messageId: sent?.id?._serialized || "sent"
+  };
 }
+
 
 
 
