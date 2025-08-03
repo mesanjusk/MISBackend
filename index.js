@@ -26,12 +26,13 @@ const Usertasks = require("./Routers/Usertask");
 const CallLogs = require("./Routers/CallLogs");
 const ChatRoutes = require("./Routers/chat");
 
-const {
-  setupWhatsApp,
-  getQR,
-  getReadyStatus,
-  sendTestMessage
-} = require("./Services/whatsappService");
+const whatsappService = require("./Services/whatsappService");
+
+const setupWhatsApp = whatsappService.setupWhatsApp;
+const getQR = whatsappService.getQR;
+const getReadyStatus = whatsappService.getReadyStatus;
+const sendTestMessage = whatsappService.sendTestMessage;
+
 
 const { initScheduler } = require("./Services/messageScheduler");
 
