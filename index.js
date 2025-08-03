@@ -112,7 +112,7 @@ app.post("/whatsapp/send-test", async (req, res) => {
     const result = await sendMessageToWhatsApp(number, message, mediaUrl);
     res.status(200).json(result);
   } catch (err) {
-    console.error("❌ Failed to send message:", err.message);
+    console.error("❌ Failed to send message:", err);  // ✅ print full error
     res.status(500).json({ success: false, error: err.message });
   }
 });
