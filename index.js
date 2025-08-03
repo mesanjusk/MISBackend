@@ -42,7 +42,7 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// ✅ API Routes (namespaced)
+// ✅ API Routes (recommended, namespaced)
 app.use("/api/users", Users);
 app.use("/api/usergroup", Usergroup);
 app.use("/api/customers", Customers);
@@ -61,7 +61,7 @@ app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
 
-// ✅ Legacy Routes (non-namespaced, to match frontend)
+// ✅ Legacy Routes (to support existing frontend calls)
 app.use("/user", Users);
 app.use("/usergroup", Usergroup);
 app.use("/customer", Customers);
@@ -69,6 +69,7 @@ app.use("/customergroup", Customergroup);
 app.use("/tasks", Tasks);
 app.use("/taskgroup", Taskgroup);
 app.use("/items", Items);
+app.use("/item", Items);           // ✅ For /item/GetItemList
 app.use("/itemgroup", Itemgroup);
 app.use("/priority", Priority);
 app.use("/order", Orders);
@@ -77,10 +78,11 @@ app.use("/payment_mode", Payment_mode);
 app.use("/transaction", Transaction);
 app.use("/attendance", Attendance);
 app.use("/vendors", Vendors);
-app.use("/note", Note);
+app.use("/note", Note);            // ✅ For /note/:id
 app.use("/usertasks", Usertasks);
+app.use("/usertask", Usertasks);   // ✅ For /usertask/GetUsertaskList
 
-// WhatsApp Routes
+// ✅ WhatsApp Routes
 app.get("/whatsapp/qr", (req, res) => {
   const qr = getLatestQR();
   if (qr) res.status(200).json({ qr });
@@ -114,7 +116,7 @@ app.post("/whatsapp/send-test", async (req, res) => {
   }
 });
 
-// DB + WhatsApp Init
+// ✅ Init DB + WhatsApp Session
 connectDB().then(() => {
   setupWhatsApp(io, process.env.SESSION_ID || "admin");
 });
