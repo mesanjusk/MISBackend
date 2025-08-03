@@ -109,12 +109,13 @@ app.post("/whatsapp/send-test", async (req, res) => {
   const { number, message } = req.body;
   try {
     const result = await sendMessageToWhatsApp(number, message);
-    res.json(result);
+    res.status(200).json(result); // ✅ consistent response
   } catch (err) {
     console.error("❌ Failed to send test message:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // ✅ Init DB + WhatsApp Session
 connectDB().then(() => {
