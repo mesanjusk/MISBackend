@@ -26,12 +26,11 @@ const Usertasks = require("./Routers/Usertask");
 // WhatsApp Services
 const {
   setupWhatsApp,
-  getQR: getLatestQR,
-  getReadyStatus: isWhatsAppReady,
-  sendTestMessage: sendMessageToWhatsApp,
+  getLatestQR,
+  isWhatsAppReady,
+  sendMessageToWhatsApp,
 } = require("./Services/whatsappService");
 
-// App setup
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
@@ -40,12 +39,11 @@ const io = socketIO(server, {
   },
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Routes
+// API Routes
 app.use("/api/users", Users);
 app.use("/api/usergroup", Usergroup);
 app.use("/api/customers", Customers);
@@ -88,12 +86,11 @@ app.post("/whatsapp/send-test", async (req, res) => {
   }
 });
 
-// MongoDB & WhatsApp Initialization
+// MongoDB + WhatsApp Init
 connectDB().then(() => {
   setupWhatsApp(io);
 });
 
-// Start server
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
