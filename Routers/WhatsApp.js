@@ -29,16 +29,19 @@ async function setupWhatsApp(io, sessionId = 'default') {
     },
   });
 
-  client.on('qr', async (qr) => {
-    try {
-      latestQR = await qrcode.toDataURL(qr);
-      console.log(`📲 New QR code generated`);
-      io.emit('qr', latestQR);
-    } catch (err) {
-      console.error("❌ Failed to generate QR image:", err);
+  client.on('qr', (qr) => {
+  qrcode.toDataURL(qr)
+    .then((qrImage) => {
+      latestQR = qrImage;
+      console.log("📲 QR code generated");
+      io.emit("qr", latestQR);
+    })
+    .catch((err) => {
+      console.error("❌ Error converting QR to base64:", err);
       latestQR = null;
-    }
-  });
+    });
+});
+
 
   client.on('ready', () => {
     isReady = true;

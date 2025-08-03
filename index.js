@@ -74,23 +74,22 @@ app.use(express.urlencoded({ extended: true }));
     await connectDB();
     initScheduler();
 
-    // ✅ Initialize WhatsApp client
-    await setupWhatsApp(io, 'default');
-
-    app.get("/whatsapp/qr", (req, res) => {
+   app.get("/whatsapp/qr", (req, res) => {
   const qr = getQR();
+  console.log("🧪 Serving /whatsapp/qr - latestQR:", !!qr);
+
   if (!qr) {
     return res.status(200).send(`
       <html>
         <body>
-          <h3>QR not ready yet. Auto-reloading every 3 seconds...</h3>
+          <h3>QR not ready. Auto-reloading...</h3>
           <script>setTimeout(() => window.location.reload(), 3000);</script>
         </body>
       </html>
     `);
   }
 
-  return res.status(200).send(`
+  res.status(200).send(`
     <html>
       <body>
         <h3>Scan WhatsApp QR:</h3>
