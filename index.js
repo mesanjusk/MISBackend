@@ -4,7 +4,7 @@ const http = require("http");
 const socketIO = require("socket.io");
 const connectDB = require("./mongo");
 
-// Routers
+// Routers (unchanged)
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
 const Customers = require("./Routers/Customer");
@@ -63,11 +63,8 @@ app.use("/api/usertasks", Usertasks);
 // WhatsApp Routes
 app.get("/whatsapp/qr", (req, res) => {
   const qr = getLatestQR();
-  if (qr) {
-    res.status(200).json({ qr });
-  } else {
-    res.status(404).json({ message: "QR not ready" });
-  }
+  if (qr) res.status(200).json({ qr });
+  else res.status(404).json({ message: "QR not ready" });
 });
 
 app.get("/qr", (req, res) => {
@@ -96,12 +93,12 @@ app.post("/whatsapp/send-test", async (req, res) => {
   }
 });
 
-// MongoDB + WhatsApp Init
+// DB + WhatsApp Init
 connectDB().then(() => {
-  setupWhatsApp(io);
+  setupWhatsApp(io, "admin"); // <<< changed sessionId here
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

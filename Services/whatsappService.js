@@ -17,7 +17,7 @@ async function setupWhatsApp(io, sessionId = "default") {
   client = new Client({
     authStrategy: new RemoteAuth({
       store,
-      clientId: sessionId,
+      clientId: sessionId, // <<<<< using passed sessionId
       backupSyncIntervalMs: 300000,
     }),
     puppeteer: {
@@ -86,15 +86,13 @@ function isWhatsAppReady() {
 }
 
 async function sendMessageToWhatsApp(number, message) {
-  if (!client || !isReady) {
-    throw new Error("WhatsApp client not ready");
-  }
+  if (!client || !isReady) throw new Error("WhatsApp client not ready");
 
   const chatId = number.includes("@c.us") ? number : `${number}@c.us`;
   const sent = await client.sendMessage(chatId, message);
 
   await Message.create({
-    from: "default",
+    from: "admin",
     to: number,
     text: message,
     time: new Date(),
