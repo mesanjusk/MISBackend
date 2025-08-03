@@ -92,7 +92,7 @@ async function sendMessageToWhatsApp(number, message) {
   const normalized = number.length === 10 ? `91${number}` : number;
   const chatId = normalized.includes("@c.us") ? normalized : `${normalized}@c.us`;
 
-  const sent = await client.sendMessage(chatId, { text: message });
+  const sent = await client.sendMessage(chatId, message);  // ✅ FIXED here
 
   await Message.create({
     from: "admin",
@@ -103,9 +103,10 @@ async function sendMessageToWhatsApp(number, message) {
 
   return {
     success: true,
-    messageId: sent?.id?._serialized || null, // ✅ critical change
+    messageId: sent?.id?._serialized || null,
   };
 }
+
 
 
 module.exports = {
