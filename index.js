@@ -44,6 +44,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.get("/version.json", (req, res) => {
+  res.set("Cache-Control", "no-store");
   res.json({ version });
 });
 
