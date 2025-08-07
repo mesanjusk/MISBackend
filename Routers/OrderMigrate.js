@@ -37,10 +37,11 @@ router.put('/single/:id', async (req, res) => {
       ];
     }
 
-    delete order.Item;
-    delete order.Quantity;
-    delete order.Rate;
-    delete order.Amount;
+    // ✅ Properly remove flat fields
+    order.set('Item', undefined, { strict: false });
+    order.set('Quantity', undefined, { strict: false });
+    order.set('Rate', undefined, { strict: false });
+    order.set('Amount', undefined, { strict: false });
 
     await order.save();
     res.json({ message: 'Order migrated', order });
@@ -73,10 +74,11 @@ router.put('/bulk', async (req, res) => {
         ];
       }
 
-      delete order.Item;
-      delete order.Quantity;
-      delete order.Rate;
-      delete order.Amount;
+      // ✅ Properly remove flat fields
+      order.set('Item', undefined, { strict: false });
+      order.set('Quantity', undefined, { strict: false });
+      order.set('Rate', undefined, { strict: false });
+      order.set('Amount', undefined, { strict: false });
 
       await order.save();
       migrated.push(order._id);
