@@ -29,7 +29,6 @@ const OrdersSchema = new mongoose.Schema({
   Order_Number: { type: Number, required: true, unique: true },
   Customer_uuid: { type: String, required: true },
   Priority: { type: String, required: true },
-  Item: { type: String }, // ✅ made optional (was: required: true)
   Items: [itemSchema],
   Status: [statusSchema],
   Steps: [stepSchema],
