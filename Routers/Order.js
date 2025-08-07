@@ -91,6 +91,51 @@ router.post('/CheckMultipleCustomers', async (req, res) => {
     }
 });
 
+const express = require('express');
+const router = express.Router();
+const Orders = require('../models/Orders');
+
+// GET /api/all-data
+router.get('/all-data', async (req, res) => {
+  try {
+    // 1. Delivered Orders (Status contains 'Delivered')
+    const delivered = await Orders.find({
+      'Status.Task': 'Delivered'
+    });
+
+    // 2. Report = Delivered orders with Items (Items length > 0)
+    const report = await Orders.find({
+      'Status.Task': 'Delivered',
+      Items: { $not: { $size: 0 } }
+    });
+
+    // 3. Outstanding = Orders without 'Delivered' status
+    const outstanding = await Orders.find({
+      'Status.Task': { $ne: 'Delivered' }
+    });
+
+    // 4. Bills = Delivered orders with empty Items
+    const bills = await Orders.find({
+      'Status.Task': 'Delivered',
+      $or: [
+        { Items: { $exists: false } },
+        { Items: { $size: 0 } }
+      ]
+    });
+
+    res.json({
+      delivered,
+      report,
+      outstanding,
+      bills
+    });
+  } catch (error) {
+    console.error('Error generating unified report:', error.message);
+    res.status(500).json({ error: 'Failed to load report data' });
+  }
+});
+
+module.exports = router;
 
 router.get("/GetOrderList", async (req, res) => {
   try {
