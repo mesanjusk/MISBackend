@@ -14,8 +14,7 @@ router.post('/updateStatus', async (req, res) => {
 router.post("/addOrder", async (req, res) => {
   const {
     Customer_uuid,
-    Priority = "Normal", 
-    Item = "New Order",  
+    Priority = "Normal",   
     Status = [{}],
     Remark,
     Steps = [], // ✅ NEW: array of steps per task group
@@ -66,7 +65,6 @@ router.post("/addOrder", async (req, res) => {
       Order_Number: newOrderNumber,
       Customer_uuid,
       Priority,
-      Item,
       Status: updatedStatus,
       Steps: flatSteps, // ✅ Save flattened steps
       Remark,
@@ -144,7 +142,7 @@ router.get("/GetDeliveredList", async (req, res) => {
       const filteredData = data.filter(order => {
         const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
         const isMainTaskDelivered = mainTask === "delivered";
-        const isMainAmount = order.Amount === 0;
+        const isMainAmount = order.Items.Amount === 0;
 
         const isStatusDelivered = order.Status.some(
           status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
@@ -171,7 +169,7 @@ router.get("/GetBillList", async (req, res) => {
       const filteredData = data.filter(order => {
         const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
         const isMainTaskDelivered = mainTask === "delivered";
-        const isMainAmount = order.Amount !== 0;
+        const isMainAmount = order.Items.Amount !== 0;
 
         const isStatusDelivered = order.Status.some(
           status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
