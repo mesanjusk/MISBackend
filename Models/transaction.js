@@ -10,6 +10,7 @@ const TransactionSchema=new mongoose.Schema({
     Transaction_uuid: { type: String },
     Transaction_id: { type: Number },
     Order_uuid: { type: String },
+    Order_number: { type: Number },
     Transaction_date: { type: Date, required: true },
     Description: { type: String, required: true },
     Total_Debit: { type: Number, required: true },
