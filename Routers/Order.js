@@ -1,31 +1,25 @@
 const express = require("express");
 const router = express.Router();
-const Orders = require("../Models/order");
+const Orders = require("../Models/order"); // ✅ Only use this once
 const { v4: uuid } = require("uuid");
 const { updateOrderStatus } = require('../Controller/orderController');
 
-router.post('/updateStatus', async (req, res) => {
-  const { orderId, newStatus } = req.body;
-  const result = await updateOrderStatus(orderId, newStatus);
-  res.json(result);
-});
-
-
+// ✅ Add Order
 router.post("/addOrder", async (req, res) => {
   const {
     Customer_uuid,
-    Priority = "Normal",   
+    Priority = "Normal",
     Status = [{}],
     Remark,
-    Steps = [], // ✅ NEW: array of steps per task group
+    Steps = [],
   } = req.body;
 
   const statusDefaults = {
     Task: "Design",
     Assigned: "Sai",
     Status_number: 1,
-    Delivery_Date: new Date().toISOString().split("T")[0], 
-    CreatedAt: new Date().toISOString().split("T")[0]
+    Delivery_Date: new Date().toISOString().split("T")[0],
+    CreatedAt: new Date().toISOString().split("T")[0],
   };
 
   const updatedStatus = Status.map((status) => ({
@@ -33,32 +27,23 @@ router.post("/addOrder", async (req, res) => {
     ...status,
   }));
 
-  if (
-    !updatedStatus[0].Task ||
-    !updatedStatus[0].Assigned ||
-    !updatedStatus[0].Delivery_Date
-  ) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        message: "Task, Assigned, and Delivery_Date fields in Status are required.",
-      });
+  if (!updatedStatus[0].Task || !updatedStatus[0].Assigned || !updatedStatus[0].Delivery_Date) {
+    return res.status(400).json({
+      success: false,
+      message: "Task, Assigned, and Delivery_Date fields in Status are required.",
+    });
   }
 
-  // ✅ Flatten all steps from all groups
   const flatSteps = Steps.reduce((acc, step) => {
-  if (step && typeof step.label === "string") {
-    acc.push({ label: step.label, checked: !!step.checked });
-  }
-  return acc;
-}, []);
+    if (step && typeof step.label === "string") {
+      acc.push({ label: step.label, checked: !!step.checked });
+    }
+    return acc;
+  }, []);
 
   try {
     const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
-
-    console.log("🧪 Steps to be saved:", flatSteps);
 
     const newOrder = new Orders({
       Order_uuid: uuid(),
@@ -66,13 +51,11 @@ router.post("/addOrder", async (req, res) => {
       Customer_uuid,
       Priority,
       Status: updatedStatus,
-      Steps: flatSteps, // ✅ Save flattened steps
+      Steps: flatSteps,
       Remark,
     });
 
     await newOrder.save();
-console.log("✅ Order saved:", newOrder);
-
     res.json({ success: true, message: "Order added successfully" });
   } catch (error) {
     console.error("Error saving order:", error);
@@ -80,174 +63,30 @@ console.log("✅ Order saved:", newOrder);
   }
 });
 
-
-router.post('/CheckMultipleCustomers', async (req, res) => {
-    try {
-        const { ids } = req.body;
-        const linkedOrders = await Order.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
-        res.status(200).json({ linkedIds: linkedOrders });
-    } catch (err) {
-        res.status(500).json({ error: 'Error checking linked orders' });
-    }
-});
-
-const express = require('express');
-const router = express.Router();
-const Orders = require('../models/Orders');
-
-// GET /api/all-data
+// ✅ Unified tab view API for React frontend
 router.get('/all-data', async (req, res) => {
   try {
-    // 1. Delivered Orders (Status contains 'Delivered')
-    const delivered = await Orders.find({
-      'Status.Task': 'Delivered'
-    });
-
-    // 2. Report = Delivered orders with Items (Items length > 0)
-    const report = await Orders.find({
-      'Status.Task': 'Delivered',
-      Items: { $not: { $size: 0 } }
-    });
-
-    // 3. Outstanding = Orders without 'Delivered' status
-    const outstanding = await Orders.find({
-      'Status.Task': { $ne: 'Delivered' }
-    });
-
-    // 4. Bills = Delivered orders with empty Items
+    const delivered = await Orders.find({ 'Status.Task': 'Delivered' });
+    const report = await Orders.find({ 'Status.Task': 'Delivered', Items: { $not: { $size: 0 } } });
+    const outstanding = await Orders.find({ 'Status.Task': { $ne: 'Delivered' } });
     const bills = await Orders.find({
       'Status.Task': 'Delivered',
-      $or: [
-        { Items: { $exists: false } },
-        { Items: { $size: 0 } }
-      ]
+      $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }]
     });
 
-    res.json({
-      delivered,
-      report,
-      outstanding,
-      bills
-    });
+    res.json({ delivered, report, outstanding, bills });
   } catch (error) {
     console.error('Error generating unified report:', error.message);
     res.status(500).json({ error: 'Failed to load report data' });
   }
 });
 
-module.exports = router;
-
-router.get("/GetOrderList", async (req, res) => {
-  try {
-   
-    let data = await Orders.find({});
-
-    if (data.length) {
-   
-      const filteredData = data.filter(order => {
-      
-        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
-
-       
-        const isMainTaskDelivered = mainTask === "Delivered";
-        const isMainTaskCancel = mainTask === "Cancel";
-        
-      
-        const isStatusDelivered = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
-        );
-
-        const isStatusCancel = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "cancel"
-        );
-
-        return !(isMainTaskDelivered || isStatusDelivered || isMainTaskCancel || isStatusCancel);
-       
-      });
-
-
-      res.json({ success: true, result: filteredData });
-    } else {
-      res.json({ success: false, message: "Order not found" });
-    }
-  } catch (err) {
-    
-    console.error("Error fetching orders:", err);
-
-   
-    res.status(500).json({ success: false, message: err.message || 'An unknown error occurred' });
-  }
+// ✅ Other routes
+router.post('/updateStatus', async (req, res) => {
+  const { orderId, newStatus } = req.body;
+  const result = await updateOrderStatus(orderId, newStatus);
+  res.json(result);
 });
-
-router.get("/GetDeliveredList", async (req, res) => {
-  try {
-    let data = await Orders.find({});
-
-    if (data.length) {
-      const filteredData = data.filter(order => {
-        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
-        const isMainTaskDelivered = mainTask === "delivered";
-        const isMainAmount = order.Items.Amount === 0;
-
-        const isStatusDelivered = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
-        );
-
-        return (isMainTaskDelivered || isStatusDelivered) && isMainAmount;
-      });
-
-      res.json({ success: true, result: filteredData });
-    } else {
-      res.json({ success: false, message: "No orders found" });
-    }
-  } catch (err) {
-    console.error("Error fetching orders:", err);
-    res.status(500).json({ success: false, message: 'Internal Server Error', details: err.message });
-  }
-});
-
-router.get("/GetBillList", async (req, res) => {
-  try {
-    let data = await Orders.find({});
-
-    if (data.length) {
-      const filteredData = data.filter(order => {
-        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
-        const isMainTaskDelivered = mainTask === "delivered";
-        const isMainAmount = order.Items.Amount !== 0;
-
-        const isStatusDelivered = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
-        );
-
-        return (isMainTaskDelivered || isStatusDelivered) && isMainAmount;
-      });
-
-      res.json({ success: true, result: filteredData });
-    } else {
-      res.json({ success: false, message: "No orders found" });
-    }
-  } catch (err) {
-    console.error("Error fetching orders:", err);
-    res.status(500).json({ success: false, message: 'Internal Server Error', details: err.message });
-  }
-});
-
-router.get('/:id', async (req, res) => {
-  const orderId = req.params.id;  
-
-  try {
-    const order = await Orders.findById(orderId);  
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-    res.json(order);
-  } catch (error) {
-    console.error('Error retrieving order:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
 
 router.post('/addStatus', async (req, res) => {
   const { orderId, newStatus } = req.body;
@@ -261,44 +100,27 @@ router.post('/addStatus', async (req, res) => {
 
 router.put("/updateOrder/:id", async (req, res) => {
   try {
-      const { Delivery_Date, ...otherFields } = req.body;
+    const { Delivery_Date, ...otherFields } = req.body;
+    const [day, month, year] = Delivery_Date.split('-');
+    const isoDate = `${year}-${month}-${day}`;
 
-      const [day, month, year] = Delivery_Date.split('-');
-      const isoDate = `${year}-${month}-${day}`;
+    const updatedOrder = await Orders.findOneAndUpdate(
+      { _id: req.params.id },
+      { $set: { Delivery_Date: isoDate, ...otherFields } },
+      { new: true }
+    );
 
-      const updatedOrder = await Orders.findOneAndUpdate(
-          { _id: req.params.id },
-          { $set: { Delivery_Date: isoDate, ...otherFields } },
-          { new: true }
-      );
+    if (!updatedOrder) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
-      if (!updatedOrder) {
-          return res.status(404).json({ success: false, message: "Order not found" });
-      }
-
-      res.json({ success: true, result: updatedOrder });
+    res.json({ success: true, result: updatedOrder });
   } catch (err) {
-      console.error('Update error:', err);
-      res.status(500).json({ success: false, message: err.message });
+    console.error('Update error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-
-
-
-router.get('/CheckCustomer/:customerUuid', async (req, res) => {
-  const { customerUuid } = req.params;
-
-  try {
-      const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
-      return res.json({ exists: !!orderExists });
-  } catch (error) {
-      console.error('Error checking orders:', error);
-      return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
-// routes/order.js
 router.put('/updateDelivery/:id', async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items, Remark } = req.body;
@@ -310,11 +132,10 @@ router.put('/updateDelivery/:id', async (req, res) => {
     }
 
     order.Customer_uuid = Customer_uuid;
-    order.Items = Items; // ✅ Now properly saved
+    order.Items = Items;
     order.Remark = Remark;
 
     await order.save();
-
     res.status(200).json({ success: true, message: 'Order updated successfully' });
   } catch (error) {
     console.error('Error updating order:', error);
@@ -322,6 +143,81 @@ router.put('/updateDelivery/:id', async (req, res) => {
   }
 });
 
+router.get('/GetOrderList', async (req, res) => {
+  try {
+    const data = await Orders.find({});
+    const filteredData = data.filter(order => {
+      const isDelivered = order.Status.some(s =>
+        s.Task && s.Task.trim().toLowerCase() === 'delivered'
+      );
+      const isCancelled = order.Status.some(s =>
+        s.Task && s.Task.trim().toLowerCase() === 'cancel'
+      );
+      return !(isDelivered || isCancelled);
+    });
+    res.json({ success: true, result: filteredData });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
+router.get("/GetDeliveredList", async (req, res) => {
+  try {
+    const data = await Orders.find({});
+    const filtered = data.filter(order => {
+      const isDelivered = order.Status.some(s => s.Task?.trim().toLowerCase() === 'delivered');
+      return isDelivered && (!order.Items || order.Items.length === 0);
+    });
+    res.json({ success: true, result: filtered });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
-  module.exports = router;
+router.get("/GetBillList", async (req, res) => {
+  try {
+    const data = await Orders.find({});
+    const filtered = data.filter(order => {
+      const isDelivered = order.Status.some(s => s.Task?.trim().toLowerCase() === 'delivered');
+      return isDelivered && order.Items && order.Items.length > 0;
+    });
+    res.json({ success: true, result: filtered });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/CheckCustomer/:customerUuid', async (req, res) => {
+  const { customerUuid } = req.params;
+  try {
+    const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
+    return res.json({ exists: !!orderExists });
+  } catch (error) {
+    console.error('Error checking orders:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+router.post('/CheckMultipleCustomers', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    const linkedOrders = await Orders.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
+    res.status(200).json({ linkedIds: linkedOrders });
+  } catch (err) {
+    res.status(500).json({ error: 'Error checking linked orders' });
+  }
+});
+
+router.get('/:id', async (req, res) => {
+  const orderId = req.params.id;
+  try {
+    const order = await Orders.findById(orderId);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ✅ Export router at the end (only once)
+module.exports = router;
