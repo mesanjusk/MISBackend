@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const Order = require('../Models/order'); // adjust path if needed
+const Order = require('../Models/order'); // Adjust if path is different
 
-// 🔍 GET all orders that use flat fields (not migrated yet)
+// 🔍 Get all old orders with flat fields (not yet migrated)
 router.get('/flat', async (req, res) => {
   try {
     const flatOrders = await Order.find({
@@ -17,17 +17,25 @@ router.get('/flat', async (req, res) => {
   }
 });
 
-// 🔁 PUT: Migrate a single order by ID
+// 🔁 Migrate a single order
 router.put('/single/:id', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
-
     if (!order || order.Items?.length > 0) {
       return res.status(400).json({ message: 'Already migrated or not found' });
     }
 
     const { Item, Quantity, Rate, Amount } = order;
     order.Items = [{ Item, Quantity, Rate, Amount }];
+
+    if (!order.Steps || order.Steps.length === 0) {
+      order.Steps = [
+        { label: 'Design Approved', checked: false },
+        { label: 'Printing Done', checked: false },
+        { label: 'Cutting Done', checked: false },
+        { label: 'Delivered', checked: false }
+      ];
+    }
 
     delete order.Item;
     delete order.Quantity;
@@ -41,7 +49,7 @@ router.put('/single/:id', async (req, res) => {
   }
 });
 
-// 🔁 PUT: Migrate multiple orders by ID list
+// 🔁 Bulk migrate multiple orders
 router.put('/bulk', async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids)) return res.status(400).json({ message: 'Invalid payload' });
@@ -52,12 +60,24 @@ router.put('/bulk', async (req, res) => {
 
     for (let order of orders) {
       if (order.Items?.length > 0) continue;
+
       const { Item, Quantity, Rate, Amount } = order;
       order.Items = [{ Item, Quantity, Rate, Amount }];
+
+      if (!order.Steps || order.Steps.length === 0) {
+        order.Steps = [
+          { label: 'Design Approved', checked: false },
+          { label: 'Printing Done', checked: false },
+          { label: 'Cutting Done', checked: false },
+          { label: 'Delivered', checked: false }
+        ];
+      }
+
       delete order.Item;
       delete order.Quantity;
       delete order.Rate;
       delete order.Amount;
+
       await order.save();
       migrated.push(order._id);
     }
