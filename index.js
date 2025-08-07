@@ -23,6 +23,8 @@ const Attendance = require("./Routers/Attendance");
 const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
+const OrderMigrate = require("./Routers/OrderMigrate");
+
 
 // WhatsApp Services
 const {
@@ -60,6 +62,7 @@ app.use("/api/attendance", Attendance);
 app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
+app.use("/api/orders/migrate", OrderMigrate);
 
 // ✅ Legacy Routes (to support existing frontend calls)
 app.use("/user", Users);
@@ -81,6 +84,7 @@ app.use("/vendors", Vendors);
 app.use("/note", Note);            // ✅ For /note/:id
 app.use("/usertasks", Usertasks);
 app.use("/usertask", Usertasks);   // ✅ For /usertask/GetUsertaskList
+
 
 // ✅ WhatsApp Routes
 app.get("/whatsapp/qr", (req, res) => {
