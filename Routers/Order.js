@@ -444,8 +444,8 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
 
       // Journal lines
       const lines = [
-        { Account_id: "COGS:Outsourcing", Type: "Debit",  Amount: amount },
-        { Account_id: `Vendor:${resolvedVendor}`, Type: "Credit", Amount: amount }
+        { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Debit",  Amount: amount },
+        { Account_id: `${resolvedVendor}`, Type: "Credit", Amount: amount }
       ];
 
       // Use plannedDate if provided, else now
