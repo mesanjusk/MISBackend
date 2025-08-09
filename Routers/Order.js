@@ -1,308 +1,434 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 const Orders = require("../Models/order");
+const Transaction = require("../Models/transaction");
 const { v4: uuid } = require("uuid");
-const { updateOrderStatus } = require('../Controller/orderController');
+const { updateOrderStatus } = require("../Controller/orderController");
 
-router.post('/updateStatus', async (req, res) => {
-  const { orderId, newStatus } = req.body;
-  const result = await updateOrderStatus(orderId, newStatus);
-  res.json(result);
-});
-
-
+/* ----------------------- CREATE NEW ORDER ----------------------- */
 router.post("/addOrder", async (req, res) => {
-  const {
-    Customer_uuid,
-    Priority = "Normal", 
-    Item = "New Order",  
-    Status = [{}],
-    Remark,
-    Steps = [], // ✅ NEW: array of steps per task group
-  } = req.body;
+  const { Customer_uuid, Priority = "Normal", Status = [{}], Remark, Steps = [] } = req.body;
 
-  const statusDefaults = {
-    Task: "Design",
-    Assigned: "Sai",
-    Status_number: 1,
-    Delivery_Date: new Date().toISOString().split("T")[0], 
-    CreatedAt: new Date().toISOString().split("T")[0]
-  };
+  const now = new Date();
+  const statusDefaults = { Task: "Design", Assigned: "Sai", Status_number: 1, Delivery_Date: now, CreatedAt: now };
 
-  const updatedStatus = Status.map((status) => ({
+  const updatedStatus = (Status || []).map(s => ({
     ...statusDefaults,
-    ...status,
+    ...s,
+    Delivery_Date: s?.Delivery_Date ? new Date(s.Delivery_Date) : now,
+    CreatedAt: s?.CreatedAt ? new Date(s.CreatedAt) : now
   }));
 
-  if (
-    !updatedStatus[0].Task ||
-    !updatedStatus[0].Assigned ||
-    !updatedStatus[0].Delivery_Date
-  ) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        message: "Task, Assigned, and Delivery_Date fields in Status are required.",
-      });
+  if (!updatedStatus[0]?.Task || !updatedStatus[0]?.Assigned || !updatedStatus[0]?.Delivery_Date) {
+    return res.status(400).json({ success: false, message: "Task, Assigned, and Delivery_Date are required in Status[0]." });
   }
 
-  // ✅ Flatten all steps from all groups
-  const flatSteps = Steps.reduce((acc, step) => {
-  if (step && typeof step.label === "string") {
-    acc.push({ label: step.label, checked: !!step.checked });
-  }
-  return acc;
-}, []);
+  const flatSteps = (Steps || []).reduce((acc, step) => {
+    if (step && typeof step.label === "string") {
+      acc.push({
+        label: step.label,
+        checked: !!step.checked,
+        vendorId: step.vendorId ?? null,
+        vendorName: step.vendorName ?? null,
+        costAmount: Number(step.costAmount ?? 0),
+        status: step.status || "pending",
+        posting: step.posting || { isPosted: false, txnId: null, postedAt: null }
+      });
+    }
+    return acc;
+  }, []);
 
   try {
-    const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
+    const lastOrder = await Orders.findOne().sort({ Order_Number: -1 }).lean();
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
-
-    console.log("🧪 Steps to be saved:", flatSteps);
 
     const newOrder = new Orders({
       Order_uuid: uuid(),
       Order_Number: newOrderNumber,
       Customer_uuid,
       Priority,
-      Item,
       Status: updatedStatus,
-      Steps: flatSteps, // ✅ Save flattened steps
-      Remark,
+      Steps: flatSteps,
+      Remark
     });
 
     await newOrder.save();
-console.log("✅ Order saved:", newOrder);
-
-    res.json({ success: true, message: "Order added successfully" });
+    res.json({ success: true, message: "Order added successfully", orderId: newOrder._id, orderNumber: newOrderNumber });
   } catch (error) {
     console.error("Error saving order:", error);
     res.status(500).json({ success: false, message: "Failed to add order" });
   }
 });
 
-
-router.post('/CheckMultipleCustomers', async (req, res) => {
-    try {
-        const { ids } = req.body;
-        const linkedOrders = await Order.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
-        res.status(200).json({ linkedIds: linkedOrders });
-    } catch (err) {
-        res.status(500).json({ error: 'Error checking linked orders' });
-    }
-});
-
-
-router.get("/GetOrderList", async (req, res) => {
+/* ----------------------- UNIFIED VIEW ----------------------- */
+router.get("/all-data", async (req, res) => {
   try {
-   
-    let data = await Orders.find({});
+    const delivered = await Orders.find({ Status: { $elemMatch: { Task: "Delivered" } } });
+    const report = await Orders.find({
+      Status: { $elemMatch: { Task: "Delivered" } },
+      Items: { $exists: true, $not: { $size: 0 } }
+    });
+    const outstanding = await Orders.find({ Status: { $not: { $elemMatch: { Task: "Delivered" } } } });
 
-    if (data.length) {
-   
-      const filteredData = data.filter(order => {
-      
-        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
+    const allvendors = await Orders.aggregate([
+      { $addFields: {
+          stepsNeedingVendor: {
+            $filter: {
+              input: "$Steps", as: "st",
+              cond: { $or: [
+                { $eq: ["$$st.vendorId", null] },
+                { $eq: ["$$st.vendorId", ""] },
+                { $eq: ["$$st.posting.isPosted", false] }
+              ]}
+            }
+          }
+        }
+      },
+      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
+      { $project: {
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Remark: 1,
+          StepsPending: { $map: {
+            input: "$stepsNeedingVendor", as: "s",
+            in: { stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId",
+                  vendorName: "$$s.vendorName", costAmount: "$$s.costAmount",
+                  isPosted: "$$s.posting.isPosted" }
+          }}
+        }
+      },
+      { $sort: { Order_Number: -1 } }
+    ]);
 
-       
-        const isMainTaskDelivered = mainTask === "Delivered";
-        const isMainTaskCancel = mainTask === "Cancel";
-        
-      
-        const isStatusDelivered = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
-        );
+    const bills = await Orders.find({
+      Status: { $elemMatch: { Task: "Delivered" } },
+      $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }]
+    });
 
-        const isStatusCancel = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "cancel"
-        );
-
-        return !(isMainTaskDelivered || isStatusDelivered || isMainTaskCancel || isStatusCancel);
-       
-      });
-
-
-      res.json({ success: true, result: filteredData });
-    } else {
-      res.json({ success: false, message: "Order not found" });
-    }
-  } catch (err) {
-    
-    console.error("Error fetching orders:", err);
-
-   
-    res.status(500).json({ success: false, message: err.message || 'An unknown error occurred' });
-  }
-});
-
-router.get("/GetDeliveredList", async (req, res) => {
-  try {
-    let data = await Orders.find({});
-
-    if (data.length) {
-      const filteredData = data.filter(order => {
-        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
-        const isMainTaskDelivered = mainTask === "delivered";
-        const isMainAmount = order.Amount === 0;
-
-        const isStatusDelivered = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
-        );
-
-        return (isMainTaskDelivered || isStatusDelivered) && isMainAmount;
-      });
-
-      res.json({ success: true, result: filteredData });
-    } else {
-      res.json({ success: false, message: "No orders found" });
-    }
-  } catch (err) {
-    console.error("Error fetching orders:", err);
-    res.status(500).json({ success: false, message: 'Internal Server Error', details: err.message });
-  }
-});
-
-router.get("/GetBillList", async (req, res) => {
-  try {
-    let data = await Orders.find({});
-
-    if (data.length) {
-      const filteredData = data.filter(order => {
-        const mainTask = order.Task ? order.Task.trim().replace(/\s+/g, '').toLowerCase() : "";
-        const isMainTaskDelivered = mainTask === "delivered";
-        const isMainAmount = order.Amount !== 0;
-
-        const isStatusDelivered = order.Status.some(
-          status => status.Task && status.Task.trim().replace(/\s+/g, '').toLowerCase() === "delivered"
-        );
-
-        return (isMainTaskDelivered || isStatusDelivered) && isMainAmount;
-      });
-
-      res.json({ success: true, result: filteredData });
-    } else {
-      res.json({ success: false, message: "No orders found" });
-    }
-  } catch (err) {
-    console.error("Error fetching orders:", err);
-    res.status(500).json({ success: false, message: 'Internal Server Error', details: err.message });
-  }
-});
-
-router.get('/:id', async (req, res) => {
-  const orderId = req.params.id;  
-
-  try {
-    const order = await Orders.findById(orderId);  
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
-    res.json(order);
+    res.json({ delivered, report, outstanding, allvendors, bills });
   } catch (error) {
-    console.error('Error retrieving order:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error("Error generating unified report:", error.message);
+    res.status(500).json({ error: "Failed to load report data" });
   }
 });
 
+/* ----------------------- PAGE: ALL VENDORS ----------------------- */
+router.get("/allvendors", async (req, res) => {
+  try {
+    const search = (req.query.search || "").trim();
 
-router.post('/addStatus', async (req, res) => {
+    const match = {};
+    if (search) {
+      match.$or = [
+        { Order_Number: isNaN(+search) ? -1 : +search },
+        { Customer_uuid: new RegExp(search, "i") },
+        { Remark: new RegExp(search, "i") }
+      ];
+    }
+
+    const rows = await Orders.aggregate([
+      { $match: Object.keys(match).length ? match : {} },
+      { $addFields: {
+          stepsNeedingVendor: {
+            $filter: {
+              input: "$Steps", as: "st",
+              cond: { $or: [
+                { $eq: ["$$st.vendorId", null] },
+                { $eq: ["$$st.vendorId", ""] },
+                { $eq: ["$$st.posting.isPosted", false] }
+              ]}
+            }
+          }
+        }
+      },
+      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
+      { $project: {
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Remark: 1,
+          StepsPending: { $map: {
+            input: "$stepsNeedingVendor", as: "s",
+            in: { stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId",
+                  vendorName: "$$s.vendorName", costAmount: "$$s.costAmount",
+                  isPosted: "$$s.posting.isPosted" }
+          }}
+        }
+      },
+      { $sort: { Order_Number: -1 } }
+    ]);
+
+    res.json({ rows, total: rows.length });
+  } catch (e) {
+    console.error("allvendors error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ----------------------- STATUS APIs ----------------------- */
+router.post("/updateStatus", async (req, res) => {
+  const { orderId, newStatus } = req.body;
+  const result = await updateOrderStatus(orderId, newStatus);
+  res.json(result);
+});
+
+router.post("/addStatus", async (req, res) => {
   const { orderId, newStatus } = req.body;
   try {
     const result = await updateOrderStatus(orderId, newStatus);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
+/* ----------------------- UPDATE ORDER ----------------------- */
 router.put("/updateOrder/:id", async (req, res) => {
   try {
-      const { Delivery_Date, ...otherFields } = req.body;
+    const { Delivery_Date, ...otherFields } = req.body;
+    const updateDoc = { ...otherFields };
 
-      const [day, month, year] = Delivery_Date.split('-');
-      const isoDate = `${year}-${month}-${day}`;
+    if (Delivery_Date) {
+      const order = await Orders.findById(req.params.id);
+      if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-      const updatedOrder = await Orders.findOneAndUpdate(
-          { _id: req.params.id },
-          { $set: { Delivery_Date: isoDate, ...otherFields } },
-          { new: true }
-      );
-
-      if (!updatedOrder) {
-          return res.status(404).json({ success: false, message: "Order not found" });
+      const lastIndex = (order.Status?.length || 1) - 1;
+      if (lastIndex >= 0) {
+        order.Status[lastIndex].Delivery_Date = new Date(Delivery_Date);
+        Object.assign(order, otherFields);
+        const saved = await order.save();
+        return res.json({ success: true, result: saved });
       }
-
-      res.json({ success: true, result: updatedOrder });
-  } catch (err) {
-      console.error('Update error:', err);
-      res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.put('/updateDelivery/:id', async (req, res) => {
-  const { id } = req.params;
-  const { Customer_uuid, Item, Quantity, Rate, Amount,Remark } = req.body;
-
-  try {
-      const order = await Orders.findById(id);
-      if (!order) {
-          return res.status(404).json({ success: false, message: 'Order not found' });
-      }
-
-      order.Customer_uuid = Customer_uuid;
-      order.Item = Item;
-      order.Quantity = Quantity;
-      order.Rate = Rate;
-      order.Amount = Amount;
-      order.Remark = Remark;
-
-      await order.save();
-      res.status(200).json({ success: true, message: 'Order updated successfully' });
-  } catch (error) {
-      console.log('Error updating order:', error);
-      res.status(500).json({ success: false, message: 'Error updating order', error });
-  }
-});
-
-
-
-router.get('/CheckCustomer/:customerUuid', async (req, res) => {
-  const { customerUuid } = req.params;
-
-  try {
-      const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
-      return res.json({ exists: !!orderExists });
-  } catch (error) {
-      console.error('Error checking orders:', error);
-      return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
-// routes/order.js
-router.put('/updateDelivery/:id', async (req, res) => {
-  const { id } = req.params;
-  const { Customer_uuid, Items, Remark } = req.body;
-
-  try {
-    const order = await Orders.findById(id);
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    order.Customer_uuid = Customer_uuid;
-    order.Items = Items; // ✅ Now properly saved
-    order.Remark = Remark;
-
-    await order.save();
-
-    res.status(200).json({ success: true, message: 'Order updated successfully' });
-  } catch (error) {
-    console.error('Error updating order:', error);
-    res.status(500).json({ success: false, message: 'Error updating order', error });
+    const updatedOrder = await Orders.findOneAndUpdate(
+      { _id: req.params.id }, { $set: updateDoc }, { new: true }
+    );
+    if (!updatedOrder) return res.status(404).json({ success: false, message: "Order not found" });
+    res.json({ success: true, result: updatedOrder });
+  } catch (err) {
+    console.error("Update error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
+/* ----------------------- UPDATE DELIVERY (Items) ----------------------- */
+router.put("/updateDelivery/:id", async (req, res) => {
+  const { id } = req.params;
+  const { Customer_uuid, Items, Remark } = req.body;
+  try {
+    const order = await Orders.findById(id);
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    order.Customer_uuid = Customer_uuid ?? order.Customer_uuid;
+    order.Items = Array.isArray(Items) ? Items : order.Items;
+    order.Remark = Remark ?? order.Remark;
+    await order.save();
+    res.status(200).json({ success: true, message: "Order updated successfully" });
+  } catch (error) {
+    console.error("Error updating order:", error);
+    res.status(500).json({ success: false, message: "Error updating order", error: error.message });
+  }
+});
 
+/* ----------------------- LISTS ----------------------- */
+router.get("/GetOrderList", async (req, res) => {
+  try {
+    const data = await Orders.find({});
+    const filteredData = data.filter(o => {
+      const delivered = o.Status?.some(s => s.Task?.trim().toLowerCase() === "delivered");
+      const cancelled = o.Status?.some(s => s.Task?.trim().toLowerCase() === "cancel");
+      return !(delivered || cancelled);
+    });
+    res.json({ success: true, result: filteredData });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
-  module.exports = router;
+router.get("/GetDeliveredList", async (req, res) => {
+  try {
+    const data = await Orders.find({});
+    const filtered = data.filter(o => {
+      const delivered = o.Status?.some(s => s.Task?.trim().toLowerCase() === "delivered");
+      return delivered && (!o.Items || o.Items.length === 0);
+    });
+    res.json({ success: true, result: filtered });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Deprecated, kept for backward compatibility
+router.get("/GetBillList", async (req, res) => {
+  try {
+    const data = await Orders.find({});
+    const filtered = data.filter(o => {
+      const delivered = o.Status?.some(s => s.Task?.trim().toLowerCase() === "delivered");
+      return delivered && o.Items && o.Items.length > 0;
+    });
+    res.json({ success: true, result: filtered });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* ----------------------- CUSTOMER CHECKS ----------------------- */
+router.get("/CheckCustomer/:customerUuid", async (req, res) => {
+  const { customerUuid } = req.params;
+  try {
+    const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
+    res.json({ exists: !!orderExists });
+  } catch (error) {
+    console.error("Error checking orders:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+router.post("/CheckMultipleCustomers", async (req, res) => {
+  try {
+    const { ids } = req.body;
+    const linked = await Orders.find({ Customer_uuid: { $in: ids } }).distinct("Customer_uuid");
+    res.status(200).json({ linkedIds: linked });
+  } catch (err) {
+    res.status(500).json({ error: "Error checking linked orders" });
+  }
+});
+
+/* ----------------------- GET BY ID ----------------------- */
+router.get("/:id", async (req, res) => {
+  const orderId = req.params.id;
+  try {
+    const order = await Orders.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* ----------------------- VENDOR REPORTS & POSTING ----------------------- */
+router.get("/reports/vendor-missing", async (req, res) => {
+  try {
+    const page  = parseInt(req.query.page || "1", 10);
+    const limit = parseInt(req.query.limit || "20", 10);
+    const skip  = (page - 1) * limit;
+    const deliveredOnly = req.query.deliveredOnly === "true";
+    const search = (req.query.search || "").trim();
+
+    const match = {};
+    if (deliveredOnly) match.Status = { $elemMatch: { Task: "Delivered" } };
+    if (search) {
+      match.$or = [
+        { Order_Number: isNaN(+search) ? -1 : +search },
+        { Customer_uuid: new RegExp(search, "i") },
+        { Remark: new RegExp(search, "i") }
+      ];
+    }
+
+    const pipeline = [
+      { $match: match },
+      { $addFields: {
+          stepsNeedingVendor: {
+            $filter: {
+              input: "$Steps", as: "st",
+              cond: { $or: [
+                { $eq: ["$$st.vendorId", null] },
+                { $eq: ["$$st.vendorId", ""] },
+                { $eq: ["$$st.posting.isPosted", false] }
+              ]}
+            }
+          }
+        }
+      },
+      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
+      { $project: {
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Remark: 1,
+          StepsPending: { $map: {
+            input: "$stepsNeedingVendor", as: "s",
+            in: { stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId",
+                  vendorName: "$$s.vendorName", costAmount: "$$s.costAmount",
+                  isPosted: "$$s.posting.isPosted" }
+          }}
+        }
+      },
+      { $sort: { Order_Number: -1 } },
+      { $facet: { data: [{ $skip: skip }, { $limit: limit }], total: [{ $count: "count" }] } }
+    ];
+
+    const result = await Orders.aggregate(pipeline);
+    const data = result[0]?.data || [];
+    const total = result[0]?.total?.[0]?.count || 0;
+    res.json({ page, limit, total, rows: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
+  const { orderId, stepId } = req.params;
+  const { vendorId, vendorName, costAmount, createdBy } = req.body;
+
+  if (!vendorId && !vendorName)
+    return res.status(400).json({ ok: false, error: "Provide vendorId or vendorName" });
+  const amount = Number(costAmount ?? 0);
+  if (Number.isNaN(amount) || amount < 0)
+    return res.status(400).json({ ok: false, error: "Invalid costAmount" });
+
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const order = await Orders.findById(orderId).session(session);
+      if (!order) throw new Error("Order not found");
+
+      const step = order.Steps.id(stepId);
+      if (!step) throw new Error("Step not found");
+
+      step.vendorId = vendorId ?? step.vendorId ?? null;
+      step.vendorName = vendorName ?? step.vendorName ?? null;
+      step.costAmount = amount;
+
+      if (step.posting?.isPosted) {
+        await order.save({ session });
+        return res.json({ ok: true, message: "Vendor saved. Step already posted.", txnId: step.posting.txnId });
+      }
+
+      if (amount === 0) {
+        step.status = "done";
+        step.posting = { isPosted: false, txnId: null, postedAt: null };
+        await order.save({ session });
+        return res.json({ ok: true, message: "Vendor saved (no posting for 0 amount)." });
+      }
+
+      const lines = [
+        { Account_id: "COGS:Outsourcing", Type: "Debit", Amount: amount },
+        { Account_id: `Vendor:${vendorId || vendorName}`, Type: "Credit", Amount: amount }
+      ];
+
+      const txnDocs = await Transaction.create([{
+        Transaction_uuid: undefined,
+        Transaction_id: undefined,
+        Order_uuid: order.Order_uuid || null,
+        Order_number: order.Order_Number,
+        Transaction_date: new Date(),
+        Description: `Outsource step: ${step.label} (Order #${order.Order_Number})`,
+        Total_Debit: 0,
+        Total_Credit: 0,
+        Payment_mode: null,
+        Created_by: createdBy || "system",
+        image: null,
+        Journal_entry: lines,
+        source: { type: "order_step", id: step._id, label: step.label },
+        counterparty: { type: "vendor", id: vendorId || null, name: vendorName || null }
+      }], { session });
+
+      step.posting = { isPosted: true, txnId: txnDocs[0]._id, postedAt: new Date() };
+      step.status = "posted";
+
+      await order.save({ session });
+      res.json({ ok: true, txnId: txnDocs[0]._id });
+    });
+  } catch (e) {
+    console.error("assign-vendor error:", e);
+    res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    session.endSession();
+  }
+});
+
+module.exports = router;
