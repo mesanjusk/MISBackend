@@ -72,28 +72,39 @@ router.get("/all-data", async (req, res) => {
     const outstanding = await Orders.find({ Status: { $not: { $elemMatch: { Task: "Delivered" } } } });
 
     const allvendors = await Orders.aggregate([
-      { $addFields: {
+      {
+        $addFields: {
           stepsNeedingVendor: {
             $filter: {
               input: "$Steps", as: "st",
-              cond: { $or: [
-                { $eq: ["$$st.vendorId", null] },
-                { $eq: ["$$st.vendorId", ""] },
-                { $eq: ["$$st.posting.isPosted", false] }
-              ]}
+              cond: {
+                $or: [
+                  { $eq: ["$$st.vendorId", null] },
+                  { $eq: ["$$st.vendorId", ""] },
+                  { $eq: ["$$st.posting.isPosted", false] }
+                ]
+              }
             }
           }
         }
       },
       { $match: { "stepsNeedingVendor.0": { $exists: true } } },
-      { $project: {
+      {
+        $project: {
           Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Remark: 1,
-          StepsPending: { $map: {
-            input: "$stepsNeedingVendor", as: "s",
-            in: { stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId",
-                  vendorName: "$$s.vendorName", costAmount: "$$s.costAmount",
-                  isPosted: "$$s.posting.isPosted" }
-          }}
+          StepsPending: {
+            $map: {
+              input: "$stepsNeedingVendor", as: "s",
+              in: {
+                stepId: "$$s._id",
+                label: "$$s.label",
+                vendorId: "$$s.vendorId",
+                vendorName: "$$s.vendorName",
+                costAmount: "$$s.costAmount",
+                isPosted: "$$s.posting.isPosted"
+              }
+            }
+          }
         }
       },
       { $sort: { Order_Number: -1 } }
@@ -127,28 +138,39 @@ router.get("/allvendors", async (req, res) => {
 
     const rows = await Orders.aggregate([
       { $match: Object.keys(match).length ? match : {} },
-      { $addFields: {
+      {
+        $addFields: {
           stepsNeedingVendor: {
             $filter: {
               input: "$Steps", as: "st",
-              cond: { $or: [
-                { $eq: ["$$st.vendorId", null] },
-                { $eq: ["$$st.vendorId", ""] },
-                { $eq: ["$$st.posting.isPosted", false] }
-              ]}
+              cond: {
+                $or: [
+                  { $eq: ["$$st.vendorId", null] },
+                  { $eq: ["$$st.vendorId", ""] },
+                  { $eq: ["$$st.posting.isPosted", false] }
+                ]
+              }
             }
           }
         }
       },
       { $match: { "stepsNeedingVendor.0": { $exists: true } } },
-      { $project: {
+      {
+        $project: {
           Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Remark: 1,
-          StepsPending: { $map: {
-            input: "$stepsNeedingVendor", as: "s",
-            in: { stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId",
-                  vendorName: "$$s.vendorName", costAmount: "$$s.costAmount",
-                  isPosted: "$$s.posting.isPosted" }
-          }}
+          StepsPending: {
+            $map: {
+              input: "$stepsNeedingVendor", as: "s",
+              in: {
+                stepId: "$$s._id",
+                label: "$$s.label",
+                vendorId: "$$s.vendorId",
+                vendorName: "$$s.vendorName",
+                costAmount: "$$s.costAmount",
+                isPosted: "$$s.posting.isPosted"
+              }
+            }
+          }
         }
       },
       { $sort: { Order_Number: -1 } }
@@ -323,28 +345,39 @@ router.get("/reports/vendor-missing", async (req, res) => {
 
     const pipeline = [
       { $match: match },
-      { $addFields: {
+      {
+        $addFields: {
           stepsNeedingVendor: {
             $filter: {
               input: "$Steps", as: "st",
-              cond: { $or: [
-                { $eq: ["$$st.vendorId", null] },
-                { $eq: ["$$st.vendorId", ""] },
-                { $eq: ["$$st.posting.isPosted", false] }
-              ]}
+              cond: {
+                $or: [
+                  { $eq: ["$$st.vendorId", null] },
+                  { $eq: ["$$st.vendorId", ""] },
+                  { $eq: ["$$st.posting.isPosted", false] }
+                ]
+              }
             }
           }
         }
       },
       { $match: { "stepsNeedingVendor.0": { $exists: true } } },
-      { $project: {
+      {
+        $project: {
           Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Remark: 1,
-          StepsPending: { $map: {
-            input: "$stepsNeedingVendor", as: "s",
-            in: { stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId",
-                  vendorName: "$$s.vendorName", costAmount: "$$s.costAmount",
-                  isPosted: "$$s.posting.isPosted" }
-          }}
+          StepsPending: {
+            $map: {
+              input: "$stepsNeedingVendor", as: "s",
+              in: {
+                stepId: "$$s._id",
+                label: "$$s.label",
+                vendorId: "$$s.vendorId",
+                vendorName: "$$s.vendorName",
+                costAmount: "$$s.costAmount",
+                isPosted: "$$s.posting.isPosted"
+              }
+            }
+          }
         }
       },
       { $sort: { Order_Number: -1 } },
@@ -360,12 +393,22 @@ router.get("/reports/vendor-missing", async (req, res) => {
   }
 });
 
+/* ************* FIXED: ASSIGN VENDOR & POST (Payment_mode="purchase") ************* */
 router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
   const { orderId, stepId } = req.params;
-  const { vendorId, vendorName, costAmount, createdBy } = req.body;
+  const {
+    vendorId,               // optional
+    vendorName,             // optional
+    vendorCustomerUuid,     // sent by frontend
+    costAmount,
+    plannedDate,            // optional (YYYY-MM-DD)
+    createdBy
+  } = req.body;
 
-  if (!vendorId && !vendorName)
-    return res.status(400).json({ ok: false, error: "Provide vendorId or vendorName" });
+  const resolvedVendor = vendorId || vendorCustomerUuid || vendorName;
+  if (!resolvedVendor)
+    return res.status(400).json({ ok: false, error: "Provide vendorId or vendorCustomerUuid or vendorName" });
+
   const amount = Number(costAmount ?? 0);
   if (Number.isNaN(amount) || amount < 0)
     return res.status(400).json({ ok: false, error: "Invalid costAmount" });
@@ -379,15 +422,19 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
       const step = order.Steps.id(stepId);
       if (!step) throw new Error("Step not found");
 
-      step.vendorId = vendorId ?? step.vendorId ?? null;
+      // Save vendor info on step
+      step.vendorId   = vendorCustomerUuid ?? vendorId ?? step.vendorId ?? null;
       step.vendorName = vendorName ?? step.vendorName ?? null;
       step.costAmount = amount;
+      if (plannedDate) step.plannedDate = new Date(plannedDate);
 
+      // If already posted, just save vendor info and return
       if (step.posting?.isPosted) {
         await order.save({ session });
         return res.json({ ok: true, message: "Vendor saved. Step already posted.", txnId: step.posting.txnId });
       }
 
+      // If zero amount, mark done; no posting needed
       if (amount === 0) {
         step.status = "done";
         step.posting = { isPosted: false, txnId: null, postedAt: null };
@@ -395,26 +442,27 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
         return res.json({ ok: true, message: "Vendor saved (no posting for 0 amount)." });
       }
 
+      // Journal lines (Debit COGS, Credit Vendor)
       const lines = [
-        { Account_id: "COGS:Outsourcing", Type: "Debit", Amount: amount },
-        { Account_id: `Vendor:${vendorId || vendorName}`, Type: "Credit", Amount: amount }
+        { Account_id: "COGS:Outsourcing", Type: "Debit",  Amount: amount },
+        { Account_id: `Vendor:${resolvedVendor}`, Type: "Credit", Amount: amount }
       ];
 
+      // Create Transaction with required fields.
+      // NOTE: Your schema requires Payment_mode; set to "purchase" by default here.
       const txnDocs = await Transaction.create([{
-        Transaction_uuid: undefined,
-        Transaction_id: undefined,
         Order_uuid: order.Order_uuid || null,
         Order_number: order.Order_Number,
         Transaction_date: new Date(),
         Description: `Outsource step: ${step.label} (Order #${order.Order_Number})`,
-        Total_Debit: 0,
-        Total_Credit: 0,
-        Payment_mode: null,
+        Total_Debit: amount,
+        Total_Credit: amount,
+        Payment_mode: "purchase",               // <-- THE FIX
         Created_by: createdBy || "system",
         image: null,
         Journal_entry: lines,
         source: { type: "order_step", id: step._id, label: step.label },
-        counterparty: { type: "vendor", id: vendorId || null, name: vendorName || null }
+        counterparty: { type: "vendor", id: (vendorCustomerUuid || vendorId) || null, name: vendorName || null }
       }], { session });
 
       step.posting = { isPosted: true, txnId: txnDocs[0]._id, postedAt: new Date() };
