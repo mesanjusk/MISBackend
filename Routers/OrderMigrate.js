@@ -4,15 +4,14 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const Orders = require("../Models/order");
 
-// small helpers
+// helpers
 const norm = (s) => String(s || "").trim().toLowerCase();
-
-function isLatestDelivered(order) {
+const isLatestDelivered = (order) => {
   const st = Array.isArray(order?.Status) ? order.Status : [];
-  if (st.length === 0) return false;
+  if (!st.length) return false;
   const latest = st[st.length - 1];
   return norm(latest?.Task) === "delivered";
-}
+};
 
 function buildPrintStep(designStep) {
   return {
@@ -30,10 +29,10 @@ function buildPrintStep(designStep) {
 
 /**
  * GET /api/orders/migrate/flat
- * Returns orders that:
- *  - have Design step,
- *  - do NOT have Print step,
- *  - and latest Status is "Delivered" (case-insensitive).
+ * Find orders where:
+ *  - latest Status is "Delivered"
+ *  - Steps contains "Design" (any case/whitespace)
+ *  - Steps does NOT contain "Print" (any case/whitespace)
  */
 router.get("/flat", async (req, res) => {
   try {
@@ -42,56 +41,71 @@ router.get("/flat", async (req, res) => {
         $project: {
           Order_Number: 1,
           Customer_uuid: 1,
-          Customer_name: 1, // remove if not in your schema
-          Steps: 1,
-          Status: 1,
-          // detect Design / Print in steps
+          // include if present, otherwise omit safely
+          Customer_name: { $ifNull: ["$Customer_name", null] },
+          Steps: { $ifNull: ["$Steps", []] },
+          Status: { $ifNull: ["$Status", []] },
+          _statusSize: { $size: { $ifNull: ["$Status", []] } },
+        },
+      },
+      // derive latest status doc (last element)
+      {
+        $addFields: {
+          latestStatus: {
+            $cond: [
+              { $gt: ["$_statusSize", 0] },
+              { $arrayElemAt: ["$Status", { $subtract: ["$_statusSize", 1] }] },
+              null,
+            ],
+          },
+        },
+      },
+      // normalized label checks for Steps
+      {
+        $addFields: {
           hasDesign: {
             $anyElementTrue: {
               $map: {
-                input: { $ifNull: ["$Steps", []] },
+                input: "$Steps",
                 as: "s",
-                in: { $eq: [{ $toLower: { $ifNull: ["$$s.label", ""] } }, "design"] },
+                in: {
+                  $eq: [
+                    {
+                      $toLower: {
+                        $trim: { input: { $ifNull: ["$$s.label", ""] } },
+                      },
+                    },
+                    "design",
+                  ],
+                },
               },
             },
           },
           hasPrint: {
             $anyElementTrue: {
               $map: {
-                input: { $ifNull: ["$Steps", []] },
+                input: "$Steps",
                 as: "s",
-                in: { $eq: [{ $toLower: { $ifNull: ["$$s.label", ""] } }, "print"] },
+                in: {
+                  $eq: [
+                    {
+                      $toLower: {
+                        $trim: { input: { $ifNull: ["$$s.label", ""] } },
+                      },
+                    },
+                    "print",
+                  ],
+                },
               },
             },
           },
-          // compute latest status task (if Status array not empty)
-          _statusSize: { $size: { $ifNull: ["$Status", []] } },
-        },
-      },
-      {
-        $addFields: {
-          latestStatus: {
-            $cond: [
-              { $gt: ["$_statusSize", 0] },
-              {
-                $arrayElemAt: [
-                  "$Status",
-                  { $subtract: ["$_statusSize", 1] }
-                ],
-              },
-              null,
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
           latestTaskLower: {
-            $toLower: { $ifNull: ["$latestStatus.Task", ""] },
+            $toLower: {
+              $trim: { input: { $ifNull: ["$latestStatus.Task", ""] } },
+            },
           },
         },
       },
-      // must: has Design, no Print, latest == delivered
       { $match: { hasDesign: true, hasPrint: false, latestTaskLower: "delivered" } },
       {
         $project: {
@@ -99,7 +113,7 @@ router.get("/flat", async (req, res) => {
           Customer_uuid: 1,
           Customer_name: 1,
           Steps: 1,
-          _isOld: { $literal: true }, // used by UI badge
+          _isOld: { $literal: true },
         },
       },
       { $sort: { Order_Number: 1 } },
@@ -114,11 +128,7 @@ router.get("/flat", async (req, res) => {
 
 /**
  * PUT /api/orders/migrate/single/:id
- * Append Print step if:
- *  - order exists,
- *  - latest Status is Delivered,
- *  - has Design,
- *  - doesn't already have Print.
+ * Append "Print" step (cloned vendor fields from "Design") if missing.
  */
 router.put("/single/:id", async (req, res) => {
   const { id } = req.params;
@@ -138,12 +148,8 @@ router.put("/single/:id", async (req, res) => {
     const hasPrint = steps.some((s) => norm(s?.label) === "print");
     const designStep = steps.find((s) => norm(s?.label) === "design");
 
-    if (hasPrint) {
-      return res.json({ ok: true, message: "Already has Print step" });
-    }
-    if (!designStep) {
-      return res.status(400).json({ error: "No Design step to base on" });
-    }
+    if (hasPrint) return res.json({ ok: true, message: "Already has Print step" });
+    if (!designStep) return res.status(400).json({ error: "No Design step to base on" });
 
     steps.push(buildPrintStep(designStep));
     order.Steps = steps;
@@ -159,7 +165,6 @@ router.put("/single/:id", async (req, res) => {
 /**
  * PUT /api/orders/migrate/bulk
  * Body: { ids: string[] }
- * Sequentially run the same logic as single.
  */
 router.put("/bulk", async (req, res) => {
   const { ids } = req.body || {};
