@@ -1,405 +1,214 @@
-// Routers/OrderMigrate.js
+// routes/migrateOrders.js
 const express = require("express");
-const mongoose = require("mongoose");
-const { ObjectId } = mongoose.Types;
-
 const router = express.Router();
+const mongoose = require("mongoose");
+const Orders = require("../Models/order");
 
-// ---- Config ----
-const COLLECTION = "orders"; // change if your collection name differs
+// small helpers
+const norm = (s) => String(s || "").trim().toLowerCase();
 
-// Any doc with at least one step missing 'posting' is treated as "old format"
-const OLD_FILTER = { Steps: { $elemMatch: { posting: { $exists: false } } } };
-
-/**
- * Build the aggregation pipeline stages used to normalize:
- * - Steps: KEEP ONLY "Design" step (from label or legacy Task), force label="Design"
- * - Steps[*].vendorId/vendorCustomerUuid/vendorName/costAmount/status/posting/stepId
- * - Items (ensure array)
- * - saleSubtotal (from Items)
- * - stepsCostTotal (sum of Steps.costAmount)
- * Idempotent: existing values are preserved where present.
- */
-function buildStages() {
-  return [
-    {
-      $set: {
-        // Keep only "Design" step (case-insensitive on label) or legacy Task === "Design"
-        Steps: {
-          $slice: [
-            {
-              $map: {
-                input: {
-                  $filter: {
-                    input: { $ifNull: ["$Steps", []] },
-                    as: "s",
-                    cond: {
-                      $or: [
-                        {
-                          $regexMatch: {
-                            input: { $ifNull: ["$$s.label", ""] },
-                            regex: /design/i,
-                          },
-                        },
-                        { $eq: [{ $ifNull: ["$$s.Task", ""] }, "Design"] },
-                      ],
-                    },
-                  },
-                },
-                as: "s",
-                in: {
-                  $mergeObjects: [
-                    "$$s",
-                    {
-                      // force pretty label
-                      label: "Design",
-                      vendorId: { $ifNull: ["$$s.vendorId", null] },
-                      vendorCustomerUuid: { $ifNull: ["$$s.vendorCustomerUuid", null] },
-                      vendorName: { $ifNull: ["$$s.vendorName", null] },
-                      costAmount: { $ifNull: ["$$s.costAmount", 0] },
-                      status: { $ifNull: ["$$s.status", "pending"] },
-                      posting: {
-                        $ifNull: [
-                          "$$s.posting",
-                          { isPosted: false, txnId: null, postedAt: null },
-                        ],
-                      },
-                      stepId: {
-                        $ifNull: [
-                          "$$s.stepId",
-                          { $toString: { $ifNull: ["$$s._id", ""] } },
-                        ],
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            1, // keep at most one "Design" step
-          ],
-        },
-
-        Items: { $ifNull: ["$Items", []] },
-
-        saleSubtotal: {
-          $ifNull: [
-            "$saleSubtotal",
-            {
-              $sum: {
-                $map: {
-                  input: { $ifNull: ["$Items", []] },
-                  as: "it",
-                  in: {
-                    $ifNull: [
-                      "$$it.Amount",
-                      {
-                        $multiply: [
-                          { $ifNull: ["$$it.Quantity", 0] },
-                          { $ifNull: ["$$it.Rate", 0] },
-                        ],
-                      },
-                    ],
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-    },
-    {
-      $set: {
-        stepsCostTotal: {
-          $sum: {
-            $map: {
-              input: { $ifNull: ["$Steps", []] },
-              as: "sp",
-              in: { $ifNull: ["$$sp.costAmount", 0] },
-            },
-          },
-        },
-      },
-    },
-  ];
+function isLatestDelivered(order) {
+  const st = Array.isArray(order?.Status) ? order.Status : [];
+  if (st.length === 0) return false;
+  const latest = st[st.length - 1];
+  return norm(latest?.Task) === "delivered";
 }
 
-/* ----------------------------- Health ----------------------------- */
-router.get("/health", (_req, res) =>
-  res.json({ ok: true, router: "OrderMigrate" })
-);
+function buildPrintStep(designStep) {
+  return {
+    label: "Print",
+    checked: false,
+    vendorId: designStep?.vendorId ?? null,
+    vendorCustomerUuid: designStep?.vendorCustomerUuid ?? null,
+    vendorName: designStep?.vendorName ?? null,
+    costAmount: Number(designStep?.costAmount || 0) || 0,
+    plannedDate: designStep?.plannedDate ? new Date(designStep.plannedDate) : undefined,
+    status: "pending",
+    posting: { isPosted: false, txnId: null, postedAt: null },
+  };
+}
 
-/* ----------------------------- Preview ---------------------------- */
 /**
- * GET /preview
- * Returns counts to help decide migration scope.
- */
-router.get("/preview", async (_req, res) => {
-  try {
-    const col = mongoose.connection.collection(COLLECTION);
-    const [counts] = await col
-      .aggregate([
-        {
-          $facet: {
-            total: [{ $count: "n" }],
-            oldStyle: [{ $match: OLD_FILTER }, { $count: "n" }],
-          },
-        },
-        {
-          $project: {
-            total: { $ifNull: [{ $arrayElemAt: ["$total.n", 0] }, 0] },
-            oldStyle: { $ifNull: [{ $arrayElemAt: ["$oldStyle.n", 0] }, 0] },
-          },
-        },
-      ])
-      .toArray();
-
-    return res.json({ ok: true, ...counts });
-  } catch (err) {
-    console.error("Preview error:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Preview failed" });
-  }
-});
-
-/* ------------------------------- Run ------------------------------ */
-/**
- * POST /run?onlyOld=1
- * Body: { secret?: string }  // must match process.env.MIGRATE_SECRET if set
- */
-router.post("/run", async (req, res) => {
-  try {
-    const { secret } = req.body || {};
-    if (process.env.MIGRATE_SECRET && secret !== process.env.MIGRATE_SECRET) {
-      return res.status(403).json({ ok: false, error: "Forbidden" });
-    }
-
-    const onlyOld = String(req.query.onlyOld || "").trim() === "1";
-    const filter = onlyOld ? OLD_FILTER : {};
-
-    const col = mongoose.connection.collection(COLLECTION);
-    const result = await col.updateMany(filter, buildStages());
-
-    return res.json({
-      ok: true,
-      matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount,
-      onlyOld,
-    });
-  } catch (err) {
-    console.error("Migration error:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Migration failed" });
-  }
-});
-
-/* ------------------------- Frontend Helpers ----------------------- */
-/**
- * GET /flat?limit=200&skip=0
- * Returns *old-format* orders with computed totals so the table can show data pre-migration.
- * Here we also show only the single "Design" step (if present) with label forced to "Design".
+ * GET /api/orders/migrate/flat
+ * Returns orders that:
+ *  - have Design step,
+ *  - do NOT have Print step,
+ *  - and latest Status is "Delivered" (case-insensitive).
  */
 router.get("/flat", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit || "200", 10), 1000);
-    const skip = Math.max(parseInt(req.query.skip || "0", 10), 0);
-
-    const col = mongoose.connection.collection(COLLECTION);
-
-    const docs = await col
-      .aggregate([
-        { $match: OLD_FILTER },
-        {
-          $addFields: {
-            _isOld: true,
-
-            // Compute sale subtotal (respect existing if present)
-            _saleSubtotal: {
-              $cond: [
-                { $ne: ["$saleSubtotal", null] },
-                "$saleSubtotal",
-                {
-                  $sum: {
-                    $map: {
-                      input: { $ifNull: ["$Items", []] },
-                      as: "it",
-                      in: {
-                        $ifNull: [
-                          "$$it.Amount",
-                          {
-                            $multiply: [
-                              { $ifNull: ["$$it.Quantity", 0] },
-                              { $ifNull: ["$$it.Rate", 0] },
-                            ],
-                          },
-                        ],
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-
-            // Filter steps to only "Design" and force label = "Design"
-            _stepsFiltered: {
-              $slice: [
-                {
-                  $map: {
-                    input: {
-                      $filter: {
-                        input: { $ifNull: ["$Steps", []] },
-                        as: "s",
-                        cond: {
-                          $or: [
-                            {
-                              $regexMatch: {
-                                input: { $ifNull: ["$$s.label", ""] },
-                                regex: /design/i,
-                              },
-                            },
-                            { $eq: [{ $ifNull: ["$$s.Task", ""], }, "Design"] },
-                          ],
-                        },
-                      },
-                    },
-                    as: "s",
-                    in: {
-                      $mergeObjects: [
-                        "$$s",
-                        {
-                          label: "Design",
-                          vendorId: { $ifNull: ["$$s.vendorId", null] },
-                          vendorCustomerUuid: {
-                            $ifNull: ["$$s.vendorCustomerUuid", null],
-                          },
-                          vendorName: { $ifNull: ["$$s.vendorName", null] },
-                          costAmount: { $ifNull: ["$$s.costAmount", 0] },
-                          status: { $ifNull: ["$$s.status", "pending"] },
-                          posting: {
-                            $ifNull: [
-                              "$$s.posting",
-                              { isPosted: false, txnId: null, postedAt: null },
-                            ],
-                          },
-                          stepId: {
-                            $ifNull: [
-                              "$$s.stepId",
-                              { $toString: { $ifNull: ["$$s._id", ""] } },
-                            ],
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-                1,
-              ],
-            },
-
-            _stepsCostTotal: {
-              $sum: {
-                $map: {
-                  input: {
-                    $ifNull: ["$Steps", []], // sum cost from original steps to reflect real cost
-                  },
-                  as: "sp",
-                  in: { $ifNull: ["$$sp.costAmount", 0] },
-                },
+    const rows = await Orders.aggregate([
+      {
+        $project: {
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Customer_name: 1, // remove if not in your schema
+          Steps: 1,
+          Status: 1,
+          // detect Design / Print in steps
+          hasDesign: {
+            $anyElementTrue: {
+              $map: {
+                input: { $ifNull: ["$Steps", []] },
+                as: "s",
+                in: { $eq: [{ $toLower: { $ifNull: ["$$s.label", ""] } }, "design"] },
               },
             },
           },
+          hasPrint: {
+            $anyElementTrue: {
+              $map: {
+                input: { $ifNull: ["$Steps", []] },
+                as: "s",
+                in: { $eq: [{ $toLower: { $ifNull: ["$$s.label", ""] } }, "print"] },
+              },
+            },
+          },
+          // compute latest status task (if Status array not empty)
+          _statusSize: { $size: { $ifNull: ["$Status", []] } },
         },
-        {
-          $project: {
-            Order_Number: 1,
-            Customer_uuid: 1,
-            Customer_name: 1, // if you store it; UI can fall back to uuid
-            Steps: "$_stepsFiltered", // only the single "Design" step (or empty)
-            saleSubtotal: "$_saleSubtotal",
-            stepsCostTotal: "$_stepsCostTotal",
-            _isOld: 1,
+      },
+      {
+        $addFields: {
+          latestStatus: {
+            $cond: [
+              { $gt: ["$_statusSize", 0] },
+              {
+                $arrayElemAt: [
+                  "$Status",
+                  { $subtract: ["$_statusSize", 1] }
+                ],
+              },
+              null,
+            ],
           },
         },
-        { $sort: { Order_Number: 1, _id: 1 } },
-        { $skip: skip },
-        { $limit: limit },
-      ])
-      .toArray();
+      },
+      {
+        $addFields: {
+          latestTaskLower: {
+            $toLower: { $ifNull: ["$latestStatus.Task", ""] },
+          },
+        },
+      },
+      // must: has Design, no Print, latest == delivered
+      { $match: { hasDesign: true, hasPrint: false, latestTaskLower: "delivered" } },
+      {
+        $project: {
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Customer_name: 1,
+          Steps: 1,
+          _isOld: { $literal: true }, // used by UI badge
+        },
+      },
+      { $sort: { Order_Number: 1 } },
+    ]);
 
-    res.json(docs);
+    res.json(rows);
   } catch (err) {
-    console.error("flat error:", err);
-    res
-      .status(500)
-      .json({ error: err.message || "Failed to fetch candidates" });
+    console.error("migrate/flat error:", err);
+    res.status(500).json({ error: "Failed to load orders for migration" });
   }
 });
 
 /**
- * PUT /single/:id
- * Migrate a single order by _id.
+ * PUT /api/orders/migrate/single/:id
+ * Append Print step if:
+ *  - order exists,
+ *  - latest Status is Delivered,
+ *  - has Design,
+ *  - doesn't already have Print.
  */
 router.put("/single/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ error: "Invalid order id" });
+  }
+
   try {
-    const id = req.params.id;
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ ok: false, error: "Invalid id" });
+    const order = await Orders.findById(id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    if (!isLatestDelivered(order)) {
+      return res.status(400).json({ error: "Latest status is not Delivered" });
     }
-    const col = mongoose.connection.collection(COLLECTION);
-    const result = await col.updateOne({ _id: new ObjectId(id) }, buildStages());
-    return res.json({
-      ok: true,
-      matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount,
-    });
+
+    const steps = Array.isArray(order.Steps) ? order.Steps : [];
+    const hasPrint = steps.some((s) => norm(s?.label) === "print");
+    const designStep = steps.find((s) => norm(s?.label) === "design");
+
+    if (hasPrint) {
+      return res.json({ ok: true, message: "Already has Print step" });
+    }
+    if (!designStep) {
+      return res.status(400).json({ error: "No Design step to base on" });
+    }
+
+    steps.push(buildPrintStep(designStep));
+    order.Steps = steps;
+    await order.save();
+
+    res.json({ ok: true, added: "Print", orderId: order._id });
   } catch (err) {
-    console.error("single migrate error:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Single migration failed" });
+    console.error("migrate/single error:", err);
+    res.status(500).json({ error: "Migration failed for this order" });
   }
 });
 
 /**
- * PUT /bulk
+ * PUT /api/orders/migrate/bulk
  * Body: { ids: string[] }
- * Migrate many orders by ids.
+ * Sequentially run the same logic as single.
  */
 router.put("/bulk", async (req, res) => {
-  try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    if (ids.length === 0) {
-      return res.status(400).json({ ok: false, error: "ids[] required" });
-    }
-
-    const valid = [];
-    const invalid = [];
-    for (const s of ids) {
-      if (ObjectId.isValid(s)) valid.push(new ObjectId(s));
-      else invalid.push(s);
-    }
-    if (valid.length === 0) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "No valid ObjectIds in ids[]" });
-    }
-
-    const col = mongoose.connection.collection(COLLECTION);
-    const result = await col.updateMany({ _id: { $in: valid } }, buildStages());
-
-    return res.json({
-      ok: true,
-      matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount,
-      invalidIds: invalid,
-    });
-  } catch (err) {
-    console.error("bulk migrate error:", err);
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message || "Bulk migration failed" });
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "Provide ids: string[]" });
   }
+
+  const results = [];
+  for (const id of ids) {
+    if (!mongoose.isValidObjectId(id)) {
+      results.push({ id, ok: false, error: "Invalid id" });
+      continue;
+    }
+    try {
+      const order = await Orders.findById(id);
+      if (!order) {
+        results.push({ id, ok: false, error: "Order not found" });
+        continue;
+      }
+      if (!isLatestDelivered(order)) {
+        results.push({ id, ok: false, error: "Latest status not Delivered" });
+        continue;
+      }
+
+      const steps = Array.isArray(order.Steps) ? order.Steps : [];
+      const hasPrint = steps.some((s) => norm(s?.label) === "print");
+      const designStep = steps.find((s) => norm(s?.label) === "design");
+
+      if (hasPrint) {
+        results.push({ id, ok: true, message: "Already has Print step" });
+        continue;
+      }
+      if (!designStep) {
+        results.push({ id, ok: false, error: "No Design step" });
+        continue;
+      }
+
+      steps.push(buildPrintStep(designStep));
+      order.Steps = steps;
+      await order.save();
+
+      results.push({ id, ok: true, added: "Print" });
+    } catch (err) {
+      console.error("bulk migrate item error:", id, err);
+      results.push({ id, ok: false, error: "Exception" });
+    }
+  }
+
+  res.json({ ok: true, count: results.length, results });
 });
 
 module.exports = router;
