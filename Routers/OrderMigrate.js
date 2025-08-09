@@ -18,6 +18,9 @@ const OLD_FILTER = { Steps: { $elemMatch: { posting: { $exists: false } } } };
  * - saleSubtotal (from Items)
  * - stepsCostTotal (sum of Steps.costAmount)
  * Idempotent: existing values are preserved.
+ *
+ * ✅ CHANGE: Only set `label` for steps where Task/task === "Design" AND label is empty.
+ *            Other steps' labels are left untouched.
  */
 function buildStages() {
   return [
@@ -44,6 +47,55 @@ function buildStages() {
                   },
                   stepId: {
                     $ifNull: ["$$s.stepId", { $toString: { $ifNull: ["$$s._id", ""] } }]
+                  },
+                  // ✅ Only update label if Task/task is "Design" and label is empty
+                  label: {
+                    $cond: [
+                      {
+                        $and: [
+                          {
+                            $in: [
+                              {
+                                $toLower: {
+                                  $ifNull: ["$$s.Task", { $ifNull: ["$$s.task", ""] }]
+                                }
+                              },
+                              ["design"]
+                            ]
+                          },
+                          {
+                            $or: [
+                              { $eq: ["$$s.label", null] },
+                              { $eq: ["$$s.label", ""] }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        $trim: {
+                          input: {
+                            $concat: [
+                              "Design",
+                              {
+                                $cond: [
+                                  {
+                                    $and: [
+                                      { $ne: ["$$s.status", null] },
+                                      { $ne: ["$$s.status", ""] }
+                                    ]
+                                  },
+                                  " ",
+                                  ""
+                                ]
+                              },
+                              { $ifNull: ["$$s.status", ""] }
+                            ]
+                          }
+                        }
+                      },
+                      // else keep existing label as-is
+                      "$$s.label"
+                    ]
                   }
                 }
               ]
