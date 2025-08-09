@@ -1,64 +1,76 @@
-// POST /orders/:orderId/steps/:stepId/assign-vendor
-// body: { vendorId, vendorName, costAmount, createdBy }
-router.post('/orders/:orderId/steps/:stepId/assign-vendor', async (req, res) => {
-  const { orderId, stepId } = req.params;
-  const { vendorId, vendorName, costAmount, createdBy } = req.body;
+const mongoose = require('mongoose');
 
-  const session = await mongoose.startSession();
-  try {
-    await session.withTransaction(async () => {
-      const order = await Orders.findById(orderId).session(session);
-      if (!order) throw new Error('Order not found');
+// --- Status subdoc
+const statusSchema = new mongoose.Schema({
+  Task: { type: String, required: true },
+  Assigned: { type: String, required: true },
+  Delivery_Date: { type: Date, required: true },
+  Status_number: { type: Number, required: true },
+  CreatedAt: { type: Date, required: true }
+}, { _id: false });
 
-      const step = order.Steps.id(stepId);
-      if (!step) throw new Error('Step not found');
+// --- Step subdoc (enriched so you can assign vendors later)
+const stepSchema = new mongoose.Schema({
+  label:   { type: String, required: true },
+  checked: { type: Boolean, default: false },
 
-      // Update vendor info
-      step.vendorId = vendorId || step.vendorId || null;
-      step.vendorName = vendorName || step.vendorName || null;
-      step.costAmount = Number(costAmount ?? step.costAmount ?? 0);
+  vendorId:   { type: String, default: null },
+  vendorName: { type: String, default: null },
+  costAmount: { type: Number, default: 0, min: 0 },
 
-      // If already posted, just save vendor info and return
-      if (step.posting?.isPosted) {
-        await order.save({ session });
-        return res.json({ ok: true, message: 'Vendor saved. Step already posted.', txnId: step.posting.txnId });
-      }
-
-      // Build and save a balanced Transaction (use your Transaction model)
-      const txn = await Transaction.create([{
-        Transaction_date: new Date(),
-        Description: `Outsource step: ${step.label} (Order #${order.Order_Number})`,
-        Payment_mode: null,
-        Created_by: createdBy || 'system',
-
-        // If you added source/counterparty fields in your Transaction model, fill them:
-        source: { type: 'order_step', id: step._id, label: step.label },
-        counterparty: { type: 'vendor', id: vendorId || null, name: vendorName || null },
-
-        Journal_entry: [
-          { Account_id: 'COGS:Outsourcing',        Type: 'Debit',  Amount: step.costAmount },
-          { Account_id: `Vendor:${vendorId || vendorName}`, Type: 'Credit', Amount: step.costAmount }
-        ],
-
-        // link for reference
-        Order_uuid: order.Order_uuid || null,
-        Order_number: order.Order_Number,
-
-        // totals will be auto-computed if you added a pre('validate') guard
-        Total_Debit: 0,
-        Total_Credit: 0
-      }], { session });
-
-      // Link back to the step
-      step.posting = { isPosted: true, txnId: txn[0]._id, postedAt: new Date() };
-      step.status = 'posted';
-
-      await order.save({ session });
-      res.json({ ok: true, txnId: txn[0]._id });
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  } finally {
-    session.endSession();
+  status: { type: String, enum: ['pending','done','posted','paid'], default: 'pending' },
+  posting: {
+    isPosted: { type: Boolean, default: false },
+    txnId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', default: null },
+    postedAt: { type: Date, default: null }
   }
+}, { _id: true });
+
+// --- Item subdoc
+const itemSchema = new mongoose.Schema({
+  Item: { type: String, required: true },
+  Quantity: { type: Number, required: true },
+  Rate: { type: Number, required: true },
+  Amount: { type: Number, required: true }
+}, { _id: false });
+
+// --- Order
+const OrdersSchema = new mongoose.Schema({
+  Order_uuid: { type: String },
+  Order_Number: { type: Number, required: true, unique: true },
+  Customer_uuid: { type: String, required: true },
+  Priority: { type: String, required: true },
+
+  Items:  [itemSchema],
+  Status: [statusSchema],
+  Steps:  [stepSchema],
+
+  Remark: { type: String, required: true },
+
+  // legacy single-line
+  Rate: { type: Number, default: 0 },
+  Quantity: { type: Number, default: 0 },
+  Amount: { type: Number, default: 0 },
+
+  // convenience totals (optional)
+  saleSubtotal:   { type: Number, default: 0 },
+  stepsCostTotal: { type: Number, default: 0 }
+}, { timestamps: true });
+
+// Indexes
+OrdersSchema.index({ Customer_uuid: 1 });
+OrdersSchema.index({ Priority: 1 });
+OrdersSchema.index({ Order_uuid: 1 });
+OrdersSchema.index({ Amount: 1 });
+OrdersSchema.index({ 'Items.Item': 1 });
+OrdersSchema.index({ 'Steps.vendorId': 1 });
+OrdersSchema.index({ 'Steps.posting.isPosted': 1 });
+
+// auto totals
+OrdersSchema.pre('save', function(next){
+  this.saleSubtotal = (this.Items || []).reduce((s,it)=>s+(+it.Amount||0),0);
+  this.stepsCostTotal = (this.Steps || []).reduce((s,st)=>s+(+st.costAmount||0),0);
+  next();
 });
+
+module.exports = mongoose.model('Orders', OrdersSchema);
