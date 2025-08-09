@@ -138,27 +138,48 @@ router.get("/all-data", async (req, res) => {
 
 /* ----------------------- NEW: RAW FEED for AllVendors (no filtering) ----------------------- */
 /** Returns minimal data; let frontend filter/search/project. */
+/* ----------------------- RAW FEED for AllVendors ----------------------- */
+/** Returns minimal data; includes Status so FE can inspect latest entry.
+ *  Optional ?deliveredOnly=true will keep only orders whose latest Status.Task === "Delivered" (case-insensitive).
+ */
 router.get("/allvendors-raw", async (req, res) => {
   try {
-    // No filtering here; return lean/minimal for client-side work
-    const docs = await Orders.find(
-      {},
-      {
-        Order_Number: 1,
-        Customer_uuid: 1,
-        Remark: 1,
-        Steps: 1,
-      }
-    )
-      .sort({ Order_Number: -1 })
-      .lean();
+    const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
 
+    const pipeline = [
+      // Keep required fields + Status (needed by FE to check latest)
+      {
+        $project: {
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Remark: 1,
+          Steps: 1,
+          Status: 1,
+          // Compute latest status safely even if Status is missing/empty
+          latestStatus: {
+            $cond: [
+              { $gt: [ { $size: { $ifNull: ["$Status", []] } }, 0 ] },
+              { $arrayElemAt: ["$Status", { $subtract: [ { $size: "$Status" }, 1 ] }] },
+              null
+            ]
+          }
+        }
+      },
+      // Optional filter: only keep orders with latest status "Delivered"
+      ...(deliveredOnly
+        ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }]
+        : []),
+      { $sort: { Order_Number: -1 } }
+    ];
+
+    const docs = await Orders.aggregate(pipeline);
     res.json({ rows: docs, total: docs.length });
   } catch (e) {
     console.error("allvendors-raw error:", e);
     res.status(500).json({ error: e.message });
   }
 });
+
 
 /* ----------------------- LEGACY PAGE: ALL VENDORS (kept) ----------------------- */
 router.get("/allvendors", async (req, res) => {
