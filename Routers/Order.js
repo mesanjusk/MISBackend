@@ -393,15 +393,15 @@ router.get("/reports/vendor-missing", async (req, res) => {
   }
 });
 
-/* ************* FIXED: ASSIGN VENDOR & POST (Payment_mode="purchase") ************* */
+/* ************* ASSIGN VENDOR & POST (uses plannedDate, sets purchase mode, UUID, seq ID) ************* */
 router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
   const { orderId, stepId } = req.params;
   const {
-    vendorId,               // optional
-    vendorName,             // optional
-    vendorCustomerUuid,     // sent by frontend
+    vendorId,
+    vendorName,
+    vendorCustomerUuid,
     costAmount,
-    plannedDate,            // optional (YYYY-MM-DD)
+    plannedDate,          // YYYY-MM-DD from UI (optional)
     createdBy
   } = req.body;
 
@@ -442,34 +442,45 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
         return res.json({ ok: true, message: "Vendor saved (no posting for 0 amount)." });
       }
 
-      // Journal lines (Debit COGS, Credit Vendor)
+      // Journal lines
       const lines = [
         { Account_id: "COGS:Outsourcing", Type: "Debit",  Amount: amount },
         { Account_id: `Vendor:${resolvedVendor}`, Type: "Credit", Amount: amount }
       ];
 
-      // Create Transaction with required fields.
-      // NOTE: Your schema requires Payment_mode; set to "purchase" by default here.
+      // Use plannedDate if provided, else now
+      const txnDate = plannedDate ? new Date(plannedDate) : new Date();
+
+      // Get next Transaction_id (best-effort) inside same session
+      const lastTxn = await Transaction
+        .findOne({}, { Transaction_id: 1 })
+        .sort({ Transaction_id: -1 })
+        .session(session)
+        .lean();
+      const nextId = (lastTxn?.Transaction_id || 0) + 1;
+
+      // Create Transaction meeting your existing schema
       const txnDocs = await Transaction.create([{
+        Transaction_uuid: uuid(),
+        Transaction_id: nextId,
         Order_uuid: order.Order_uuid || null,
         Order_number: order.Order_Number,
-        Transaction_date: new Date(),
+        Transaction_date: txnDate,
         Description: `Outsource step: ${step.label} (Order #${order.Order_Number})`,
         Total_Debit: amount,
         Total_Credit: amount,
-        Payment_mode: "purchase",               // <-- THE FIX
+        Payment_mode: "purchase",
         Created_by: createdBy || "system",
         image: null,
-        Journal_entry: lines,
-        source: { type: "order_step", id: step._id, label: step.label },
-        counterparty: { type: "vendor", id: (vendorCustomerUuid || vendorId) || null, name: vendorName || null }
+        Journal_entry: lines
       }], { session });
 
+      // Mark step posted
       step.posting = { isPosted: true, txnId: txnDocs[0]._id, postedAt: new Date() };
       step.status = "posted";
 
       await order.save({ session });
-      res.json({ ok: true, txnId: txnDocs[0]._id });
+      res.json({ ok: true, txnId: txnDocs[0]._id, transactionId: nextId });
     });
   } catch (e) {
     console.error("assign-vendor error:", e);
