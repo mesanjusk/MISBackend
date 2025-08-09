@@ -5,6 +5,11 @@ const socketIO = require("socket.io");
 const connectDB = require("./mongo");
 require("dotenv").config();
 
+// Handle any unhandled promise rejections to avoid crashing the app
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", reason);
+});
+
 // Routers
 const Users = require("./Routers/Users");
 const Usergroup = require("./Routers/Usergroup");
@@ -124,9 +129,14 @@ app.post("/whatsapp/send-test", async (req, res) => {
 
 
 // ✅ Init DB + WhatsApp Session
-connectDB().then(() => {
-  setupWhatsApp(io, process.env.SESSION_ID || "admin");
-});
+(async () => {
+  await connectDB();
+  try {
+    await setupWhatsApp(io, process.env.SESSION_ID || "admin");
+  } catch (err) {
+    console.error("❌ Failed to initialize WhatsApp client:", err);
+  }
+})();
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
