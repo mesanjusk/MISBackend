@@ -1,10 +1,12 @@
 const express = require("express");
 const router = express.Router();
-const Orders = require("../Models/order"); // ✅ Only use this once
+const mongoose = require("mongoose");
+const Orders = require("../Models/order"); // ✅ your Order model
+const Transaction = require("../Models/transaction"); // ✅ your Transaction model (from your schema shared earlier)
 const { v4: uuid } = require("uuid");
 const { updateOrderStatus } = require('../Controller/orderController');
 
-// ✅ Add Order
+/* ------------------------------ Add Order ------------------------------ */
 router.post("/addOrder", async (req, res) => {
   const {
     Customer_uuid,
@@ -14,35 +16,49 @@ router.post("/addOrder", async (req, res) => {
     Steps = [],
   } = req.body;
 
+  const todayISO = new Date().toISOString();
+
   const statusDefaults = {
     Task: "Design",
     Assigned: "Sai",
     Status_number: 1,
-    Delivery_Date: new Date().toISOString().split("T")[0],
-    CreatedAt: new Date().toISOString().split("T")[0],
+    Delivery_Date: todayISO, // schema expects Date; ISO is fine
+    CreatedAt: todayISO,
   };
 
-  const updatedStatus = Status.map((status) => ({
+  const updatedStatus = (Status || []).map((status) => ({
     ...statusDefaults,
     ...status,
+    Delivery_Date: status.Delivery_Date ? new Date(status.Delivery_Date) : new Date(),
+    CreatedAt: status.CreatedAt ? new Date(status.CreatedAt) : new Date(),
   }));
 
-  if (!updatedStatus[0].Task || !updatedStatus[0].Assigned || !updatedStatus[0].Delivery_Date) {
+  if (!updatedStatus[0]?.Task || !updatedStatus[0]?.Assigned || !updatedStatus[0]?.Delivery_Date) {
     return res.status(400).json({
       success: false,
       message: "Task, Assigned, and Delivery_Date fields in Status are required.",
     });
   }
 
-  const flatSteps = Steps.reduce((acc, step) => {
+  // Flatten steps to your existing shape, but preserve future vendor fields if provided
+  const flatSteps = (Steps || []).reduce((acc, step) => {
     if (step && typeof step.label === "string") {
-      acc.push({ label: step.label, checked: !!step.checked });
+      acc.push({
+        label: step.label,
+        checked: !!step.checked,
+        // optional vendor fields (your enriched schema supports these):
+        vendorId: step.vendorId ?? null,
+        vendorName: step.vendorName ?? null,
+        costAmount: Number(step.costAmount ?? 0),
+        status: step.status || 'pending',
+        posting: step.posting || { isPosted: false, txnId: null, postedAt: null }
+      });
     }
     return acc;
   }, []);
 
   try {
-    const lastOrder = await Orders.findOne().sort({ Order_Number: -1 });
+    const lastOrder = await Orders.findOne().sort({ Order_Number: -1 }).lean();
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
 
     const newOrder = new Orders({
@@ -56,21 +72,28 @@ router.post("/addOrder", async (req, res) => {
     });
 
     await newOrder.save();
-    res.json({ success: true, message: "Order added successfully" });
+    res.json({ success: true, message: "Order added successfully", orderId: newOrder._id, orderNumber: newOrderNumber });
   } catch (error) {
     console.error("Error saving order:", error);
     res.status(500).json({ success: false, message: "Failed to add order" });
   }
 });
 
-// ✅ Unified tab view API for React frontend
+/* --------------------- Unified tab view API (fixed) -------------------- */
 router.get('/all-data', async (req, res) => {
   try {
-    const delivered = await Orders.find({ 'Status.Task': 'Delivered' });
-    const report = await Orders.find({ 'Status.Task': 'Delivered', Items: { $not: { $size: 0 } } });
-    const outstanding = await Orders.find({ 'Status.Task': { $ne: 'Delivered' } });
+    // Use $elemMatch to search inside array of Status objects
+    const delivered = await Orders.find({ Status: { $elemMatch: { Task: 'Delivered' } } });
+
+    const report = await Orders.find({
+      Status: { $elemMatch: { Task: 'Delivered' } },
+      Items: { $exists: true, $not: { $size: 0 } }
+    });
+
+    const outstanding = await Orders.find({ Status: { $not: { $elemMatch: { Task: 'Delivered' } } } });
+
     const bills = await Orders.find({
-      'Status.Task': 'Delivered',
+      Status: { $elemMatch: { Task: 'Delivered' } },
       $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }]
     });
 
@@ -81,7 +104,7 @@ router.get('/all-data', async (req, res) => {
   }
 });
 
-// ✅ Other routes
+/* ------------------------------ Status APIs ---------------------------- */
 router.post('/updateStatus', async (req, res) => {
   const { orderId, newStatus } = req.body;
   const result = await updateOrderStatus(orderId, newStatus);
@@ -98,15 +121,33 @@ router.post('/addStatus', async (req, res) => {
   }
 });
 
+/* --------------------------- Update Order (UI) ------------------------- */
+/** NOTE: Your Orders schema does not have root Delivery_Date.
+ * If you intend to update the latest Status.Delivery_Date, adjust accordingly.
+ */
 router.put("/updateOrder/:id", async (req, res) => {
   try {
     const { Delivery_Date, ...otherFields } = req.body;
-    const [day, month, year] = Delivery_Date.split('-');
-    const isoDate = `${year}-${month}-${day}`;
+
+    const updateDoc = { ...otherFields };
+
+    if (Delivery_Date) {
+      // Update the most recent status' Delivery_Date
+      const order = await Orders.findById(req.params.id);
+      if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+      const lastIndex = (order.Status?.length || 1) - 1;
+      if (lastIndex >= 0) {
+        order.Status[lastIndex].Delivery_Date = new Date(Delivery_Date); // accepts dd-mm-yyyy? ensure frontend sends ISO or parse
+        Object.assign(order, otherFields);
+        const saved = await order.save();
+        return res.json({ success: true, result: saved });
+      }
+    }
 
     const updatedOrder = await Orders.findOneAndUpdate(
       { _id: req.params.id },
-      { $set: { Delivery_Date: isoDate, ...otherFields } },
+      { $set: updateDoc },
       { new: true }
     );
 
@@ -121,6 +162,7 @@ router.put("/updateOrder/:id", async (req, res) => {
   }
 });
 
+/* --------------------------- Update Delivery --------------------------- */
 router.put('/updateDelivery/:id', async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items, Remark } = req.body;
@@ -131,28 +173,25 @@ router.put('/updateDelivery/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    order.Customer_uuid = Customer_uuid;
-    order.Items = Items;
-    order.Remark = Remark;
+    order.Customer_uuid = Customer_uuid ?? order.Customer_uuid;
+    order.Items = Array.isArray(Items) ? Items : order.Items;
+    order.Remark = Remark ?? order.Remark;
 
     await order.save();
     res.status(200).json({ success: true, message: 'Order updated successfully' });
   } catch (error) {
     console.error('Error updating order:', error);
-    res.status(500).json({ success: false, message: 'Error updating order', error });
+    res.status(500).json({ success: false, message: 'Error updating order', error: error.message });
   }
 });
 
+/* -------------------------- Listing (filtered) ------------------------- */
 router.get('/GetOrderList', async (req, res) => {
   try {
     const data = await Orders.find({});
     const filteredData = data.filter(order => {
-      const isDelivered = order.Status.some(s =>
-        s.Task && s.Task.trim().toLowerCase() === 'delivered'
-      );
-      const isCancelled = order.Status.some(s =>
-        s.Task && s.Task.trim().toLowerCase() === 'cancel'
-      );
+      const isDelivered = order.Status?.some(s => s.Task?.trim().toLowerCase() === 'delivered');
+      const isCancelled = order.Status?.some(s => s.Task?.trim().toLowerCase() === 'cancel');
       return !(isDelivered || isCancelled);
     });
     res.json({ success: true, result: filteredData });
@@ -165,7 +204,7 @@ router.get("/GetDeliveredList", async (req, res) => {
   try {
     const data = await Orders.find({});
     const filtered = data.filter(order => {
-      const isDelivered = order.Status.some(s => s.Task?.trim().toLowerCase() === 'delivered');
+      const isDelivered = order.Status?.some(s => s.Task?.trim().toLowerCase() === 'delivered');
       return isDelivered && (!order.Items || order.Items.length === 0);
     });
     res.json({ success: true, result: filtered });
@@ -178,7 +217,7 @@ router.get("/GetBillList", async (req, res) => {
   try {
     const data = await Orders.find({});
     const filtered = data.filter(order => {
-      const isDelivered = order.Status.some(s => s.Task?.trim().toLowerCase() === 'delivered');
+      const isDelivered = order.Status?.some(s => s.Task?.trim().toLowerCase() === 'delivered');
       return isDelivered && order.Items && order.Items.length > 0;
     });
     res.json({ success: true, result: filtered });
@@ -187,6 +226,7 @@ router.get("/GetBillList", async (req, res) => {
   }
 });
 
+/* ---------------------- Customer linkage checks ----------------------- */
 router.get('/CheckCustomer/:customerUuid', async (req, res) => {
   const { customerUuid } = req.params;
   try {
@@ -201,13 +241,15 @@ router.get('/CheckCustomer/:customerUuid', async (req, res) => {
 router.post('/CheckMultipleCustomers', async (req, res) => {
   try {
     const { ids } = req.body;
-    const linkedOrders = await Orders.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
+    // FIX: your schema uses Customer_uuid (not Customer_id)
+    const linkedOrders = await Orders.find({ Customer_uuid: { $in: ids } }).distinct('Customer_uuid');
     res.status(200).json({ linkedIds: linkedOrders });
   } catch (err) {
     res.status(500).json({ error: 'Error checking linked orders' });
   }
 });
 
+/* ------------------------------ Get by id ----------------------------- */
 router.get('/:id', async (req, res) => {
   const orderId = req.params.id;
   try {
@@ -219,5 +261,152 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ✅ Export router at the end (only once)
+/* ===================================================================== */
+/* =============== NEW: Vendor Missing Report & Posting ================= */
+/* ===================================================================== */
+
+/** Report: orders where any step has no vendor or not posted to ledger */
+router.get('/reports/vendor-missing', async (req, res) => {
+  try {
+    const page  = parseInt(req.query.page || '1', 10);
+    const limit = parseInt(req.query.limit || '20', 10);
+    const skip  = (page - 1) * limit;
+    const deliveredOnly = req.query.deliveredOnly === 'true';
+    const search = (req.query.search || '').trim();
+
+    const match = {};
+    if (deliveredOnly) {
+      match.Status = { $elemMatch: { Task: 'Delivered' } };
+    }
+    if (search) {
+      match.$or = [
+        { Order_Number: isNaN(+search) ? -1 : +search },
+        { Customer_uuid: new RegExp(search, 'i') },
+        { Remark: new RegExp(search, 'i') }
+      ];
+    }
+
+    const pipeline = [
+      { $match: match },
+      { $addFields: {
+          stepsNeedingVendor: {
+            $filter: {
+              input: '$Steps',
+              as: 'st',
+              cond: {
+                $or: [
+                  { $eq: ['$$st.vendorId', null] },
+                  { $eq: ['$$st.vendorId', ''] },
+                  { $eq: ['$$st.posting.isPosted', false] }
+                ]
+              }
+            }
+          }
+        }
+      },
+      { $match: { 'stepsNeedingVendor.0': { $exists: true } } },
+      { $project: {
+          Order_uuid: 1,
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Remark: 1,
+          StepsPending: {
+            $map: {
+              input: '$stepsNeedingVendor',
+              as: 's',
+              in: {
+                stepId: '$$s._id',
+                label: '$$s.label',
+                vendorId: '$$s.vendorId',
+                vendorName: '$$s.vendorName',
+                costAmount: '$$s.costAmount',
+                isPosted: '$$s.posting.isPosted'
+              }
+            }
+          }
+        }
+      },
+      { $sort: { Order_Number: -1 } },
+      { $facet: {
+          data:  [{ $skip: skip }, { $limit: limit }],
+          total: [{ $count: 'count' }]
+        }
+      }
+    ];
+
+    const result = await Orders.aggregate(pipeline);
+    const data = result[0]?.data || [];
+    const total = result[0]?.total?.[0]?.count || 0;
+
+    res.json({ page, limit, total, rows: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Assign vendor later + post vendor cost (idempotent) */
+router.post('/orders/:orderId/steps/:stepId/assign-vendor', async (req, res) => {
+  const { orderId, stepId } = req.params;
+  const { vendorId, vendorName, costAmount, createdBy } = req.body;
+
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const order = await Orders.findById(orderId).session(session);
+      if (!order) throw new Error('Order not found');
+
+      const step = order.Steps.id(stepId);
+      if (!step) throw new Error('Step not found');
+
+      // 1) Update step vendor details
+      step.vendorId = vendorId ?? step.vendorId ?? null;
+      step.vendorName = vendorName ?? step.vendorName ?? null;
+      step.costAmount = Number(costAmount ?? step.costAmount ?? 0);
+
+      // 2) If already posted, just save vendor fields and exit
+      if (step.posting?.isPosted) {
+        await order.save({ session });
+        return res.json({ ok: true, message: 'Vendor saved. Step already posted.', txnId: step.posting.txnId });
+      }
+
+      // 3) Post double-entry: Dr COGS:Outsourcing / Cr Vendor
+      const lines = [
+        { Account_id: 'COGS:Outsourcing', Type: 'Debit',  Amount: step.costAmount },
+        { Account_id: `Vendor:${vendorId || vendorName || 'Unknown'}`, Type: 'Credit', Amount: step.costAmount }
+      ];
+
+      const txnDocs = await Transaction.create([{
+        Transaction_uuid: undefined,
+        Transaction_id: undefined,
+        Order_uuid: order.Order_uuid || null,
+        Order_number: order.Order_Number,
+        Transaction_date: new Date(),
+        Description: `Outsource step: ${step.label} (Order #${order.Order_Number})`,
+        Total_Debit: 0,  // if your Transaction model has pre('validate'), it will compute totals
+        Total_Credit: 0,
+        Payment_mode: null,
+        Created_by: createdBy || 'system',
+        image: null,
+        Journal_entry: lines,
+
+        // If you extended Transaction with these fields, include them:
+        source: { type: 'order_step', id: step._id, label: step.label },
+        counterparty: { type: 'vendor', id: vendorId || null, name: vendorName || null }
+      }], { session });
+
+      // 4) Link back to the step
+      step.posting = { isPosted: true, txnId: txnDocs[0]._id, postedAt: new Date() };
+      step.status = 'posted';
+
+      await order.save({ session });
+      res.json({ ok: true, txnId: txnDocs[0]._id });
+    });
+  } catch (e) {
+    console.error('assign-vendor error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    session.endSession();
+  }
+});
+
 module.exports = router;
