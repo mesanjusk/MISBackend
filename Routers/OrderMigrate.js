@@ -13,44 +13,74 @@ const OLD_FILTER = { Steps: { $elemMatch: { posting: { $exists: false } } } };
 
 /**
  * Build the aggregation pipeline stages used to normalize:
+ * - Steps: KEEP ONLY "Design" step (from label or legacy Task), force label="Design"
  * - Steps[*].vendorId/vendorCustomerUuid/vendorName/costAmount/status/posting/stepId
  * - Items (ensure array)
  * - saleSubtotal (from Items)
  * - stepsCostTotal (sum of Steps.costAmount)
- * Idempotent: existing values are preserved.
+ * Idempotent: existing values are preserved where present.
  */
 function buildStages() {
   return [
     {
       $set: {
+        // Keep only "Design" step (case-insensitive on label) or legacy Task === "Design"
         Steps: {
-          $map: {
-            input: { $ifNull: ["$Steps", []] },
-            as: "s",
-            in: {
-              $mergeObjects: [
-                "$$s",
-                {
-                  vendorId: { $ifNull: ["$$s.vendorId", null] },
-                  vendorCustomerUuid: { $ifNull: ["$$s.vendorCustomerUuid", null] },
-                  vendorName: { $ifNull: ["$$s.vendorName", null] },
-                  costAmount: { $ifNull: ["$$s.costAmount", 0] },
-                  status: { $ifNull: ["$$s.status", "pending"] },
-                  posting: {
-                    $ifNull: [
-                      "$$s.posting",
-                      { isPosted: false, txnId: null, postedAt: null }
-                    ]
+          $slice: [
+            {
+              $map: {
+                input: {
+                  $filter: {
+                    input: { $ifNull: ["$Steps", []] },
+                    as: "s",
+                    cond: {
+                      $or: [
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$$s.label", ""] },
+                            regex: /design/i,
+                          },
+                        },
+                        { $eq: [{ $ifNull: ["$$s.Task", ""] }, "Design"] },
+                      ],
+                    },
                   },
-                  stepId: {
-                    $ifNull: ["$$s.stepId", { $toString: { $ifNull: ["$$s._id", ""] } }]
-                  }
-                }
-              ]
-            }
-          }
+                },
+                as: "s",
+                in: {
+                  $mergeObjects: [
+                    "$$s",
+                    {
+                      // force pretty label
+                      label: "Design",
+                      vendorId: { $ifNull: ["$$s.vendorId", null] },
+                      vendorCustomerUuid: { $ifNull: ["$$s.vendorCustomerUuid", null] },
+                      vendorName: { $ifNull: ["$$s.vendorName", null] },
+                      costAmount: { $ifNull: ["$$s.costAmount", 0] },
+                      status: { $ifNull: ["$$s.status", "pending"] },
+                      posting: {
+                        $ifNull: [
+                          "$$s.posting",
+                          { isPosted: false, txnId: null, postedAt: null },
+                        ],
+                      },
+                      stepId: {
+                        $ifNull: [
+                          "$$s.stepId",
+                          { $toString: { $ifNull: ["$$s._id", ""] } },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+            1, // keep at most one "Design" step
+          ],
         },
+
         Items: { $ifNull: ["$Items", []] },
+
         saleSubtotal: {
           $ifNull: [
             "$saleSubtotal",
@@ -65,17 +95,17 @@ function buildStages() {
                       {
                         $multiply: [
                           { $ifNull: ["$$it.Quantity", 0] },
-                          { $ifNull: ["$$it.Rate", 0] }
-                        ]
-                      }
-                    ]
-                  }
-                }
-              }
-            }
-          ]
-        }
-      }
+                          { $ifNull: ["$$it.Rate", 0] },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
     },
     {
       $set: {
@@ -84,12 +114,12 @@ function buildStages() {
             $map: {
               input: { $ifNull: ["$Steps", []] },
               as: "sp",
-              in: { $ifNull: ["$$sp.costAmount", 0] }
-            }
-          }
-        }
-      }
-    }
+              in: { $ifNull: ["$$sp.costAmount", 0] },
+            },
+          },
+        },
+      },
+    },
   ];
 }
 
@@ -111,22 +141,24 @@ router.get("/preview", async (_req, res) => {
         {
           $facet: {
             total: [{ $count: "n" }],
-            oldStyle: [{ $match: OLD_FILTER }, { $count: "n" }]
-          }
+            oldStyle: [{ $match: OLD_FILTER }, { $count: "n" }],
+          },
         },
         {
           $project: {
             total: { $ifNull: [{ $arrayElemAt: ["$total.n", 0] }, 0] },
-            oldStyle: { $ifNull: [{ $arrayElemAt: ["$oldStyle.n", 0] }, 0] }
-          }
-        }
+            oldStyle: { $ifNull: [{ $arrayElemAt: ["$oldStyle.n", 0] }, 0] },
+          },
+        },
       ])
       .toArray();
 
     return res.json({ ok: true, ...counts });
   } catch (err) {
     console.error("Preview error:", err);
-    return res.status(500).json({ ok: false, error: err.message || "Preview failed" });
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Preview failed" });
   }
 });
 
@@ -152,11 +184,13 @@ router.post("/run", async (req, res) => {
       ok: true,
       matchedCount: result.matchedCount,
       modifiedCount: result.modifiedCount,
-      onlyOld
+      onlyOld,
     });
   } catch (err) {
     console.error("Migration error:", err);
-    return res.status(500).json({ ok: false, error: err.message || "Migration failed" });
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Migration failed" });
   }
 });
 
@@ -164,6 +198,7 @@ router.post("/run", async (req, res) => {
 /**
  * GET /flat?limit=200&skip=0
  * Returns *old-format* orders with computed totals so the table can show data pre-migration.
+ * Here we also show only the single "Design" step (if present) with label forced to "Design".
  */
 router.get("/flat", async (req, res) => {
   try {
@@ -178,6 +213,8 @@ router.get("/flat", async (req, res) => {
         {
           $addFields: {
             _isOld: true,
+
+            // Compute sale subtotal (respect existing if present)
             _saleSubtotal: {
               $cond: [
                 { $ne: ["$saleSubtotal", null] },
@@ -193,48 +230,109 @@ router.get("/flat", async (req, res) => {
                           {
                             $multiply: [
                               { $ifNull: ["$$it.Quantity", 0] },
-                              { $ifNull: ["$$it.Rate", 0] }
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  }
-                }
-              ]
+                              { $ifNull: ["$$it.Rate", 0] },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              ],
             },
+
+            // Filter steps to only "Design" and force label = "Design"
+            _stepsFiltered: {
+              $slice: [
+                {
+                  $map: {
+                    input: {
+                      $filter: {
+                        input: { $ifNull: ["$Steps", []] },
+                        as: "s",
+                        cond: {
+                          $or: [
+                            {
+                              $regexMatch: {
+                                input: { $ifNull: ["$$s.label", ""] },
+                                regex: /design/i,
+                              },
+                            },
+                            { $eq: [{ $ifNull: ["$$s.Task", ""], }, "Design"] },
+                          ],
+                        },
+                      },
+                    },
+                    as: "s",
+                    in: {
+                      $mergeObjects: [
+                        "$$s",
+                        {
+                          label: "Design",
+                          vendorId: { $ifNull: ["$$s.vendorId", null] },
+                          vendorCustomerUuid: {
+                            $ifNull: ["$$s.vendorCustomerUuid", null],
+                          },
+                          vendorName: { $ifNull: ["$$s.vendorName", null] },
+                          costAmount: { $ifNull: ["$$s.costAmount", 0] },
+                          status: { $ifNull: ["$$s.status", "pending"] },
+                          posting: {
+                            $ifNull: [
+                              "$$s.posting",
+                              { isPosted: false, txnId: null, postedAt: null },
+                            ],
+                          },
+                          stepId: {
+                            $ifNull: [
+                              "$$s.stepId",
+                              { $toString: { $ifNull: ["$$s._id", ""] } },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                },
+                1,
+              ],
+            },
+
             _stepsCostTotal: {
               $sum: {
                 $map: {
-                  input: { $ifNull: ["$Steps", []] },
+                  input: {
+                    $ifNull: ["$Steps", []], // sum cost from original steps to reflect real cost
+                  },
                   as: "sp",
-                  in: { $ifNull: ["$$sp.costAmount", 0] }
-                }
-              }
-            }
-          }
+                  in: { $ifNull: ["$$sp.costAmount", 0] },
+                },
+              },
+            },
+          },
         },
         {
           $project: {
             Order_Number: 1,
             Customer_uuid: 1,
             Customer_name: 1, // if you store it; UI can fall back to uuid
-            Steps: 1,
+            Steps: "$_stepsFiltered", // only the single "Design" step (or empty)
             saleSubtotal: "$_saleSubtotal",
             stepsCostTotal: "$_stepsCostTotal",
-            _isOld: 1
-          }
+            _isOld: 1,
+          },
         },
         { $sort: { Order_Number: 1, _id: 1 } },
         { $skip: skip },
-        { $limit: limit }
+        { $limit: limit },
       ])
       .toArray();
 
     res.json(docs);
   } catch (err) {
     console.error("flat error:", err);
-    res.status(500).json({ error: err.message || "Failed to fetch candidates" });
+    res
+      .status(500)
+      .json({ error: err.message || "Failed to fetch candidates" });
   }
 });
 
@@ -253,11 +351,13 @@ router.put("/single/:id", async (req, res) => {
     return res.json({
       ok: true,
       matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount
+      modifiedCount: result.modifiedCount,
     });
   } catch (err) {
     console.error("single migrate error:", err);
-    return res.status(500).json({ ok: false, error: err.message || "Single migration failed" });
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Single migration failed" });
   }
 });
 
@@ -280,7 +380,9 @@ router.put("/bulk", async (req, res) => {
       else invalid.push(s);
     }
     if (valid.length === 0) {
-      return res.status(400).json({ ok: false, error: "No valid ObjectIds in ids[]" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "No valid ObjectIds in ids[]" });
     }
 
     const col = mongoose.connection.collection(COLLECTION);
@@ -290,11 +392,13 @@ router.put("/bulk", async (req, res) => {
       ok: true,
       matchedCount: result.matchedCount,
       modifiedCount: result.modifiedCount,
-      invalidIds: invalid
+      invalidIds: invalid,
     });
   } catch (err) {
     console.error("bulk migrate error:", err);
-    return res.status(500).json({ ok: false, error: err.message || "Bulk migration failed" });
+    return res
+      .status(500)
+      .json({ ok: false, error: err.message || "Bulk migration failed" });
   }
 });
 
