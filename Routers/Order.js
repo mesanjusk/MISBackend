@@ -43,22 +43,28 @@ function normalizeItems(items) {
 }
 
 // Steps in DB don’t have vendorCustomerUuid; still accept it and store in vendorId
+// UPDATED: persist uuid if FE sends it
 function normalizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps.reduce((acc, step) => {
-    if (step && typeof step.label === "string") {
-      const amount = Number(step.costAmount ?? 0);
-      acc.push({
-        label: step.label,
-        checked: !!step.checked,
-        vendorId: step.vendorCustomerUuid ?? step.vendorId ?? null,
-        vendorName: step.vendorName ?? null,
-        costAmount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
-        plannedDate: step.plannedDate ? new Date(step.plannedDate) : undefined,
-        status: step.status || "pending",
-        posting: step.posting || { isPosted: false, txnId: null, postedAt: null },
-      });
-    }
+    const label = typeof step?.label === "string" ? step.label.trim() : "";
+    if (!label) return acc;
+
+    const amount = Number(step.costAmount ?? 0);
+    acc.push({
+      uuid: typeof step?.uuid === "string" ? step.uuid.trim() : undefined,
+      label,
+      checked: !!step.checked,
+      vendorId: step.vendorCustomerUuid ?? step.vendorId ?? null,
+      vendorName: step.vendorName ?? null,
+      costAmount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+      plannedDate: step.plannedDate ? new Date(step.plannedDate) : undefined,
+      status: step.status || "pending",
+      posting:
+        step.posting && typeof step.posting === "object"
+          ? step.posting
+          : { isPosted: false, txnId: null, postedAt: null },
+    });
     return acc;
   }, []);
 }
@@ -756,6 +762,67 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
     res.status(500).json({ ok: false, error: e.message });
   } finally {
     session.endSession();
+  }
+});
+
+/* ------------------ TOGGLE STEP (add on check, remove on uncheck) ------------------ */
+// body: { orderId, step: { uuid, label }, checked: true|false }
+router.post("/steps/toggle", async (req, res) => {
+  try {
+    const { orderId, step = {}, checked } = req.body || {};
+    if (!orderId || typeof checked !== "boolean") {
+      return res.status(400).json({ success: false, message: "orderId and checked are required" });
+    }
+    const uuidStr = String(step.uuid || "").trim();
+    const label = String(step.label || "").trim();
+    if (!uuidStr && !label) {
+      return res.status(400).json({ success: false, message: "Provide step.uuid or step.label" });
+    }
+
+    const find = { _id: orderId };
+
+    if (checked) {
+      // Add if not already present (by uuid preferred, else label)
+      const doc = await Orders.findOne(find, { Steps: 1 }).lean();
+      if (!doc) return res.status(404).json({ success: false, message: "Order not found" });
+
+      const exists =
+        Array.isArray(doc.Steps) &&
+        doc.Steps.some(
+          (s) =>
+            (uuidStr && String(s.uuid || "") === uuidStr) ||
+            (!uuidStr && label && String(s.label || "") === label)
+        );
+
+      if (exists) return res.json({ success: true, updated: false });
+
+      const now = new Date();
+      await Orders.updateOne(find, {
+        $push: {
+          Steps: {
+            uuid: uuidStr || undefined,
+            label,
+            checked: true,
+            vendorId: null,
+            vendorName: null,
+            costAmount: 0,
+            plannedDate: undefined,
+            status: "pending",
+            posting: { isPosted: false, txnId: null, postedAt: null },
+            addedAt: now,
+          },
+        },
+      });
+      return res.json({ success: true, updated: true });
+    } else {
+      // Remove by uuid if present, otherwise by label
+      const pullBy = uuidStr ? { uuid: uuidStr } : { label };
+      await Orders.updateOne(find, { $pull: { Steps: pullBy } });
+      return res.json({ success: true, updated: true });
+    }
+  } catch (e) {
+    console.error("/order/steps/toggle error", e);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
