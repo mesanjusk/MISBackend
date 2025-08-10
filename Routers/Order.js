@@ -194,7 +194,7 @@ const pipeline = [
       Items: 1,
       Steps: 1,
       Status: 1,
-+     Remark: 1, // legacy, for old data fallback
+      Remark: 1, // legacy, for old data fallback
       latestStatus: {
         $cond: [
           { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
@@ -204,7 +204,8 @@ const pipeline = [
       },
     },
   },
-  ...
+  ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
+  { $sort: { Order_Number: -1 } },
 ];
 
 
