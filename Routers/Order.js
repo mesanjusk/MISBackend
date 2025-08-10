@@ -26,7 +26,7 @@ function normalizeItems(items) {
     .filter((it) => it.Item); // keep only valid lines
 }
 
-// Steps in DB don’t have vendorCustomerUuid; we still accept it and store in vendorId
+// Steps in DB don’t have vendorCustomerUuid; still accept it and store in vendorId
 function normalizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps.reduce((acc, step) => {
@@ -55,7 +55,7 @@ router.post("/addOrder", async (req, res) => {
       // order-level Priority/Remark are deprecated – ignore on write
       Status = [{}],
       Steps = [],
-      Items = [], // new: accept line items with Priority & Remark inside each row
+      Items = [], // accept line items with Priority & Remark inside each row
     } = req.body;
 
     const now = new Date();
@@ -90,8 +90,7 @@ router.post("/addOrder", async (req, res) => {
     const newOrder = new Orders({
       Order_uuid: uuid(),
       Order_Number: newOrderNumber,
-      Customer_uuid: Customer_uuid,
-      // DO NOT set order-level Priority/Remark anymore
+      Customer_uuid,
       Status: updatedStatus,
       Steps: flatSteps,
       Items: lineItems,
@@ -185,29 +184,39 @@ router.get("/all-data", async (req, res) => {
 
 /* ----------------------- RAW FEED for AllVendors ----------------------- */
 /** Includes Status so FE can inspect latest. Option ?deliveredOnly=true */
-// /order/allvendors-raw
-const pipeline = [
-  {
-    $project: {
-      Order_Number: 1,
-      Customer_uuid: 1,
-      Items: 1,
-      Steps: 1,
-      Status: 1,
-      Remark: 1, // legacy, for old data fallback
-      latestStatus: {
-        $cond: [
-          { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
-          { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
-          null,
-        ],
-      },
-    },
-  },
-  ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
-  { $sort: { Order_Number: -1 } },
-];
+router.get("/allvendors-raw", async (req, res) => {
+  try {
+    const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
 
+    const pipeline = [
+      {
+        $project: {
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Items: 1,
+          Steps: 1,
+          Status: 1,
+          Remark: 1, // legacy, for old data fallback
+          latestStatus: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+              { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+              null,
+            ],
+          },
+        },
+      },
+      ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
+      { $sort: { Order_Number: -1 } },
+    ];
+
+    const docs = await Orders.aggregate(pipeline);
+    res.json({ rows: docs, total: docs.length });
+  } catch (e) {
+    console.error("allvendors-raw error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 /* ----------------------- LEGACY PAGE: ALL VENDORS (kept) ----------------------- */
 router.get("/allvendors", async (req, res) => {
@@ -218,12 +227,9 @@ router.get("/allvendors", async (req, res) => {
     if (search) {
       const num = +search;
       match.$or = [
-        // Order number
-        { Order_Number: Number.isNaN(num) ? -1 : num },
-        // customer id
-        { Customer_uuid: new RegExp(search, "i") },
-        // any item remark
-        { "Items.Remark": new RegExp(search, "i") },
+        { Order_Number: Number.isNaN(num) ? -1 : num }, // Order number
+        { Customer_uuid: new RegExp(search, "i") }, // customer id
+        { "Items.Remark": new RegExp(search, "i") }, // any item remark
       ];
     }
 
@@ -310,7 +316,10 @@ router.put("/updateOrder/:id", async (req, res) => {
     if (Delivery_Date) {
       const lastIndex = (order.Status?.length || 1) - 1;
       if (lastIndex >= 0) {
-        order.Status[lastIndex].Delivery_Date = toDate(Delivery_Date, order.Status[lastIndex].Delivery_Date);
+        order.Status[lastIndex].Delivery_Date = toDate(
+          Delivery_Date,
+          order.Status[lastIndex].Delivery_Date
+        );
       }
     }
 
@@ -541,7 +550,16 @@ router.post("/orders/:orderId/steps", async (req, res) => {
 /* ------------------ EDIT STEP (no posting side effects) ------------------ */
 router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   const { orderId, stepId } = req.params;
-  const allowed = ["label", "vendorId", "vendorCustomerUuid", "vendorName", "costAmount", "plannedDate", "status", "checked"];
+  const allowed = [
+    "label",
+    "vendorId",
+    "vendorCustomerUuid",
+    "vendorName",
+    "costAmount",
+    "plannedDate",
+    "status",
+    "checked",
+  ];
   const patch = {};
   for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
 
@@ -567,16 +585,20 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   }
 });
 
-/* ************* ASSIGN VENDOR & POST (uses “purchase”) ************* */
+/* ************* ASSIGN VENDOR & POST (uses "purchase") ************* */
 router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
   const { orderId, stepId } = req.params;
   const { vendorId, vendorName, vendorCustomerUuid, costAmount, plannedDate, createdBy } = req.body;
 
   const resolvedVendor = vendorId || vendorCustomerUuid || vendorName;
-  if (!resolvedVendor) return res.status(400).json({ ok: false, error: "Provide vendorId or vendorCustomerUuid or vendorName" });
+  if (!resolvedVendor)
+    return res
+      .status(400)
+      .json({ ok: false, error: "Provide vendorId or vendorCustomerUuid or vendorName" });
 
   const amount = Number(costAmount ?? 0);
-  if (Number.isNaN(amount) || amount < 0) return res.status(400).json({ ok: false, error: "Invalid costAmount" });
+  if (Number.isNaN(amount) || amount < 0)
+    return res.status(400).json({ ok: false, error: "Invalid costAmount" });
 
   const session = await mongoose.startSession();
   try {
@@ -596,7 +618,11 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
       // Already posted? only update vendor info
       if (step.posting?.isPosted) {
         await order.save({ session });
-        return res.json({ ok: true, message: "Vendor saved. Step already posted.", txnId: step.posting.txnId });
+        return res.json({
+          ok: true,
+          message: "Vendor saved. Step already posted.",
+          txnId: step.posting.txnId,
+        });
       }
 
       // Zero amount => mark done, no posting
@@ -610,7 +636,7 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
       // Journal lines
       const lines = [
         { Account_id: `${resolvedVendor}`, Type: "Debit", Amount: amount },
-        // “purchase” account (static id you shared earlier)
+        // "purchase" account (static id)
         { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount },
       ];
 
