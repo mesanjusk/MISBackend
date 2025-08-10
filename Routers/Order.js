@@ -437,12 +437,17 @@ router.get("/GetOrderList", async (req, res) => {
   }
 });
 
+// helper: does this order have any item with Amount > 0?
+const hasBillableAmount = (items) =>
+  Array.isArray(items) && items.some((it) => Number(it?.Amount) > 0);
+
+// Delivered AND NO billable amount (0 or missing across all items)
 router.get("/GetDeliveredList", async (req, res) => {
   try {
-    const data = await Orders.find({});
+    const data = await Orders.find({}).lean();
     const filtered = data.filter((o) => {
       const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
-      return delivered && (!o.Items || o.Items.length === 0);
+      return delivered && !hasBillableAmount(o.Items);
     });
     res.json({ success: true, result: filtered });
   } catch (err) {
@@ -450,19 +455,20 @@ router.get("/GetDeliveredList", async (req, res) => {
   }
 });
 
-// Deprecated, kept for backward compatibility
+// Delivered AND HAS billable amount (any item Amount > 0)
 router.get("/GetBillList", async (req, res) => {
   try {
-    const data = await Orders.find({});
+    const data = await Orders.find({}).lean();
     const filtered = data.filter((o) => {
       const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
-      return delivered && o.Items && o.Items.length > 0;
+      return delivered && hasBillableAmount(o.Items);
     });
     res.json({ success: true, result: filtered });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 
 /* ----------------------- CUSTOMER CHECKS ----------------------- */
 router.get("/CheckCustomer/:customerUuid", async (req, res) => {
