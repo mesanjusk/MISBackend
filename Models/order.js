@@ -39,14 +39,12 @@ stepSchema.pre('validate', function(next) {
   next();
 });
 
-// Item subdoc (now holds Priority & Remark per line)
+// Item subdoc (holds Priority & Remark per line)
 const itemSchema = new mongoose.Schema({
   Item:     { type: String,  required: true },
   Quantity: { type: Number,  required: true },
   Rate:     { type: Number,  required: true },
   Amount:   { type: Number,  required: true },
-
-  // moved here from order-level as requested
   Priority: { type: String,  default: 'Normal' },
   Remark:   { type: String,  default: '' }
 }, { _id: false });
@@ -110,7 +108,6 @@ OrdersSchema.pre('save', function(next) {
 OrdersSchema.post('findOneAndUpdate', async function(doc) {
   if (!doc) return;
   recalcTotals(doc);
-  // persist the new totals without bumping updated fields unnecessarily
   await doc.updateOne({
     $set: {
       saleSubtotal: doc.saleSubtotal,
