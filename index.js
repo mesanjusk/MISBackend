@@ -67,7 +67,7 @@ app.use("/api/attendance", Attendance);
 app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
-app.use("/api/orders/migrate", OrderMigrate);
+app.use("/api/orders", OrderMigrate);
 
 // ✅ Legacy Routes (to support existing frontend calls)
 app.use("/user", Users);
