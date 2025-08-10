@@ -6,35 +6,38 @@ const Transaction = require("../Models/transaction");
 const { v4: uuid } = require("uuid");
 const { updateOrderStatus } = require("../Controller/orderController");
 
-/* ----------------------- CREATE NEW ORDER ----------------------- */
-router.post("/addOrder", async (req, res) => {
-  const { Customer_uuid, Priority = "Normal", Status = [{}], Remark, Steps = [] } = req.body;
+/* ----------------------- helpers ----------------------- */
+const norm = (s) => String(s || "").trim();
+const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 
-  const now = new Date();
-  const statusDefaults = { Task: "Design", Assigned: "Sai", Status_number: 1, Delivery_Date: now, CreatedAt: now };
+// Ensure each item has per-line Priority & Remark
+function normalizeItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter(Boolean)
+    .map((it) => ({
+      Item: String(it.Item || "").trim(),
+      Quantity: Number(it.Quantity || 0),
+      Rate: Number(it.Rate || 0),
+      Amount: Number(it.Amount || 0),
+      Priority: it.Priority ? String(it.Priority) : "Normal",
+      Remark: it.Remark ? String(it.Remark) : "",
+    }))
+    .filter((it) => it.Item); // keep only valid lines
+}
 
-  const updatedStatus = (Status || []).map((s) => ({
-    ...statusDefaults,
-    ...s,
-    Delivery_Date: s?.Delivery_Date ? new Date(s.Delivery_Date) : now,
-    CreatedAt: s?.CreatedAt ? new Date(s.CreatedAt) : now,
-  }));
-
-  if (!updatedStatus[0]?.Task || !updatedStatus[0]?.Assigned || !updatedStatus[0]?.Delivery_Date) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Task, Assigned, and Delivery_Date are required in Status[0]." });
-  }
-
-  const flatSteps = (Steps || []).reduce((acc, step) => {
+// Steps in DB don’t have vendorCustomerUuid; we still accept it and store in vendorId
+function normalizeSteps(steps) {
+  if (!Array.isArray(steps)) return [];
+  return steps.reduce((acc, step) => {
     if (step && typeof step.label === "string") {
+      const amount = Number(step.costAmount ?? 0);
       acc.push({
         label: step.label,
         checked: !!step.checked,
-        vendorId: step.vendorId ?? null,
-        vendorCustomerUuid: step.vendorCustomerUuid ?? null, // keep both for safety
+        vendorId: step.vendorCustomerUuid ?? step.vendorId ?? null,
         vendorName: step.vendorName ?? null,
-        costAmount: Number(step.costAmount ?? 0),
+        costAmount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
         plannedDate: step.plannedDate ? new Date(step.plannedDate) : undefined,
         status: step.status || "pending",
         posting: step.posting || { isPosted: false, txnId: null, postedAt: null },
@@ -42,22 +45,60 @@ router.post("/addOrder", async (req, res) => {
     }
     return acc;
   }, []);
+}
 
+/* ----------------------- CREATE NEW ORDER ----------------------- */
+router.post("/addOrder", async (req, res) => {
   try {
+    const {
+      Customer_uuid,
+      // order-level Priority/Remark are deprecated – ignore on write
+      Status = [{}],
+      Steps = [],
+      Items = [], // new: accept line items with Priority & Remark inside each row
+    } = req.body;
+
+    const now = new Date();
+    const statusDefaults = {
+      Task: "Design",
+      Assigned: "Sai",
+      Status_number: 1,
+      Delivery_Date: now,
+      CreatedAt: now,
+    };
+
+    const updatedStatus = (Status || []).map((s) => ({
+      ...statusDefaults,
+      ...s,
+      Delivery_Date: toDate(s?.Delivery_Date, now),
+      CreatedAt: toDate(s?.CreatedAt, now),
+    }));
+
+    if (!updatedStatus[0]?.Task || !updatedStatus[0]?.Assigned || !updatedStatus[0]?.Delivery_Date) {
+      return res.status(400).json({
+        success: false,
+        message: "Task, Assigned, and Delivery_Date are required in Status[0].",
+      });
+    }
+
+    const flatSteps = normalizeSteps(Steps);
+    const lineItems = normalizeItems(Items);
+
     const lastOrder = await Orders.findOne().sort({ Order_Number: -1 }).lean();
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
 
     const newOrder = new Orders({
       Order_uuid: uuid(),
       Order_Number: newOrderNumber,
-      Customer_uuid,
-      Priority,
+      Customer_uuid: Customer_uuid,
+      // DO NOT set order-level Priority/Remark anymore
       Status: updatedStatus,
       Steps: flatSteps,
-      Remark,
+      Items: lineItems,
     });
 
     await newOrder.save();
+
     res.json({
       success: true,
       message: "Order added successfully",
@@ -70,16 +111,21 @@ router.post("/addOrder", async (req, res) => {
   }
 });
 
-/* ----------------------- UNIFIED VIEW (unchanged) ----------------------- */
+/* ----------------------- UNIFIED VIEW (kept) ----------------------- */
 router.get("/all-data", async (req, res) => {
   try {
     const delivered = await Orders.find({ Status: { $elemMatch: { Task: "Delivered" } } });
+
     const report = await Orders.find({
       Status: { $elemMatch: { Task: "Delivered" } },
       Items: { $exists: true, $not: { $size: 0 } },
     });
-    const outstanding = await Orders.find({ Status: { $not: { $elemMatch: { Task: "Delivered" } } } });
 
+    const outstanding = await Orders.find({
+      Status: { $not: { $elemMatch: { Task: "Delivered" } } },
+    });
+
+    // show steps that need vendor or are not posted yet
     const allvendors = await Orders.aggregate([
       {
         $addFields: {
@@ -104,7 +150,8 @@ router.get("/all-data", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          Remark: 1,
+          // items' remarks for FE (legacy order.Remark may exist on old data)
+          ItemsRemarks: "$Items.Remark",
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
@@ -136,40 +183,31 @@ router.get("/all-data", async (req, res) => {
   }
 });
 
-/* ----------------------- NEW: RAW FEED for AllVendors (no filtering) ----------------------- */
-/** Returns minimal data; let frontend filter/search/project. */
 /* ----------------------- RAW FEED for AllVendors ----------------------- */
-/** Returns minimal data; includes Status so FE can inspect latest entry.
- *  Optional ?deliveredOnly=true will keep only orders whose latest Status.Task === "Delivered" (case-insensitive).
- */
+/** Includes Status so FE can inspect latest. Option ?deliveredOnly=true */
 router.get("/allvendors-raw", async (req, res) => {
   try {
     const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
 
     const pipeline = [
-      // Keep required fields + Status (needed by FE to check latest)
       {
         $project: {
           Order_Number: 1,
           Customer_uuid: 1,
-          Remark: 1,
+          Items: 1,
           Steps: 1,
           Status: 1,
-          // Compute latest status safely even if Status is missing/empty
           latestStatus: {
             $cond: [
-              { $gt: [ { $size: { $ifNull: ["$Status", []] } }, 0 ] },
-              { $arrayElemAt: ["$Status", { $subtract: [ { $size: "$Status" }, 1 ] }] },
-              null
-            ]
-          }
-        }
+              { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+              { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+              null,
+            ],
+          },
+        },
       },
-      // Optional filter: only keep orders with latest status "Delivered"
-      ...(deliveredOnly
-        ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }]
-        : []),
-      { $sort: { Order_Number: -1 } }
+      ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
+      { $sort: { Order_Number: -1 } },
     ];
 
     const docs = await Orders.aggregate(pipeline);
@@ -180,7 +218,6 @@ router.get("/allvendors-raw", async (req, res) => {
   }
 });
 
-
 /* ----------------------- LEGACY PAGE: ALL VENDORS (kept) ----------------------- */
 router.get("/allvendors", async (req, res) => {
   try {
@@ -188,10 +225,14 @@ router.get("/allvendors", async (req, res) => {
 
     const match = {};
     if (search) {
+      const num = +search;
       match.$or = [
-        { Order_Number: isNaN(+search) ? -1 : +search },
+        // Order number
+        { Order_Number: Number.isNaN(num) ? -1 : num },
+        // customer id
         { Customer_uuid: new RegExp(search, "i") },
-        { Remark: new RegExp(search, "i") },
+        // any item remark
+        { "Items.Remark": new RegExp(search, "i") },
       ];
     }
 
@@ -220,7 +261,7 @@ router.get("/allvendors", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          Remark: 1,
+          Items: 1, // FE can read per-line Priority/Remark
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
@@ -264,44 +305,44 @@ router.post("/addStatus", async (req, res) => {
   }
 });
 
-/* ----------------------- UPDATE ORDER ----------------------- */
+/* ----------------------- UPDATE ORDER (generic) ----------------------- */
 router.put("/updateOrder/:id", async (req, res) => {
   try {
-    const { Delivery_Date, ...otherFields } = req.body;
-    const updateDoc = { ...otherFields };
+    const { Delivery_Date, Items, ...otherFields } = req.body;
+
+    // normalize line items if provided
+    if (Items) otherFields.Items = normalizeItems(Items);
+
+    const order = await Orders.findById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
     if (Delivery_Date) {
-      const order = await Orders.findById(req.params.id);
-      if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
       const lastIndex = (order.Status?.length || 1) - 1;
       if (lastIndex >= 0) {
-        order.Status[lastIndex].Delivery_Date = new Date(Delivery_Date);
-        Object.assign(order, otherFields);
-        const saved = await order.save();
-        return res.json({ success: true, result: saved });
+        order.Status[lastIndex].Delivery_Date = toDate(Delivery_Date, order.Status[lastIndex].Delivery_Date);
       }
     }
 
-    const updatedOrder = await Orders.findOneAndUpdate({ _id: req.params.id }, { $set: updateDoc }, { new: true });
-    if (!updatedOrder) return res.status(404).json({ success: false, message: "Order not found" });
-    res.json({ success: true, result: updatedOrder });
+    Object.assign(order, otherFields);
+    const saved = await order.save();
+    return res.json({ success: true, result: saved });
   } catch (err) {
     console.error("Update error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-/* ----------------------- UPDATE DELIVERY (Items) ----------------------- */
+/* ----------------------- UPDATE DELIVERY (Items only) ----------------------- */
 router.put("/updateDelivery/:id", async (req, res) => {
   const { id } = req.params;
-  const { Customer_uuid, Items, Remark } = req.body;
+  const { Customer_uuid, Items } = req.body;
   try {
     const order = await Orders.findById(id);
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-    order.Customer_uuid = Customer_uuid ?? order.Customer_uuid;
-    order.Items = Array.isArray(Items) ? Items : order.Items;
-    order.Remark = Remark ?? order.Remark;
+
+    if (Customer_uuid) order.Customer_uuid = Customer_uuid;
+    if (Items) order.Items = normalizeItems(Items);
+
     await order.save();
     res.status(200).json({ success: true, message: "Order updated successfully" });
   } catch (error) {
@@ -315,8 +356,8 @@ router.get("/GetOrderList", async (req, res) => {
   try {
     const data = await Orders.find({});
     const filteredData = data.filter((o) => {
-      const delivered = o.Status?.some((s) => s.Task?.trim().toLowerCase() === "delivered");
-      const cancelled = o.Status?.some((s) => s.Task?.trim().toLowerCase() === "cancel");
+      const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
+      const cancelled = o.Status?.some((s) => norm(s.Task).toLowerCase() === "cancel");
       return !(delivered || cancelled);
     });
     res.json({ success: true, result: filteredData });
@@ -329,7 +370,7 @@ router.get("/GetDeliveredList", async (req, res) => {
   try {
     const data = await Orders.find({});
     const filtered = data.filter((o) => {
-      const delivered = o.Status?.some((s) => s.Task?.trim().toLowerCase() === "delivered");
+      const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
       return delivered && (!o.Items || o.Items.length === 0);
     });
     res.json({ success: true, result: filtered });
@@ -343,7 +384,7 @@ router.get("/GetBillList", async (req, res) => {
   try {
     const data = await Orders.find({});
     const filtered = data.filter((o) => {
-      const delivered = o.Status?.some((s) => s.Task?.trim().toLowerCase() === "delivered");
+      const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
       return delivered && o.Items && o.Items.length > 0;
     });
     res.json({ success: true, result: filtered });
@@ -386,7 +427,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-/* ----------------------- REPORTS: VENDOR MISSING (kept) ----------------------- */
+/* ----------------------- REPORTS: VENDOR MISSING ----------------------- */
 router.get("/reports/vendor-missing", async (req, res) => {
   try {
     const page = parseInt(req.query.page || "1", 10);
@@ -398,10 +439,11 @@ router.get("/reports/vendor-missing", async (req, res) => {
     const match = {};
     if (deliveredOnly) match.Status = { $elemMatch: { Task: "Delivered" } };
     if (search) {
+      const num = +search;
       match.$or = [
-        { Order_Number: isNaN(+search) ? -1 : +search },
+        { Order_Number: Number.isNaN(num) ? -1 : num },
         { Customer_uuid: new RegExp(search, "i") },
-        { Remark: new RegExp(search, "i") },
+        { "Items.Remark": new RegExp(search, "i") },
       ];
     }
 
@@ -430,7 +472,7 @@ router.get("/reports/vendor-missing", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          Remark: 1,
+          Items: 1, // includes per-line Priority/Remark
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
@@ -460,7 +502,7 @@ router.get("/reports/vendor-missing", async (req, res) => {
   }
 });
 
-/* ------------------ NEW: CREATE STEP (append missing step) ------------------ */
+/* ------------------ CREATE STEP ------------------ */
 router.post("/orders/:orderId/steps", async (req, res) => {
   const { orderId } = req.params;
   const {
@@ -486,7 +528,6 @@ router.post("/orders/:orderId/steps", async (req, res) => {
       label,
       checked: !!checked,
       vendorId: vendorCustomerUuid ?? vendorId ?? null,
-      vendorCustomerUuid: vendorCustomerUuid ?? null,
       vendorName,
       costAmount: Number(costAmount || 0),
       plannedDate: plannedDate ? new Date(plannedDate) : undefined,
@@ -506,12 +547,11 @@ router.post("/orders/:orderId/steps", async (req, res) => {
   }
 });
 
-/* ----------- NEW: EDIT STEP (no posting/transaction side effects) ----------- */
+/* ------------------ EDIT STEP (no posting side effects) ------------------ */
 router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   const { orderId, stepId } = req.params;
   const allowed = ["label", "vendorId", "vendorCustomerUuid", "vendorName", "costAmount", "plannedDate", "status", "checked"];
   const patch = {};
-
   for (const k of allowed) if (k in req.body) patch[k] = req.body[k];
 
   try {
@@ -523,9 +563,11 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
 
     if ("plannedDate" in patch && patch.plannedDate) patch.plannedDate = new Date(patch.plannedDate);
     if ("costAmount" in patch) patch.costAmount = Number(patch.costAmount || 0);
+    if ("vendorCustomerUuid" in patch && patch.vendorCustomerUuid && !patch.vendorId) {
+      patch.vendorId = patch.vendorCustomerUuid; // map to stored field
+    }
 
     Object.assign(step, patch);
-
     await order.save();
     res.json({ ok: true, step });
   } catch (e) {
@@ -534,7 +576,7 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   }
 });
 
-/* ************* ASSIGN VENDOR & POST (kept, uses “purchase”) ************* */
+/* ************* ASSIGN VENDOR & POST (uses “purchase”) ************* */
 router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
   const { orderId, stepId } = req.params;
   const { vendorId, vendorName, vendorCustomerUuid, costAmount, plannedDate, createdBy } = req.body;
@@ -577,12 +619,16 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
       // Journal lines
       const lines = [
         { Account_id: `${resolvedVendor}`, Type: "Debit", Amount: amount },
+        // “purchase” account (static id you shared earlier)
         { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount },
       ];
 
       const txnDate = plannedDate ? new Date(plannedDate) : new Date();
 
-      const lastTxn = await Transaction.findOne({}, { Transaction_id: 1 }).sort({ Transaction_id: -1 }).session(session).lean();
+      const lastTxn = await Transaction.findOne({}, { Transaction_id: 1 })
+        .sort({ Transaction_id: -1 })
+        .session(session)
+        .lean();
       const nextId = (lastTxn?.Transaction_id || 0) + 1;
 
       const txnDocs = await Transaction.create(
