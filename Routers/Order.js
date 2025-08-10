@@ -185,38 +185,28 @@ router.get("/all-data", async (req, res) => {
 
 /* ----------------------- RAW FEED for AllVendors ----------------------- */
 /** Includes Status so FE can inspect latest. Option ?deliveredOnly=true */
-router.get("/allvendors-raw", async (req, res) => {
-  try {
-    const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
-
-    const pipeline = [
-      {
-        $project: {
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
-          Steps: 1,
-          Status: 1,
-          latestStatus: {
-            $cond: [
-              { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
-              { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
-              null,
-            ],
-          },
-        },
+// /order/allvendors-raw
+const pipeline = [
+  {
+    $project: {
+      Order_Number: 1,
+      Customer_uuid: 1,
+      Items: 1,
+      Steps: 1,
+      Status: 1,
++     Remark: 1, // legacy, for old data fallback
+      latestStatus: {
+        $cond: [
+          { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+          { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+          null,
+        ],
       },
-      ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
-      { $sort: { Order_Number: -1 } },
-    ];
+    },
+  },
+  ...
+];
 
-    const docs = await Orders.aggregate(pipeline);
-    res.json({ rows: docs, total: docs.length });
-  } catch (e) {
-    console.error("allvendors-raw error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
 
 /* ----------------------- LEGACY PAGE: ALL VENDORS (kept) ----------------------- */
 router.get("/allvendors", async (req, res) => {
