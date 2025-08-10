@@ -10,19 +10,35 @@ const { updateOrderStatus } = require("../Controller/orderController");
 const norm = (s) => String(s || "").trim();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 
-// Ensure each item has per-line Priority & Remark
+// Ensure each item has per-line Priority & Remark (resilient to key casing)
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items
     .filter(Boolean)
-    .map((it) => ({
-      Item: String(it.Item || "").trim(),
-      Quantity: Number(it.Quantity || 0),
-      Rate: Number(it.Rate || 0),
-      Amount: Number(it.Amount || 0),
-      Priority: it.Priority ? String(it.Priority) : "Normal",
-      Remark: it.Remark ? String(it.Remark) : "",
-    }))
+    .map((it) => {
+      const name = String(it.Item ?? it.item ?? "").trim();
+      const qty = Number(it.Quantity ?? it.quantity ?? 0);
+      const rate = Number(it.Rate ?? it.rate ?? 0);
+      const amt = Number(it.Amount ?? it.amount ?? (qty * rate) ?? 0);
+
+      const priorityRaw = it.Priority ?? it.priority ?? "Normal";
+      const remarkRaw =
+        it.Remark ??
+        it.remark ??
+        it.remarks ??
+        it.comment ??
+        it.note ??
+        "";
+
+      return {
+        Item: name,
+        Quantity: qty,
+        Rate: rate,
+        Amount: amt,
+        Priority: String(priorityRaw || "Normal"),
+        Remark: String(remarkRaw || ""),
+      };
+    })
     .filter((it) => it.Item); // keep only valid lines
 }
 
@@ -55,7 +71,7 @@ router.post("/addOrder", async (req, res) => {
       // order-level Priority/Remark are deprecated – ignore on write
       Status = [{}],
       Steps = [],
-      Items = [], // accept line items with Priority & Remark inside each row
+      Items = [],
     } = req.body;
 
     const now = new Date();
@@ -83,6 +99,20 @@ router.post("/addOrder", async (req, res) => {
 
     const flatSteps = normalizeSteps(Steps);
     const lineItems = normalizeItems(Items);
+
+    // Fallback: if FE didn’t send Items but sent a top-level remark-like field, save as a note line
+    const topRemark =
+      (req.body && (req.body.Remark || req.body.remark || req.body.note || req.body.comments)) || "";
+    if (lineItems.length === 0 && String(topRemark).trim()) {
+      lineItems.push({
+        Item: "Order Note",
+        Quantity: 0,
+        Rate: 0,
+        Amount: 0,
+        Priority: "Normal",
+        Remark: String(topRemark).trim(),
+      });
+    }
 
     const lastOrder = await Orders.findOne().sort({ Order_Number: -1 }).lean();
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
@@ -149,7 +179,7 @@ router.get("/all-data", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          // items' remarks for FE (legacy order.Remark may exist on old data)
+          // items' remarks for FE
           ItemsRemarks: "$Items.Remark",
           StepsPending: {
             $map: {
@@ -196,13 +226,49 @@ router.get("/allvendors-raw", async (req, res) => {
           Items: 1,
           Steps: 1,
           Status: 1,
-          Remark: 1, // legacy, for old data fallback
           latestStatus: {
             $cond: [
               { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
               { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
               null,
             ],
+          },
+        },
+      },
+      // Build a flat RemarkText from Items[].Remark (trim + join)
+      {
+        $addFields: {
+          RemarkText: {
+            $let: {
+              vars: {
+                rems: {
+                  $filter: {
+                    input: {
+                      $map: {
+                        input: { $ifNull: ["$Items", []] },
+                        as: "it",
+                        in: { $trim: { input: { $ifNull: ["$$it.Remark", ""] } } },
+                      },
+                    },
+                    as: "r",
+                    cond: { $ne: ["$$r", ""] },
+                  },
+                },
+              },
+              in: {
+                $reduce: {
+                  input: "$$rems",
+                  initialValue: "",
+                  in: {
+                    $cond: [
+                      { $eq: ["$$value", ""] },
+                      "$$this",
+                      { $concat: ["$$value", " | ", "$$this"] },
+                    ],
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -341,7 +407,12 @@ router.put("/updateDelivery/:id", async (req, res) => {
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
     if (Customer_uuid) order.Customer_uuid = Customer_uuid;
-    if (Items) order.Items = normalizeItems(Items);
+
+    // Append new Items to preserve initial "Order Note" line
+    if (Items) {
+      const incoming = normalizeItems(Items);
+      order.Items = normalizeItems([...(order.Items || []), ...incoming]);
+    }
 
     await order.save();
     res.status(200).json({ success: true, message: "Order updated successfully" });
