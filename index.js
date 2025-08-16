@@ -4,6 +4,7 @@ const http = require("http");
 const socketIO = require("socket.io");
 const connectDB = require("./mongo");
 require("dotenv").config();
+const { version } = require("./package.json");
 
 // Handle any unhandled promise rejections to avoid crashing the app
 process.on("unhandledRejection", (reason) => {
@@ -48,6 +49,11 @@ const io = socketIO(server, {
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+app.get("/version.json", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ version });
+});
 
 // ✅ API Routes (recommended, namespaced)
 app.use("/api/users", Users);
