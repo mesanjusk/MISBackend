@@ -29,6 +29,7 @@ const Vendors = require("./Routers/Vendor");
 const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const OrderMigrate = require("./Routers/OrderMigrate");
+const paymentFollowupRouter = require("./routes/paymentFollowup");
 
 
 // WhatsApp Services
@@ -89,6 +90,7 @@ app.use("/vendors", Vendors);
 app.use("/note", Note);            // ✅ For /note/:id
 app.use("/usertasks", Usertasks);
 app.use("/usertask", Usertasks);   // ✅ For /usertask/GetUsertaskList
+app.use("/paymentfollowup", paymentFollowupRouter);
 
 
 // ✅ WhatsApp Routes
