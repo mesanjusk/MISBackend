@@ -505,7 +505,8 @@ router.get("/:id", async (req, res) => {
 router.get("/reports/vendor-missing", async (req, res) => {
   try {
     const page = parseInt(req.query.page || "1", 10);
-    const limit = parseInt(req.query.limit || "20", 10);
+    the_limit = parseInt(req.query.limit || "20", 10); // keep var name stable
+    const limit = the_limit;
     const skip = (page - 1) * limit;
     const deliveredOnly = req.query.deliveredOnly === "true";
     const search = (req.query.search || "").trim();
@@ -781,6 +782,7 @@ router.post("/steps/toggle", async (req, res) => {
     const find = { _id: orderId };
 
     if (checked) {
+      // ADD
       const doc = await Orders.findOne(find, { Steps: 1 }).lean();
       if (!doc) return res.status(404).json({ success: false, message: "Order not found" });
 
@@ -812,19 +814,18 @@ router.post("/steps/toggle", async (req, res) => {
         },
       });
       return res.json({ success: true, updated: true });
-    } else {
-      const pullBy = uuidStr
-        ? { uuid: uuidStr }
-        : {
-            $or: [
-              { normLabel: labelNorm },
-              { label: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, "i") },
-            ],
-          };
-
-      const result = await Orders.updateOne(find, { $pull: { Steps: pullBy } });
-      return res.json({ success: true, updated: result.modifiedCount > 0 });
     }
+
+    // UNCHECK: remove by uuid OR normLabel OR case-insensitive label
+    const pullOr = [];
+    if (uuidStr) pullOr.push({ uuid: uuidStr });
+    if (label) {
+      pullOr.push({ normLabel: labelNorm });
+      pullOr.push({ label: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, "i") });
+    }
+
+    const result = await Orders.updateOne(find, { $pull: { Steps: { $or: pullOr } } });
+    return res.json({ success: true, updated: result.modifiedCount > 0 });
   } catch (e) {
     console.error("/order/steps/toggle error", e);
     res.status(500).json({ success: false, message: "Server error" });
