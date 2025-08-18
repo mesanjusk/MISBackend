@@ -1,3 +1,4 @@
+// routes/order.js
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
@@ -8,6 +9,7 @@ const { updateOrderStatus } = require("../Controller/orderController");
 
 /* ----------------------- helpers ----------------------- */
 const norm = (s) => String(s || "").trim();
+const normLower = (s) => String(s || "").trim().toLowerCase();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 
 // Ensure each item has per-line Priority & Remark (resilient to key casing)
@@ -43,7 +45,7 @@ function normalizeItems(items) {
 }
 
 // Steps in DB don’t have vendorCustomerUuid; still accept it and store in vendorId
-// UPDATED: persist uuid if FE sends it
+// UPDATED: persist uuid and normLabel if FE sends them
 function normalizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps.reduce((acc, step) => {
@@ -54,6 +56,7 @@ function normalizeSteps(steps) {
     acc.push({
       uuid: typeof step?.uuid === "string" ? step.uuid.trim() : undefined,
       label,
+      normLabel: normLower(label),
       checked: !!step.checked,
       vendorId: step.vendorCustomerUuid ?? step.vendorId ?? null,
       vendorName: step.vendorName ?? null,
@@ -589,6 +592,7 @@ router.get("/reports/vendor-missing", async (req, res) => {
 router.post("/orders/:orderId/steps", async (req, res) => {
   const { orderId } = req.params;
   const {
+    uuid: stepUuid,
     label,
     vendorCustomerUuid = null,
     vendorId = null,
@@ -608,7 +612,9 @@ router.post("/orders/:orderId/steps", async (req, res) => {
     if (!order) return res.status(404).json({ ok: false, error: "Order not found" });
 
     const step = {
-      label,
+      uuid: stepUuid ? String(stepUuid).trim() : undefined,
+      label: String(label).trim(),
+      normLabel: normLower(label),
       checked: !!checked,
       vendorId: vendorCustomerUuid ?? vendorId ?? null,
       vendorName,
@@ -634,6 +640,7 @@ router.post("/orders/:orderId/steps", async (req, res) => {
 router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   const { orderId, stepId } = req.params;
   const allowed = [
+    "uuid",
     "label",
     "vendorId",
     "vendorCustomerUuid",
@@ -657,6 +664,13 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
     if ("costAmount" in patch) patch.costAmount = Number(patch.costAmount || 0);
     if ("vendorCustomerUuid" in patch && patch.vendorCustomerUuid && !patch.vendorId) {
       patch.vendorId = patch.vendorCustomerUuid; // map to stored field
+    }
+    if ("label" in patch && patch.label) {
+      patch.label = String(patch.label).trim();
+      patch.normLabel = normLower(patch.label); // keep normalized label
+    }
+    if ("uuid" in patch && patch.uuid) {
+      patch.uuid = String(patch.uuid).trim();
     }
 
     Object.assign(step, patch);
@@ -773,8 +787,10 @@ router.post("/steps/toggle", async (req, res) => {
     if (!orderId || typeof checked !== "boolean") {
       return res.status(400).json({ success: false, message: "orderId and checked are required" });
     }
-    const uuidStr = String(step.uuid || "").trim();
-    const label = String(step.label || "").trim();
+    const uuidStr = norm(step.uuid || "");
+    const label = norm(step.label || "");
+    const labelNorm = normLower(label);
+
     if (!uuidStr && !label) {
       return res.status(400).json({ success: false, message: "Provide step.uuid or step.label" });
     }
@@ -782,16 +798,15 @@ router.post("/steps/toggle", async (req, res) => {
     const find = { _id: orderId };
 
     if (checked) {
-      // Add if not already present (by uuid preferred, else label)
+      // Add if not already present (uuid OR normalized label match)
       const doc = await Orders.findOne(find, { Steps: 1 }).lean();
       if (!doc) return res.status(404).json({ success: false, message: "Order not found" });
 
       const exists =
         Array.isArray(doc.Steps) &&
-        doc.Steps.some(
-          (s) =>
-            (uuidStr && String(s.uuid || "") === uuidStr) ||
-            (!uuidStr && label && String(s.label || "") === label)
+        doc.Steps.some((s) =>
+          (uuidStr && String(s.uuid || "") === uuidStr) ||
+          (label && normLower(s.normLabel || s.label || "") === labelNorm)
         );
 
       if (exists) return res.json({ success: true, updated: false });
@@ -802,6 +817,7 @@ router.post("/steps/toggle", async (req, res) => {
           Steps: {
             uuid: uuidStr || undefined,
             label,
+            normLabel: labelNorm,
             checked: true,
             vendorId: null,
             vendorName: null,
@@ -815,8 +831,10 @@ router.post("/steps/toggle", async (req, res) => {
       });
       return res.json({ success: true, updated: true });
     } else {
-      // Remove by uuid if present, otherwise by label
-      const pullBy = uuidStr ? { uuid: uuidStr } : { label };
+      // Remove by uuid if present, otherwise by normalized label
+      const pullBy = uuidStr
+        ? { uuid: uuidStr }
+        : { $or: [{ normLabel: labelNorm }, { label }] };
       await Orders.updateOne(find, { $pull: { Steps: pullBy } });
       return res.json({ success: true, updated: true });
     }
