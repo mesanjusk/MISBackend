@@ -11,6 +11,7 @@ const { updateOrderStatus } = require("../Controller/orderController");
 const norm = (s) => String(s || "").trim();
 const normLower = (s) => String(s || "").trim().toLowerCase();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
+const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Ensure each item has per-line Priority & Remark (resilient to key casing)
 function normalizeItems(items) {
@@ -515,7 +516,7 @@ router.get("/:id", async (req, res) => {
 
 /* ----------------------- REPORTS: VENDOR MISSING ----------------------- */
 router.get("/reports/vendor-missing", async (req, res) => {
-  try {
+  [200~try {
     const page = parseInt(req.query.page || "1", 10);
     const limit = parseInt(req.query.limit || "20", 10);
     const skip = (page - 1) * limit;
@@ -817,7 +818,7 @@ router.post("/steps/toggle", async (req, res) => {
           Steps: {
             uuid: uuidStr || undefined,
             label,
-            normLabel: labelNorm,
+            normLabel: labelNorm,        // store normalized label
             checked: true,
             vendorId: null,
             vendorName: null,
@@ -831,12 +832,18 @@ router.post("/steps/toggle", async (req, res) => {
       });
       return res.json({ success: true, updated: true });
     } else {
-      // Remove by uuid if present, otherwise by normalized label
+      // Remove by uuid if present, otherwise by normalized label OR case-insensitive label
       const pullBy = uuidStr
         ? { uuid: uuidStr }
-        : { $or: [{ normLabel: labelNorm }, { label }] };
-      await Orders.updateOne(find, { $pull: { Steps: pullBy } });
-      return res.json({ success: true, updated: true });
+        : {
+            $or: [
+              { normLabel: labelNorm },
+              { label: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, "i") }, // case-insensitive, trims outer spaces
+            ],
+          };
+
+      const result = await Orders.updateOne(find, { $pull: { Steps: pullBy } });
+      return res.json({ success: true, updated: result.modifiedCount > 0 });
     }
   } catch (e) {
     console.error("/order/steps/toggle error", e);
