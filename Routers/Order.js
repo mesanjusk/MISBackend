@@ -1,4 +1,4 @@
-// routes/order.js
+// Routers/Order.js
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
@@ -42,11 +42,10 @@ function normalizeItems(items) {
         Remark: String(remarkRaw || ""),
       };
     })
-    .filter((it) => it.Item); // keep only valid lines
+    .filter((it) => it.Item);
 }
 
-// Steps in DB don’t have vendorCustomerUuid; still accept it and store in vendorId
-// UPDATED: persist uuid and normLabel if FE sends them
+// Steps: persist uuid & normLabel if available
 function normalizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps.reduce((acc, step) => {
@@ -78,7 +77,6 @@ router.post("/addOrder", async (req, res) => {
   try {
     const {
       Customer_uuid,
-      // order-level Priority/Remark are deprecated – ignore on write
       Status = [{}],
       Steps = [],
       Items = [],
@@ -110,7 +108,6 @@ router.post("/addOrder", async (req, res) => {
     const flatSteps = normalizeSteps(Steps);
     const lineItems = normalizeItems(Items);
 
-    // Fallback: if FE didn’t send Items but sent a top-level remark-like field, save as a note line
     const topRemark =
       (req.body && (req.body.Remark || req.body.remark || req.body.note || req.body.comments)) || "";
     if (lineItems.length === 0 && String(topRemark).trim()) {
@@ -164,7 +161,6 @@ router.get("/all-data", async (req, res) => {
       Status: { $not: { $elemMatch: { Task: "Delivered" } } },
     });
 
-    // show steps that need vendor or are not posted yet
     const allvendors = await Orders.aggregate([
       {
         $addFields: {
@@ -189,7 +185,6 @@ router.get("/all-data", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          // items' remarks for FE
           ItemsRemarks: "$Items.Remark",
           StepsPending: {
             $map: {
@@ -223,7 +218,6 @@ router.get("/all-data", async (req, res) => {
 });
 
 /* ----------------------- RAW FEED for AllVendors ----------------------- */
-/** Includes Status so FE can inspect latest. Option ?deliveredOnly=true */
 router.get("/allvendors-raw", async (req, res) => {
   try {
     const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
@@ -245,7 +239,6 @@ router.get("/allvendors-raw", async (req, res) => {
           },
         },
       },
-      // Build a flat RemarkText from Items[].Remark (trim + join)
       {
         $addFields: {
           RemarkText: {
@@ -303,9 +296,9 @@ router.get("/allvendors", async (req, res) => {
     if (search) {
       const num = +search;
       match.$or = [
-        { Order_Number: Number.isNaN(num) ? -1 : num }, // Order number
-        { Customer_uuid: new RegExp(search, "i") }, // customer id
-        { "Items.Remark": new RegExp(search, "i") }, // any item remark
+        { Order_Number: Number.isNaN(num) ? -1 : num },
+        { Customer_uuid: new RegExp(search, "i") },
+        { "Items.Remark": new RegExp(search, "i") },
       ];
     }
 
@@ -334,7 +327,7 @@ router.get("/allvendors", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          Items: 1, // FE can read per-line Priority/Remark
+          Items: 1,
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
@@ -383,7 +376,6 @@ router.put("/updateOrder/:id", async (req, res) => {
   try {
     const { Delivery_Date, Items, ...otherFields } = req.body;
 
-    // normalize line items if provided
     if (Items) otherFields.Items = normalizeItems(Items);
 
     const order = await Orders.findById(req.params.id);
@@ -418,7 +410,6 @@ router.put("/updateDelivery/:id", async (req, res) => {
 
     if (Customer_uuid) order.Customer_uuid = Customer_uuid;
 
-    // Append new Items to preserve initial "Order Note" line
     if (Items) {
       const incoming = normalizeItems(Items);
       order.Items = normalizeItems([...(order.Items || []), ...incoming]);
@@ -447,11 +438,9 @@ router.get("/GetOrderList", async (req, res) => {
   }
 });
 
-// helper: does this order have any item with Amount > 0?
 const hasBillableAmount = (items) =>
   Array.isArray(items) && items.some((it) => Number(it?.Amount) > 0);
 
-// Delivered AND NO billable amount (0 or missing across all items)
 router.get("/GetDeliveredList", async (req, res) => {
   try {
     const data = await Orders.find({}).lean();
@@ -465,7 +454,6 @@ router.get("/GetDeliveredList", async (req, res) => {
   }
 });
 
-// Delivered AND HAS billable amount (any item Amount > 0)
 router.get("/GetBillList", async (req, res) => {
   try {
     const data = await Orders.find({}).lean();
@@ -478,7 +466,6 @@ router.get("/GetBillList", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 
 /* ----------------------- CUSTOMER CHECKS ----------------------- */
 router.get("/CheckCustomer/:customerUuid", async (req, res) => {
@@ -516,7 +503,7 @@ router.get("/:id", async (req, res) => {
 
 /* ----------------------- REPORTS: VENDOR MISSING ----------------------- */
 router.get("/reports/vendor-missing", async (req, res) => {
-  [200~try {
+  try {
     const page = parseInt(req.query.page || "1", 10);
     const limit = parseInt(req.query.limit || "20", 10);
     const skip = (page - 1) * limit;
@@ -559,7 +546,7 @@ router.get("/reports/vendor-missing", async (req, res) => {
           Order_uuid: 1,
           Order_Number: 1,
           Customer_uuid: 1,
-          Items: 1, // includes per-line Priority/Remark
+          Items: 1,
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
@@ -664,11 +651,11 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
     if ("plannedDate" in patch && patch.plannedDate) patch.plannedDate = new Date(patch.plannedDate);
     if ("costAmount" in patch) patch.costAmount = Number(patch.costAmount || 0);
     if ("vendorCustomerUuid" in patch && patch.vendorCustomerUuid && !patch.vendorId) {
-      patch.vendorId = patch.vendorCustomerUuid; // map to stored field
+      patch.vendorId = patch.vendorCustomerUuid;
     }
     if ("label" in patch && patch.label) {
       patch.label = String(patch.label).trim();
-      patch.normLabel = normLower(patch.label); // keep normalized label
+      patch.normLabel = normLower(patch.label);
     }
     if ("uuid" in patch && patch.uuid) {
       patch.uuid = String(patch.uuid).trim();
@@ -707,13 +694,11 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
       const step = order.Steps.id(stepId);
       if (!step) throw new Error("Step not found");
 
-      // Save vendor info on step
       step.vendorId = vendorCustomerUuid ?? vendorId ?? step.vendorId ?? null;
       step.vendorName = vendorName ?? step.vendorName ?? null;
       step.costAmount = amount;
       if (plannedDate) step.plannedDate = new Date(plannedDate);
 
-      // Already posted? only update vendor info
       if (step.posting?.isPosted) {
         await order.save({ session });
         return res.json({
@@ -723,7 +708,6 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
         });
       }
 
-      // Zero amount => mark done, no posting
       if (amount === 0) {
         step.status = "done";
         step.posting = { isPosted: false, txnId: null, postedAt: null };
@@ -731,10 +715,8 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
         return res.json({ ok: true, message: "Vendor saved (no posting for 0 amount)." });
       }
 
-      // Journal lines
       const lines = [
         { Account_id: `${resolvedVendor}`, Type: "Debit", Amount: amount },
-        // "purchase" account (static id)
         { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount },
       ];
 
@@ -799,7 +781,6 @@ router.post("/steps/toggle", async (req, res) => {
     const find = { _id: orderId };
 
     if (checked) {
-      // Add if not already present (uuid OR normalized label match)
       const doc = await Orders.findOne(find, { Steps: 1 }).lean();
       if (!doc) return res.status(404).json({ success: false, message: "Order not found" });
 
@@ -818,7 +799,7 @@ router.post("/steps/toggle", async (req, res) => {
           Steps: {
             uuid: uuidStr || undefined,
             label,
-            normLabel: labelNorm,        // store normalized label
+            normLabel: labelNorm,
             checked: true,
             vendorId: null,
             vendorName: null,
@@ -832,13 +813,12 @@ router.post("/steps/toggle", async (req, res) => {
       });
       return res.json({ success: true, updated: true });
     } else {
-      // Remove by uuid if present, otherwise by normalized label OR case-insensitive label
       const pullBy = uuidStr
         ? { uuid: uuidStr }
         : {
             $or: [
               { normLabel: labelNorm },
-              { label: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, "i") }, // case-insensitive, trims outer spaces
+              { label: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, "i") },
             ],
           };
 
