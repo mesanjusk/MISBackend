@@ -402,33 +402,46 @@ router.put("/updateOrder/:id", async (req, res) => {
 
 /* ----------------------- UPDATE DELIVERY (Items only) ----------------------- */
 // Routers/Order.js
+/* ----------------------- UPDATE DELIVERY (Items only, atomic) ----------------------- */
 router.put("/updateDelivery/:id", async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items } = req.body;
+
   try {
+    // Resolve by _id or Order_uuid
     const isObjectId = mongoose.isValidObjectId(id);
-    const order = isObjectId
-      ? await Orders.findById(id)
-      : await Orders.findOne({ Order_uuid: id });
+    const filter = isObjectId ? { _id: id } : { Order_uuid: id };
 
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found", error: "No matching order for given id" });
+    const incoming = normalizeItems(Items || []);
+    if (!Customer_uuid && incoming.length === 0) {
+      return res.status(400).json({ success: false, message: "Nothing to update" });
     }
 
-    if (Customer_uuid) order.Customer_uuid = Customer_uuid;
+    const update = {};
+    if (Customer_uuid) update.$set = { Customer_uuid };
+    if (incoming.length > 0) update.$push = { Items: { $each: incoming } };
 
-    if (Items) {
-      const incoming = normalizeItems(Items);
-      order.Items = normalizeItems([...(order.Items || []), ...incoming]);
+    const result = await Orders.updateOne(filter, update, { runValidators: false });
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Order not found" });
     }
 
-    const saved = await order.save();
-    res.status(200).json({ success: true, message: "Order updated successfully", result: saved });
+    // If you want the updated doc, fetch it again:
+    const refreshed = await Orders.findOne(filter).lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Order updated successfully",
+      result: refreshed,
+    });
   } catch (error) {
     console.error("Error updating order:", error);
-    res.status(500).json({ success: false, message: "Error updating order", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Error updating order", error: error.message });
   }
 });
+
 
 
 /* ----------------------- LISTS ----------------------- */
