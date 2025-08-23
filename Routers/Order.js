@@ -401,12 +401,19 @@ router.put("/updateOrder/:id", async (req, res) => {
 });
 
 /* ----------------------- UPDATE DELIVERY (Items only) ----------------------- */
+// Routers/Order.js
 router.put("/updateDelivery/:id", async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items } = req.body;
   try {
-    const order = await Orders.findById(id);
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    const isObjectId = mongoose.isValidObjectId(id);
+    const order = isObjectId
+      ? await Orders.findById(id)
+      : await Orders.findOne({ Order_uuid: id });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found", error: "No matching order for given id" });
+    }
 
     if (Customer_uuid) order.Customer_uuid = Customer_uuid;
 
@@ -415,13 +422,14 @@ router.put("/updateDelivery/:id", async (req, res) => {
       order.Items = normalizeItems([...(order.Items || []), ...incoming]);
     }
 
-    await order.save();
-    res.status(200).json({ success: true, message: "Order updated successfully" });
+    const saved = await order.save();
+    res.status(200).json({ success: true, message: "Order updated successfully", result: saved });
   } catch (error) {
     console.error("Error updating order:", error);
     res.status(500).json({ success: false, message: "Error updating order", error: error.message });
   }
 });
+
 
 /* ----------------------- LISTS ----------------------- */
 router.get("/GetOrderList", async (req, res) => {
