@@ -25,5 +25,6 @@
     "uuid": "^10.0.0",
     "whatsapp-web.js": "^1.23.0",
     "wwebjs-mongo": "^1.1.0"
+    "compression": "^1.7.4",
   }
 }
