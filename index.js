@@ -30,6 +30,8 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const OrderMigrate = require("./Routers/OrderMigrate");
 const paymentFollowupRouter = require("./Routers/paymentFollowup");
+const compression = require("compression");
+
 
 
 // WhatsApp Services
@@ -69,6 +71,8 @@ app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
 app.use("/api/orders", OrderMigrate);
+app.use(compression()); // gzip/br compression for large JSON
+
 
 // ✅ Legacy Routes (to support existing frontend calls)
 app.use("/user", Users);
