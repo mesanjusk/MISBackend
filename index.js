@@ -4,6 +4,7 @@ const http = require("http");
 const socketIO = require("socket.io");
 const connectDB = require("./mongo");
 require("dotenv").config();
+const compression = require("compression");
 
 // Handle any unhandled promise rejections to avoid crashing the app
 process.on("unhandledRejection", (reason) => {
@@ -30,9 +31,7 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const OrderMigrate = require("./Routers/OrderMigrate");
 const paymentFollowupRouter = require("./Routers/paymentFollowup");
-const compression = require("compression");
-
-
+const Dashboard = require("./Routers/Dashboard"); // NEW
 
 // WhatsApp Services
 const {
@@ -44,15 +43,18 @@ const {
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIO(server, {
-  cors: { origin: "*" },
-});
+const io = socketIO(server, { cors: { origin: "*" } });
 
+// ---------- Core middleware ----------
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(compression()); // enable before routes
 
-// ✅ API Routes (recommended, namespaced)
+// ---------- Health check ----------
+app.get("/", (_req, res) => res.json({ ok: true, service: "MIS Backend" }));
+
+// ---------- API namespace ----------
 app.use("/api/users", Users);
 app.use("/api/usergroup", Usergroup);
 app.use("/api/customers", Customers);
@@ -70,11 +72,11 @@ app.use("/api/attendance", Attendance);
 app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
-app.use("/api/orders", OrderMigrate);
-app.use(compression()); // gzip/br compression for large JSON
+app.use("/api/orders-migrate", OrderMigrate); // distinct path (no overlap)
+app.use("/api/paymentfollowup", paymentFollowupRouter);
+app.use("/api/dashboard", Dashboard); // NEW
 
-
-// ✅ Legacy Routes (to support existing frontend calls)
+// ---------- Legacy paths (optional) ----------
 app.use("/user", Users);
 app.use("/usergroup", Usergroup);
 app.use("/customer", Customers);
@@ -82,7 +84,7 @@ app.use("/customergroup", Customergroup);
 app.use("/tasks", Tasks);
 app.use("/taskgroup", Taskgroup);
 app.use("/items", Items);
-app.use("/item", Items);           // ✅ For /item/GetItemList
+app.use("/item", Items);
 app.use("/itemgroup", Itemgroup);
 app.use("/priority", Priority);
 app.use("/order", Orders);
@@ -91,13 +93,13 @@ app.use("/payment_mode", Payment_mode);
 app.use("/transaction", Transaction);
 app.use("/attendance", Attendance);
 app.use("/vendors", Vendors);
-app.use("/note", Note);            // ✅ For /note/:id
+app.use("/note", Note);
 app.use("/usertasks", Usertasks);
-app.use("/usertask", Usertasks);   // ✅ For /usertask/GetUsertaskList
+app.use("/usertask", Usertasks);
 app.use("/paymentfollowup", paymentFollowupRouter);
+app.use("/dashboard", Dashboard); // legacy without /api
 
-
-// ✅ WhatsApp Routes
+// ---------- WhatsApp ----------
 app.get("/whatsapp/qr", (req, res) => {
   const qr = getLatestQR();
   if (qr) res.status(200).json({ qr });
@@ -107,7 +109,6 @@ app.get("/whatsapp/qr", (req, res) => {
 app.get("/qr", (req, res) => {
   const qr = getLatestQR();
   if (!qr) return res.send("QR not ready");
-
   res.send(`
     <html><body>
       <h2>Scan QR to Login WhatsApp</h2>
@@ -122,19 +123,16 @@ app.get("/whatsapp/status", (req, res) => {
 
 app.post("/whatsapp/send-test", async (req, res) => {
   const { number, message, mediaUrl } = req.body;
-
   try {
     const result = await sendMessageToWhatsApp(number, message, mediaUrl);
     res.status(200).json(result);
   } catch (err) {
-    console.error("❌ Failed to send message:", err);  // ✅ print full error
+    console.error("❌ Failed to send message:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-
-
-// ✅ Init DB + WhatsApp Session
+// ---------- Init DB + WhatsApp ----------
 (async () => {
   await connectDB();
   try {
