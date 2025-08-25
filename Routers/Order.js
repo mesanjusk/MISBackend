@@ -14,7 +14,7 @@ const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // pagination helper with sane caps
-function getPaging(req, defaults = { page: 1, limit: 50, max: 200 }) {
+function getPaging(req, defaults = { page: 1, limit: 50, max: 1000 }) { // <-- raised max
   const page = Math.max(1, parseInt(req.query.page || defaults.page, 10) || 1);
   const rawLimit = parseInt(req.query.limit || defaults.limit, 10) || defaults.limit;
   const limit = Math.min(Math.max(1, rawLimit), defaults.max);
@@ -455,8 +455,15 @@ const LIST_PROJ = {
   Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1, Status: 1, createdAt: 1, updatedAt: 1,
 };
 
+// delivered OR cancel detection (case-insensitive)
 const matchNotDeliveredOrCancelled = {
-  Status: { $not: { $elemMatch: { Task: { $in: ["Delivered", "Cancel"] } } } },
+  Status: {
+    $not: {
+      $elemMatch: {
+        Task: { $regex: /^(delivered|cancel)$/i }, // <-- case-insensitive
+      },
+    },
+  },
 };
 
 router.get("/GetOrderList", async (req, res) => {
