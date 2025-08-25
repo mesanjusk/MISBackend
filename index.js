@@ -6,7 +6,7 @@ const connectDB = require("./mongo");
 require("dotenv").config();
 const compression = require("compression");
 
-// Handle any unhandled promise rejections to avoid crashing the 
+// Handle any unhandled promise rejections to avoid crashing the app
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled Rejection:", reason);
 });
@@ -31,7 +31,7 @@ const Note = require("./Routers/Note");
 const Usertasks = require("./Routers/Usertask");
 const OrderMigrate = require("./Routers/OrderMigrate");
 const paymentFollowupRouter = require("./Routers/paymentFollowup");
-const Dashboard = require("./Routers/Dashboard"); // NEW
+const Dashboard = require("./Routers/Dashboard");
 
 // WhatsApp Services
 const {
@@ -49,7 +49,7 @@ const io = socketIO(server, { cors: { origin: "*" } });
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-app.use(compression()); // enable before routes
+app.use(compression());
 
 // ---------- Health check ----------
 app.get("/", (_req, res) => res.json({ ok: true, service: "MIS Backend" }));
@@ -72,9 +72,9 @@ app.use("/api/attendance", Attendance);
 app.use("/api/vendors", Vendors);
 app.use("/api/note", Note);
 app.use("/api/usertasks", Usertasks);
-app.use("/api/orders-migrate", OrderMigrate); // distinct path (no overlap)
+app.use("/api/orders-migrate", OrderMigrate);
 app.use("/api/paymentfollowup", paymentFollowupRouter);
-app.use("/api/dashboard", Dashboard); // NEW
+app.use("/api/dashboard", Dashboard);
 
 // ---------- Legacy paths (optional) ----------
 app.use("/user", Users);
@@ -97,7 +97,7 @@ app.use("/note", Note);
 app.use("/usertasks", Usertasks);
 app.use("/usertask", Usertasks);
 app.use("/paymentfollowup", paymentFollowupRouter);
-app.use("/dashboard", Dashboard); // legacy without /api
+app.use("/dashboard", Dashboard);
 
 // ---------- WhatsApp ----------
 app.get("/whatsapp/qr", (req, res) => {
@@ -117,12 +117,12 @@ app.get("/qr", (req, res) => {
   `);
 });
 
-app.get("/whatsapp/status", (req, res) => {
+app.get("/whatsapp/status", (_req, res) => {
   res.json({ ready: isWhatsAppReady() });
 });
 
 app.post("/whatsapp/send-test", async (req, res) => {
-  const { number, message, mediaUrl } = req.body;
+  const { number, message, mediaUrl } = req.body || {};
   try {
     const result = await sendMessageToWhatsApp(number, message, mediaUrl);
     res.status(200).json(result);
@@ -145,7 +145,4 @@ app.post("/whatsapp/send-test", async (req, res) => {
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-}); 
-
-
-POST https://api.cloudinary.com/v1_1/dadcprflr/raw/upload (Cloudinary upload)
+});
