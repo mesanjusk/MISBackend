@@ -30,18 +30,10 @@ function buildSearchMatch(q) {
   const num = Number(search);
   const numericOr = Number.isFinite(num) ? [{ Order_Number: num }] : [];
 
-  // regex kept for flexibility (index recommendation provided separately)
   const rx = new RegExp(escapeRegex(search), "i");
-  return {
-    $or: [
-      ...numericOr,
-      { Customer_uuid: rx },
-      { "Items.Remark": rx },
-    ],
-  };
+  return { $or: [...numericOr, { Customer_uuid: rx }, { "Items.Remark": rx }] };
 }
 
-// Ensure each item has per-line Priority & Remark (resilient to key casing)
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items
@@ -51,16 +43,8 @@ function normalizeItems(items) {
       const qty = Number(it.Quantity ?? it.quantity ?? 0);
       const rate = Number(it.Rate ?? it.rate ?? 0);
       const amt = Number(it.Amount ?? it.amount ?? (qty * rate) ?? 0);
-
       const priorityRaw = it.Priority ?? it.priority ?? "Normal";
-      const remarkRaw =
-        it.Remark ??
-        it.remark ??
-        it.remarks ??
-        it.comment ??
-        it.note ??
-        "";
-
+      const remarkRaw = it.Remark ?? it.remark ?? it.remarks ?? it.comment ?? it.note ?? "";
       return {
         Item: name,
         Quantity: qty,
@@ -73,13 +57,11 @@ function normalizeItems(items) {
     .filter((it) => it.Item);
 }
 
-// Steps: persist uuid & normLabel if available
 function normalizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps.reduce((acc, step) => {
     const label = typeof step?.label === "string" ? step.label.trim() : "";
     if (!label) return acc;
-
     const amount = Number(step.costAmount ?? 0);
     acc.push({
       uuid: typeof step?.uuid === "string" ? step.uuid.trim() : undefined,
@@ -91,10 +73,9 @@ function normalizeSteps(steps) {
       costAmount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
       plannedDate: step.plannedDate ? new Date(step.plannedDate) : undefined,
       status: step.status || "pending",
-      posting:
-        step.posting && typeof step.posting === "object"
-          ? step.posting
-          : { isPosted: false, txnId: null, postedAt: null },
+      posting: step.posting && typeof step.posting === "object"
+        ? step.posting
+        : { isPosted: false, txnId: null, postedAt: null },
     });
     return acc;
   }, []);
@@ -103,21 +84,10 @@ function normalizeSteps(steps) {
 /* ----------------------- CREATE NEW ORDER ----------------------- */
 router.post("/addOrder", async (req, res) => {
   try {
-    const {
-      Customer_uuid,
-      Status = [{}],
-      Steps = [],
-      Items = [],
-    } = req.body;
+    const { Customer_uuid, Status = [{}], Steps = [], Items = [] } = req.body;
 
     const now = new Date();
-    const statusDefaults = {
-      Task: "Design",
-      Assigned: "Sai",
-      Status_number: 1,
-      Delivery_Date: now,
-      CreatedAt: now,
-    };
+    const statusDefaults = { Task: "Design", Assigned: "Sai", Status_number: 1, Delivery_Date: now, CreatedAt: now };
 
     const updatedStatus = (Status || []).map((s) => ({
       ...statusDefaults,
@@ -127,29 +97,17 @@ router.post("/addOrder", async (req, res) => {
     }));
 
     if (!updatedStatus[0]?.Task || !updatedStatus[0]?.Assigned || !updatedStatus[0]?.Delivery_Date) {
-      return res.status(400).json({
-        success: false,
-        message: "Task, Assigned, and Delivery_Date are required in Status[0].",
-      });
+      return res.status(400).json({ success: false, message: "Task, Assigned, and Delivery_Date are required in Status[0]." });
     }
 
     const flatSteps = normalizeSteps(Steps);
     const lineItems = normalizeItems(Items);
 
-    const topRemark =
-      (req.body && (req.body.Remark || req.body.remark || req.body.note || req.body.comments)) || "";
+    const topRemark = (req.body && (req.body.Remark || req.body.remark || req.body.note || req.body.comments)) || "";
     if (lineItems.length === 0 && String(topRemark).trim()) {
-      lineItems.push({
-        Item: "Order Note",
-        Quantity: 0,
-        Rate: 0,
-        Amount: 0,
-        Priority: "Normal",
-        Remark: String(topRemark).trim(),
-      });
+      lineItems.push({ Item: "Order Note", Quantity: 0, Rate: 0, Amount: 0, Priority: "Normal", Remark: String(topRemark).trim() });
     }
 
-    // fetch last order number lean + projection only what we need
     const lastOrder = await Orders.findOne({}, { Order_Number: 1 }).sort({ Order_Number: -1 }).lean();
     const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
 
@@ -179,28 +137,16 @@ router.post("/addOrder", async (req, res) => {
 /* ----------------------- UNIFIED VIEW (kept) ----------------------- */
 router.get("/all-data", async (req, res) => {
   try {
-    // return only fields used by UI
     const proj = {
-      Order_uuid: 1,
-      Order_Number: 1,
-      Customer_uuid: 1,
-      Items: 1,
-      Status: 1,
-      Steps: 1,
-      createdAt: 1,
-      updatedAt: 1,
+      Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1, Status: 1, Steps: 1,
+      createdAt: 1, updatedAt: 1,
     };
 
-    const delivered = await Orders.find(
-      { Status: { $elemMatch: { Task: "Delivered" } } },
-      proj
-    ).sort({ Order_Number: -1 }).limit(200).lean();
+    const delivered = await Orders.find({ Status: { $elemMatch: { Task: "Delivered" } } }, proj)
+      .sort({ Order_Number: -1 }).limit(200).lean();
 
     const report = await Orders.find(
-      {
-        Status: { $elemMatch: { Task: "Delivered" } },
-        Items: { $exists: true, $not: { $size: 0 } },
-      },
+      { Status: { $elemMatch: { Task: "Delivered" } }, Items: { $exists: true, $not: { $size: 0 } } },
       proj
     ).sort({ Order_Number: -1 }).limit(200).lean();
 
@@ -212,11 +158,7 @@ router.get("/all-data", async (req, res) => {
     const allvendors = await Orders.aggregate([
       {
         $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
-          Steps: 1,
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1, Steps: 1,
           stepsNeedingVendor: {
             $filter: {
               input: "$Steps",
@@ -235,21 +177,14 @@ router.get("/all-data", async (req, res) => {
       { $match: { "stepsNeedingVendor.0": { $exists: true } } },
       {
         $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          ItemsRemarks: "$Items.Remark",
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, ItemsRemarks: "$Items.Remark",
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
               as: "s",
               in: {
-                stepId: "$$s._id",
-                label: "$$s.label",
-                vendorId: "$$s.vendorId",
-                vendorName: "$$s.vendorName",
-                costAmount: "$$s.costAmount",
-                isPosted: "$$s.posting.isPosted",
+                stepId: "$$s._id", label: "$$s.label", vendorId: "$$s.vendorId", vendorName: "$$s.vendorName",
+                costAmount: "$$s.costAmount", isPosted: "$$s.posting.isPosted",
               },
             },
           },
@@ -260,10 +195,7 @@ router.get("/all-data", async (req, res) => {
     ]);
 
     const bills = await Orders.find(
-      {
-        Status: { $elemMatch: { Task: "Delivered" } },
-        $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }],
-      },
+      { Status: { $elemMatch: { Task: "Delivered" } }, $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }] },
       { Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1, Status: 1 }
     ).sort({ Order_Number: -1 }).limit(200).lean();
 
@@ -274,7 +206,7 @@ router.get("/all-data", async (req, res) => {
   }
 });
 
-/* ----------------------- RAW FEED for AllVendors (PAGINATED) ----------------------- */
+/* ----------------------- RAW FEED (vendors) ----------------------- */
 router.get("/allvendors-raw", async (req, res) => {
   try {
     const { page, limit, skip } = getPaging(req);
@@ -289,12 +221,7 @@ router.get("/allvendors-raw", async (req, res) => {
       { $match: baseMatch },
       {
         $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
-          Steps: 1,
-          Status: 1,
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1, Steps: 1, Status: 1,
           latestStatus: {
             $cond: [
               { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
@@ -340,7 +267,6 @@ router.get("/allvendors-raw", async (req, res) => {
           },
         },
       },
-      // only keep orders with at least 1 step needing vendor OR not yet posted
       {
         $addFields: {
           StepsPending: {
@@ -366,12 +292,7 @@ router.get("/allvendors-raw", async (req, res) => {
           total: [{ $count: "count" }],
         },
       },
-      {
-        $project: {
-          rows: "$data",
-          total: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] },
-        },
-      },
+      { $project: { rows: "$data", total: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] } } },
     ];
 
     const out = await Orders.aggregate(pipeline);
@@ -383,12 +304,11 @@ router.get("/allvendors-raw", async (req, res) => {
   }
 });
 
-/* ----------------------- LEGACY PAGE: ALL VENDORS (kept) ----------------------- */
+/* ----------------------- LEGACY vendors page ----------------------- */
 router.get("/allvendors", async (req, res) => {
   try {
     const { page, limit, skip } = getPaging(req);
     const search = (req.query.search || "").trim();
-
     const match = buildSearchMatch(search);
 
     const pipeline = [
@@ -413,10 +333,7 @@ router.get("/allvendors", async (req, res) => {
       { $match: { "stepsNeedingVendor.0": { $exists: true } } },
       {
         $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
+          Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1,
           StepsPending: {
             $map: {
               input: "$stepsNeedingVendor",
@@ -440,12 +357,7 @@ router.get("/allvendors", async (req, res) => {
           total: [{ $count: "count" }],
         },
       },
-      {
-        $project: {
-          rows: "$data",
-          total: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] },
-        },
-      },
+      { $project: { rows: "$data", total: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] } } },
     ];
 
     const result = await Orders.aggregate(pipeline);
@@ -478,7 +390,6 @@ router.post("/addStatus", async (req, res) => {
 router.put("/updateOrder/:id", async (req, res) => {
   try {
     const { Delivery_Date, Items, ...otherFields } = req.body;
-
     if (Items) otherFields.Items = normalizeItems(Items);
 
     const order = await Orders.findById(req.params.id);
@@ -503,7 +414,7 @@ router.put("/updateOrder/:id", async (req, res) => {
   }
 });
 
-/* ----------------------- UPDATE DELIVERY (Items only, atomic) ----------------------- */
+/* ----------------------- UPDATE DELIVERY (Items only) ----------------------- */
 router.put("/updateDelivery/:id", async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items } = req.body;
@@ -535,41 +446,23 @@ router.put("/updateDelivery/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating order:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Error updating order", error: error.message });
+    res.status(500).json({ success: false, message: "Error updating order", error: error.message });
   }
 });
 
 /* ----------------------- LISTS (paginated + projected) ----------------------- */
-
-// common projections for list cards
 const LIST_PROJ = {
-  Order_uuid: 1,
-  Order_Number: 1,
-  Customer_uuid: 1,
-  Items: 1,
-  Status: 1,
-  createdAt: 1,
-  updatedAt: 1,
+  Order_uuid: 1, Order_Number: 1, Customer_uuid: 1, Items: 1, Status: 1, createdAt: 1, updatedAt: 1,
 };
 
-// delivered OR cancel detection
 const matchNotDeliveredOrCancelled = {
-  Status: {
-    $not: {
-      $elemMatch: {
-        Task: { $in: ["Delivered", "Cancel"] },
-      },
-    },
-  },
+  Status: { $not: { $elemMatch: { Task: { $in: ["Delivered", "Cancel"] } } } },
 };
 
 router.get("/GetOrderList", async (req, res) => {
   try {
     const { page, limit, skip } = getPaging(req);
     const searchMatch = buildSearchMatch(req.query.q);
-
     const match = { ...matchNotDeliveredOrCancelled, ...searchMatch };
 
     const [rows, count] = await Promise.all([
@@ -583,7 +476,6 @@ router.get("/GetOrderList", async (req, res) => {
   }
 });
 
-// helper: delivered match
 const deliveredMatch = { Status: { $elemMatch: { Task: "Delivered" } } };
 
 router.get("/GetDeliveredList", async (req, res) => {
@@ -630,11 +522,7 @@ router.get("/GetBillList", async (req, res) => {
     const searchMatch = buildSearchMatch(req.query.q);
 
     // delivered AND HAS billable line
-    const match = {
-      ...deliveredMatch,
-      ...searchMatch,
-      Items: { $elemMatch: { Amount: { $gt: 0 } } },
-    };
+    const match = { ...deliveredMatch, ...searchMatch, Items: { $elemMatch: { Amount: { $gt: 0 } } } };
 
     const [rows, count] = await Promise.all([
       Orders.find(match, LIST_PROJ).sort({ Order_Number: -1 }).skip(skip).limit(limit).lean(),
@@ -662,8 +550,7 @@ router.get("/CheckCustomer/:customerUuid", async (req, res) => {
 router.post("/CheckMultipleCustomers", async (req, res) => {
   try {
     const { ids } = req.body;
-    const linked = await Orders.find({ Customer_uuid: { $in: ids } }, { Customer_uuid: 1 })
-      .distinct("Customer_uuid");
+    const linked = await Orders.find({ Customer_uuid: { $in: ids } }, { Customer_uuid: 1 }).distinct("Customer_uuid");
     res.status(200).json({ linkedIds: linked });
   } catch (err) {
     res.status(500).json({ error: "Error checking linked orders" });
@@ -682,78 +569,8 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-/* ----------------------- REPORTS: VENDOR MISSING (paged) ----------------------- */
-router.get("/reports/vendor-missing", async (req, res) => {
-  try {
-    const { page, limit, skip } = getPaging(req);
-    const deliveredOnly = req.query.deliveredOnly === "true";
-    const search = (req.query.search || "").trim();
-
-    const match = buildSearchMatch(search);
-    if (deliveredOnly) match.Status = { $elemMatch: { Task: "Delivered" } };
-
-    const pipeline = [
-      { $match: match },
-      {
-        $addFields: {
-          stepsNeedingVendor: {
-            $filter: {
-              input: "$Steps",
-              as: "st",
-              cond: {
-                $or: [
-                  { $eq: ["$$st.vendorId", null] },
-                  { $eq: ["$$st.vendorId", ""] },
-                  { $eq: ["$$st.posting.isPosted", false] },
-                ],
-              },
-            },
-          },
-        },
-      },
-      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
-      {
-        $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
-          StepsPending: {
-            $map: {
-              input: "$stepsNeedingVendor",
-              as: "s",
-              in: {
-                stepId: "$$s._id",
-                label: "$$s.label",
-                vendorId: "$$s.vendorId",
-                vendorName: "$$s.vendorName",
-                costAmount: "$$s.costAmount",
-                isPosted: "$$s.posting.isPosted",
-              },
-            },
-          },
-        },
-      },
-      { $sort: { Order_Number: -1 } },
-      { $facet: { data: [{ $skip: skip }, { $limit: limit }], total: [{ $count: "count" }] } },
-      {
-        $project: {
-          rows: "$data",
-          total: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] },
-        },
-      },
-    ];
-
-    const result = await Orders.aggregate(pipeline);
-    const { rows = [], total = 0 } = result[0] || {};
-    res.json({ page, limit, total, rows });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 /* ------------------ CREATE STEP ------------------ */
-router.post("/orders/:orderId/steps", async (req, res) => {
+router.post("/:orderId/steps", async (req, res) => {
   const { orderId } = req.params;
   const {
     uuid: stepUuid,
@@ -801,7 +618,7 @@ router.post("/orders/:orderId/steps", async (req, res) => {
 });
 
 /* ------------------ EDIT STEP (no posting side effects) ------------------ */
-router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
+router.patch("/:orderId/steps/:stepId", async (req, res) => {
   const { orderId, stepId } = req.params;
   const allowed = [
     "uuid",
@@ -847,15 +664,13 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
 });
 
 /* ************* ASSIGN VENDOR & POST (uses "purchase") ************* */
-router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
+router.post("/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
   const { orderId, stepId } = req.params;
   const { vendorId, vendorName, vendorCustomerUuid, costAmount, plannedDate, createdBy } = req.body;
 
   const resolvedVendor = vendorId || vendorCustomerUuid || vendorName;
   if (!resolvedVendor)
-    return res
-      .status(400)
-      .json({ ok: false, error: "Provide vendorId or vendorCustomerUuid or vendorName" });
+    return res.status(400).json({ ok: false, error: "Provide vendorId or vendorCustomerUuid or vendorName" });
 
   const amount = Number(costAmount ?? 0);
   if (Number.isNaN(amount) || amount < 0)
@@ -938,8 +753,7 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
   }
 });
 
-/* ------------------ TOGGLE STEP (add on check, remove on uncheck) ------------------ */
-// NOTE: Frontend uncheck currently calls DELETE /orders/:orderId/steps/:stepId (added below).
+/* ------------------ TOGGLE STEP ------------------ */
 router.post("/steps/toggle", async (req, res) => {
   try {
     const { orderId, step = {}, checked } = req.body || {};
@@ -957,7 +771,6 @@ router.post("/steps/toggle", async (req, res) => {
     const find = { _id: orderId };
 
     if (checked) {
-      // ADD
       const doc = await Orders.findOne(find, { Steps: 1 }).lean();
       if (!doc) return res.status(404).json({ success: false, message: "Order not found" });
 
@@ -991,7 +804,6 @@ router.post("/steps/toggle", async (req, res) => {
       return res.json({ success: true, updated: true });
     }
 
-    // UNCHECK: remove by uuid OR normLabel OR case-insensitive label
     const pullOr = [];
     if (uuidStr) pullOr.push({ uuid: uuidStr });
     if (label) {
@@ -1007,23 +819,17 @@ router.post("/steps/toggle", async (req, res) => {
   }
 });
 
-/* -------------- NEW: DELETE a specific Step by subdoc _id -------------- */
-router.delete("/orders/:orderId/steps/:stepId", async (req, res) => {
+/* -------------- DELETE a specific Step by subdoc _id -------------- */
+router.delete("/:orderId/steps/:stepId", async (req, res) => {
   try {
     const { orderId, stepId } = req.params;
     if (!mongoose.isValidObjectId(orderId) || !mongoose.isValidObjectId(stepId)) {
       return res.status(400).json({ ok: false, error: "Invalid orderId or stepId" });
     }
-
-    const result = await Orders.updateOne(
-      { _id: orderId },
-      { $pull: { Steps: { _id: stepId } } }
-    );
-
+    const result = await Orders.updateOne({ _id: orderId }, { $pull: { Steps: { _id: stepId } } });
     if (result.modifiedCount === 0) {
       return res.status(404).json({ ok: false, error: "Order/Step not found or already removed" });
     }
-
     res.json({ ok: true, removed: true });
   } catch (e) {
     console.error("delete step error:", e);
