@@ -84,27 +84,27 @@ app.use("/api/dashboard", Dashboard);
 
 // ---------- Optional: remove legacy mounts to avoid duplicates ----------
 // If some old pages still call non-/api paths, re-enable selectively.
-// app.use("/user", Users);
-// app.use("/usergroup", Usergroup);
-// app.use("/customer", Customers);
-// app.use("/customergroup", Customergroup);
-// app.use("/tasks", Tasks);
-// app.use("/taskgroup", Taskgroup);
-// app.use("/items", Items);
-// app.use("/item", Items);
-// app.use("/itemgroup", Itemgroup);
-// app.use("/priority", Priority);
-// app.use("/order", Orders);
-// app.use("/enquiry", Enquiry);
-// app.use("/payment_mode", Payment_mode);
-// app.use("/transaction", Transaction);
-// app.use("/attendance", Attendance);
-// app.use("/vendors", Vendors);
-// app.use("/note", Note);
-// app.use("/usertasks", Usertasks);
-// app.use("/usertask", Usertasks);
-// app.use("/paymentfollowup", paymentFollowupRouter);
-// app.use("/dashboard", Dashboard);
+app.use("/user", Users);
+app.use("/usergroup", Usergroup);
+app.use("/customer", Customers);
+app.use("/customergroup", Customergroup);
+app.use("/tasks", Tasks);
+app.use("/taskgroup", Taskgroup);
+app.use("/items", Items);
+app.use("/item", Items);
+app.use("/itemgroup", Itemgroup);
+app.use("/priority", Priority);
+app.use("/order", Orders);
+app.use("/enquiry", Enquiry);
+app.use("/payment_mode", Payment_mode);
+app.use("/transaction", Transaction);
+app.use("/attendance", Attendance);
+app.use("/vendors", Vendors);
+app.use("/note", Note);
+app.use("/usertasks", Usertasks);
+app.use("/usertask", Usertasks);
+app.use("/paymentfollowup", paymentFollowupRouter);
+app.use("/dashboard", Dashboard);
 
 // ---------- WhatsApp (kept as non-/api to match your frontend) ----------
 app.get("/whatsapp/qr", (_req, res) => {
