@@ -6,7 +6,7 @@ const connectDB = require("./mongo");
 require("dotenv").config();
 const compression = require("compression");
 
-// Handle any unhandled promise rejections to avoid crashing the app
+// Handle any unhandled promise rejections to avoid crashing the 
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled Rejection:", reason);
 });
