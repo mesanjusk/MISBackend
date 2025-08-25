@@ -1,4 +1,4 @@
-this is my index.js const express = require("express");
+const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const socketIO = require("socket.io");
