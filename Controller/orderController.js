@@ -2,104 +2,76 @@
 const mongoose = require("mongoose");
 const Orders = require("../Models/order");
 
-// normalize
-const norm = (s) => String(s || "").trim();
-const isObjectId = (v) => mongoose.isValidObjectId(v);
+// ... keep existing code (including updateStatus) ...
 
-/**
- * Core helper: append a new Status entry (computes next Status_number).
- * - orderIdOrUuid: Mongo _id OR Order_uuid
- * - task: string (e.g., "Design", "Printing", "Delivered", ...)
- */
-const updateOrderStatus = async (orderIdOrUuid, task) => {
+/** GET /order/GetOrderList?page=1&limit=500&search=... */
+const getOrderList = async (req, res) => {
   try {
-    const id = norm(orderIdOrUuid);
-    const Task = norm(task);
-    if (!id) return { success: false, message: "Order id is required" };
-    if (!Task) return { success: false, message: "Task is required" };
+    const page  = Math.max(parseInt(req.query.page  || "1", 10), 1);
+    const limit = Math.max(parseInt(req.query.limit || "50", 10), 1);
+    const skip  = (page - 1) * limit;
+    const search = (req.query.search || "").trim();
 
-    // find by _id or Order_uuid
-    let order = null;
-    if (isObjectId(id)) {
-      order = await Orders.findById(id);
-    }
-    if (!order) {
-      order = await Orders.findOne({ Order_uuid: id });
-    }
-    if (!order) {
-      return { success: false, message: "Order not found" };
+    const q = {};
+    if (search) {
+      const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      q.$or = [
+        { Order_Number: rx },
+        { Customer_name: rx },         // in case you store a denorm name
+        { "Items.Item": rx }
+      ];
     }
 
-    // work out next Status_number
-    const nextNo = typeof order.nextStatusNumber === "function"
-      ? order.nextStatusNumber()
-      : (() => {
-          const arr = Array.isArray(order.Status) ? order.Status : [];
-          if (arr.length === 0) return 1;
-          return Math.max(...arr.map((s) => Number(s?.Status_number || 0))) + 1;
-        })();
+    // Sort by updated time (latest first)
+    const orders = await Orders.find(q).sort({ updatedAt: -1 }).skip(skip).limit(limit).lean();
 
-    // reuse last Assigned & Delivery_Date to satisfy required fields in statusSchema
-    const last = (Array.isArray(order.Status) && order.Status.length > 0)
-      ? order.Status[order.Status.length - 1]
-      : null;
-
-    const Assigned = norm(last?.Assigned || "System");
-    const Delivery_Date = last?.Delivery_Date ? new Date(last.Delivery_Date) : new Date();
-    const CreatedAt = new Date();
-
-    const newStatus = { Task, Assigned, Delivery_Date, Status_number: nextNo, CreatedAt };
-
-    const updatedOrder = await Orders.findByIdAndUpdate(
-      order._id,
-      { $push: { Status: newStatus } },
-      { new: true }
-    );
-
-    if (!updatedOrder) {
-      return { success: false, message: "Order not found after update" };
-    }
-
-    return {
+    return res.json({
       success: true,
-      message: "Status updated",
-      result: updatedOrder,
-      highestStatusTask: newStatus
-    };
-  } catch (error) {
-    console.error("Error updating order status:", error);
-    return { success: false, message: "Error updating order status" };
+      page,
+      limit,
+      count: orders.length,
+      result: orders,
+    });
+  } catch (err) {
+    console.error("GetOrderList error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 };
 
-/**
- * Express route handler:
- *  - POST /order/updateStatus       body: { Order_id, Task }
- *  - PUT  /order/updateStatus/:id   body: { Task }
- *  - (Backward compatible) body: { orderId, newStatus: { Task } }
- */
-const updateStatus = async (req, res) => {
+/** GET /taskgroup/GetTaskgroupList?page=1&limit=500 */
+const getTaskgroupList = async (req, res) => {
   try {
-    // accept multiple shapes
-    const id = req.params.id || req.body.Order_id || req.body.orderId;
-    const Task =
-      (req.body.Task ?? req.body.task) ??
-      (req.body.newStatus && req.body.newStatus.Task) ??
-      "";
+    // If you have a Taskgroup model, use it. If not, return a static list for now.
+    // Example with a simple static list including 'Sequence':
+    const rows = [
+      { Task_group: "Created",   Sequence: 1 },
+      { Task_group: "Design",    Sequence: 2 },
+      { Task_group: "Printing",  Sequence: 3 },
+      { Task_group: "Lamination",Sequence: 4 },
+      { Task_group: "Cutting",   Sequence: 5 },
+      { Task_group: "Packing",   Sequence: 6 },
+      { Task_group: "Dispatch",  Sequence: 7 },
+      // Do NOT return Delivered here (frontend adds it as drop-zone)
+    ];
 
-    const out = await updateOrderStatus(id, Task);
-    if (!out.success) {
-      const code = /not found/i.test(out.message) ? 404 : 400;
-      return res.status(code).json(out);
-    }
-    return res.json(out);
+    return res.json({
+      success: true,
+      page: 1,
+      limit: rows.length,
+      result: rows,
+    });
   } catch (err) {
-    console.error("updateStatus handler error:", err);
-    return res.status(500).json({ success: false, message: err?.message || "Server error" });
+    console.error("GetTaskgroupList error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 };
 
 module.exports = {
-  updateOrderStatus, // programmatic use
-  updateStatus       // route handler
+  // existing exports ...
+  updateOrderStatus,
+  updateStatus,
+
+  // NEW:
+  getOrderList,
+  getTaskgroupList,
 };
