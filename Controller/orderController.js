@@ -43,16 +43,9 @@ const getTaskgroupList = async (req, res) => {
   try {
     // If you have a Taskgroup model, use it. If not, return a static list for now.
     // Example with a simple static list including 'Sequence':
-    const rows = [
-      { Task_group: "Created",   Sequence: 1 },
-      { Task_group: "Design",    Sequence: 2 },
-      { Task_group: "Printing",  Sequence: 3 },
-      { Task_group: "Lamination",Sequence: 4 },
-      { Task_group: "Cutting",   Sequence: 5 },
-      { Task_group: "Packing",   Sequence: 6 },
-      { Task_group: "Dispatch",  Sequence: 7 },
-      // Do NOT return Delivered here (frontend adds it as drop-zone)
-    ];
+   const TaskGroup = require("../Models/taskGroup");
+const rows = await TaskGroup.find().lean();
+
 
     return res.json({
       success: true,
