@@ -90,21 +90,29 @@ function recalcTotals(doc) {
   doc.stepsCostTotal = (doc.Steps || []).reduce((s, st) => s + (+st.costAmount || 0), 0);
 }
 
-/* ----------------------- Hooks ----------------------- */
+// Optional helper for controllers
+OrdersSchema.methods.nextStatusNumber = function() {
+  const arr = Array.isArray(this.Status) ? this.Status : [];
+  if (arr.length === 0) return 1;
+  let max = 0;
+  for (const s of arr) {
+    const n = Number(s?.Status_number || 0);
+    if (n > max) max = n;
+  }
+  return max + 1;
+};
 
-// Ensure UUID exists
+/* ----------------------- Hooks ----------------------- */
 OrdersSchema.pre('validate', function(next) {
   if (!this.Order_uuid) this.Order_uuid = uuidv4();
   next();
 });
 
-// Recalculate on save
 OrdersSchema.pre('save', function(next) {
   recalcTotals(this);
   next();
 });
 
-// Recalculate after findOneAndUpdate (covers $set/$push cases)
 OrdersSchema.post('findOneAndUpdate', async function(doc) {
   if (!doc) return;
   recalcTotals(doc);
