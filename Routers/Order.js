@@ -13,7 +13,66 @@ const normLower = (s) => String(s || "").trim().toLowerCase();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Ensure each item has per-line Priority & Remark (resilient to key casing)
+/** Resolve a Mongo filter from any incoming id type */
+function idToFilter(anyId) {
+  const id = String(anyId || "").trim();
+  if (!id) return null;
+  if (mongoose.isValidObjectId(id)) return { _id: id };
+  if (/^\d+$/.test(id)) return { Order_Number: Number(id) };
+  return { Order_uuid: id };
+}
+
+/** Append a new status entry and return the fresh order (lean) */
+async function appendStatus(filter, task, assignedHint = "DragDrop") {
+  const order = await Orders.findOne(filter);
+  if (!order) return { ok: false, code: 404, msg: "Order not found" };
+
+  const now = new Date();
+  const last = Array.isArray(order.Status) && order.Status.length
+    ? order.Status[order.Status.length - 1]
+    : null;
+
+  const nextNo = Number(last?.Status_number || 0) + 1;
+
+  const entry = {
+    Task: String(task || "").trim() || "Other",
+    Assigned: last?.Assigned || assignedHint || "System",
+    Status_number: nextNo,
+    Delivery_Date: now,
+    CreatedAt: now,
+  };
+
+  order.Status = Array.isArray(order.Status) ? order.Status : [];
+  order.Status.push(entry);
+  await order.save();
+
+  const fresh = await Orders.findOne(filter).lean();
+  return { ok: true, order: fresh, entry };
+}
+
+/** Normalizes both old and new payload shapes */
+function parseStatusPayload(req) {
+  // Old shape used by legacy callers:
+  // { orderId, newStatus }  (newStatus may be string or { Task })
+  const oldOrderId = req.body?.orderId;
+  const oldNewStatus = req.body?.newStatus;
+
+  // New DnD shape used by AllOrder.jsx:
+  // { Order_id, Task }
+  const dndId = req.body?.Order_id;
+  const dndTask = req.body?.Task;
+
+  // Fallback to URL param (PUT /updateStatus/:id)
+  let id = dndId || oldOrderId || req.params?.id;
+  let task = dndTask;
+
+  if (!task && typeof oldNewStatus === "string") task = oldNewStatus;
+  if (!task && oldNewStatus && typeof oldNewStatus === "object") task = oldNewStatus.Task;
+
+  return { id: id ? String(id).trim() : "", task: task ? String(task).trim() : "" };
+}
+
+/* ----------------------- items/steps normalizers (unchanged) ----------------------- */
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items
@@ -45,7 +104,6 @@ function normalizeItems(items) {
     .filter((it) => it.Item);
 }
 
-// Steps: persist uuid & normLabel if available
 function normalizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
   return steps.reduce((acc, step) => {
@@ -72,7 +130,7 @@ function normalizeSteps(steps) {
   }, []);
 }
 
-/* ----------------------- CREATE NEW ORDER ----------------------- */
+/* ----------------------- CREATE NEW ORDER (kept) ----------------------- */
 router.post("/addOrder", async (req, res) => {
   try {
     const {
@@ -147,274 +205,9 @@ router.post("/addOrder", async (req, res) => {
   }
 });
 
-/* ----------------------- UNIFIED VIEW (kept) ----------------------- */
-router.get("/all-data", async (req, res) => {
-  try {
-    const delivered = await Orders.find({ Status: { $elemMatch: { Task: "Delivered" } } });
+/* ----------------------- DnD / STATUS (fixed) ----------------------- */
 
-    const report = await Orders.find({
-      Status: { $elemMatch: { Task: "Delivered" } },
-      Items: { $exists: true, $not: { $size: 0 } },
-    });
-
-    const outstanding = await Orders.find({
-      Status: { $not: { $elemMatch: { Task: "Delivered" } } },
-    });
-
-    const allvendors = await Orders.aggregate([
-      {
-        $addFields: {
-          stepsNeedingVendor: {
-            $filter: {
-              input: "$Steps",
-              as: "st",
-              cond: {
-                $or: [
-                  { $eq: ["$$st.vendorId", null] },
-                  { $eq: ["$$st.vendorId", ""] },
-                  { $eq: ["$$st.posting.isPosted", false] },
-                ],
-              },
-            },
-          },
-        },
-      },
-      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
-      {
-        $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          ItemsRemarks: "$Items.Remark",
-          StepsPending: {
-            $map: {
-              input: "$stepsNeedingVendor",
-              as: "s",
-              in: {
-                stepId: "$$s._id",
-                label: "$$s.label",
-                vendorId: "$$s.vendorId",
-                vendorName: "$$s.vendorName",
-                costAmount: "$$s.costAmount",
-                isPosted: "$$s.posting.isPosted",
-              },
-            },
-          },
-        },
-      },
-      { $sort: { Order_Number: -1 } },
-    ]);
-
-    const bills = await Orders.find({
-      Status: { $elemMatch: { Task: "Delivered" } },
-      $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }],
-    });
-
-    res.json({ delivered, report, outstanding, allvendors, bills });
-  } catch (error) {
-    console.error("Error generating unified report:", error.message);
-    res.status(500).json({ error: "Failed to load report data" });
-  }
-});
-
-/* ----------------------- RAW FEED for AllVendors ----------------------- */
-router.get("/allvendors-raw", async (req, res) => {
-  try {
-    const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
-
-    const pipeline = [
-      {
-        $project: {
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
-          Steps: 1,
-          Status: 1,
-          latestStatus: {
-            $cond: [
-              { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
-              { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
-              null,
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          RemarkText: {
-            $let: {
-              vars: {
-                rems: {
-                  $filter: {
-                    input: {
-                      $map: {
-                        input: { $ifNull: ["$Items", []] },
-                        as: "it",
-                        in: { $trim: { input: { $ifNull: ["$$it.Remark", ""] } } },
-                      },
-                    },
-                    as: "r",
-                    cond: { $ne: ["$$r", ""] },
-                  },
-                },
-              },
-              in: {
-                $reduce: {
-                  input: "$$rems",
-                  initialValue: "",
-                  in: {
-                    $cond: [
-                      { $eq: ["$$value", ""] },
-                      "$$this",
-                      { $concat: ["$$value", " | ", "$$this"] },
-                    ],
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
-      { $sort: { Order_Number: -1 } },
-    ];
-
-    const docs = await Orders.aggregate(pipeline);
-    res.json({ rows: docs, total: docs.length });
-  } catch (e) {
-    console.error("allvendors-raw error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-/* ----------------------- LEGACY PAGE: ALL VENDORS (kept) ----------------------- */
-router.get("/allvendors", async (req, res) => {
-  try {
-    const search = (req.query.search || "").trim();
-
-    const match = {};
-    if (search) {
-      const num = +search;
-      match.$or = [
-        { Order_Number: Number.isNaN(num) ? -1 : num },
-        { Customer_uuid: new RegExp(search, "i") },
-        { "Items.Remark": new RegExp(search, "i") },
-      ];
-    }
-
-    const rows = await Orders.aggregate([
-      { $match: Object.keys(match).length ? match : {} },
-      {
-        $addFields: {
-          stepsNeedingVendor: {
-            $filter: {
-              input: "$Steps",
-              as: "st",
-              cond: {
-                $or: [
-                  { $eq: ["$$st.vendorId", null] },
-                  { $eq: ["$$st.vendorId", ""] },
-                  { $eq: ["$$st.posting.isPosted", false] },
-                ],
-              },
-            },
-          },
-        },
-      },
-      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
-      {
-        $project: {
-          Order_uuid: 1,
-          Order_Number: 1,
-          Customer_uuid: 1,
-          Items: 1,
-          StepsPending: {
-            $map: {
-              input: "$stepsNeedingVendor",
-              as: "s",
-              in: {
-                stepId: "$$s._id",
-                label: "$$s.label",
-                vendorId: "$$s.vendorId",
-                vendorName: "$$s.vendorName",
-                costAmount: "$$s.costAmount",
-                isPosted: "$$s.posting.isPosted",
-              },
-            },
-          },
-        },
-      },
-      { $sort: { Order_Number: -1 } },
-    ]);
-
-    res.json({ rows, total: rows.length });
-  } catch (e) {
-    console.error("allvendors error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-/* ----------------------- STATUS: DnD-friendly + backward-compatible ----------------------- */
-
-/** Resolve a Mongo filter from any incoming id type */
-function idToFilter(anyId) {
-  const id = String(anyId || "").trim();
-  if (!id) return null;
-  if (mongoose.isValidObjectId(id)) return { _id: id };
-  if (/^\d+$/.test(id)) return { Order_Number: Number(id) };
-  return { Order_uuid: id };
-}
-
-/** Append a new status entry and return the fresh order (lean) */
-async function appendStatus(filter, task, assignedHint = "System") {
-  const order = await Orders.findOne(filter);
-  if (!order) return { ok: false, code: 404, msg: "Order not found" };
-
-  const now = new Date();
-  const last = Array.isArray(order.Status) && order.Status.length
-    ? order.Status[order.Status.length - 1]
-    : null;
-
-  const nextNo = Number(last?.Status_number || 0) + 1;
-
-  const entry = {
-    Task: String(task || "").trim() || "Other",
-    Assigned: last?.Assigned || assignedHint || "System",
-    Status_number: nextNo,
-    Delivery_Date: now,
-    CreatedAt: now,
-  };
-
-  order.Status = Array.isArray(order.Status) ? order.Status : [];
-  order.Status.push(entry);
-  await order.save();
-
-  const fresh = await Orders.findOne(filter).lean();
-  return { ok: true, order: fresh, entry };
-}
-
-/** Normalizes both old and new payload shapes */
-function parseStatusPayload(req) {
-  // Old shape used by some places:
-  // { orderId, newStatus }  where newStatus may be string or { Task }
-  const oldOrderId = req.body?.orderId;
-  const oldNewStatus = req.body?.newStatus;
-
-  // New DnD shape used by AllOrder.jsx:
-  // { Order_id, Task }
-  const dndId = req.body?.Order_id;
-  const dndTask = req.body?.Task;
-
-  let id = dndId || oldOrderId || req.params?.id;
-  let task = dndTask;
-
-  if (!task && typeof oldNewStatus === "string") task = oldNewStatus;
-  if (!task && oldNewStatus && typeof oldNewStatus === "object") task = oldNewStatus.Task;
-
-  return { id: id ? String(id).trim() : "", task: task ? String(task).trim() : "" };
-}
-
-/** POST /order/updateStatus  — accepts BOTH shapes */
+/** POST /order/updateStatus — understands {Order_id, Task} and {orderId, newStatus} */
 router.post("/updateStatus", async (req, res) => {
   try {
     const { id, task } = parseStatusPayload(req);
@@ -425,29 +218,18 @@ router.post("/updateStatus", async (req, res) => {
     const filter = idToFilter(id);
     if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
 
-    // Try controller if you still want to keep old path working
-    // If your controller expects (orderId, newStatus), we pass the normalized values.
-    try {
-      if (typeof updateOrderStatus === "function") {
-        const legacy = await updateOrderStatus(id, task);
-        // If controller indicates success, return as-is (keeps old behavior)
-        if (legacy && legacy.success) return res.json(legacy);
-      }
-    } catch (_) {
-      // If controller path fails, fall through to local updater
-    }
-
+    // Do the reliable local save first (so UI DnD always persists)
     const out = await appendStatus(filter, task, "DragDrop");
     if (!out.ok) return res.status(out.code || 500).json({ success: false, message: out.msg });
 
     return res.json({ success: true, message: "Status updated", result: out.order });
   } catch (e) {
-    console.error("updateStatus error:", e);
+    console.error("POST /updateStatus error:", e);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 
-/** PUT /order/updateStatus/:id  — fallback used by frontend */
+/** PUT /order/updateStatus/:id — UI fallback */
 router.put("/updateStatus/:id", async (req, res) => {
   try {
     const id = String(req.params.id || "").trim();
@@ -468,7 +250,7 @@ router.put("/updateStatus/:id", async (req, res) => {
   }
 });
 
-/** POST /order/addStatus — keeps old route name, same handler */
+/** Keep legacy route name working too */
 router.post("/addStatus", async (req, res) => {
   try {
     const { id, task } = parseStatusPayload(req);
@@ -483,7 +265,7 @@ router.post("/addStatus", async (req, res) => {
 
     return res.json({ success: true, message: "Status added", result: out.order });
   } catch (e) {
-    console.error("addStatus error:", e);
+    console.error("POST /addStatus error:", e);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
