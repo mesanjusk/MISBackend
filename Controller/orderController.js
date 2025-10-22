@@ -1,82 +1,74 @@
 const mongoose = require("mongoose");
 const Orders = require("../Models/order");
 
-const coerceDate = (value, fallback) => {
-  if (!value) return fallback;
-  const dt = new Date(value);
-  return Number.isNaN(dt.getTime()) ? fallback : dt;
-};
-
-const buildOrderFilter = (identifier) => {
+function buildOrderFilter(identifier) {
   if (!identifier) return null;
 
   if (typeof identifier === "object" && !Array.isArray(identifier)) {
     return identifier;
   }
 
-  const options = [];
+  const trimmed = String(identifier).trim();
+  const queries = [];
 
-  if (typeof identifier === "string") {
-    const trimmed = identifier.trim();
-    if (trimmed) {
-      options.push({ Order_uuid: trimmed });
+  if (trimmed) {
+    queries.push({ Order_uuid: trimmed });
 
-      const asNumber = Number(trimmed);
-      if (!Number.isNaN(asNumber)) {
-        options.push({ Order_Number: asNumber });
-      }
+    const asNumber = Number(trimmed);
+    if (!Number.isNaN(asNumber)) {
+      queries.push({ Order_Number: asNumber });
     }
   }
 
   if (mongoose.isValidObjectId(identifier)) {
-    options.push({ _id: identifier });
+    queries.push({ _id: identifier });
   }
 
-  if (options.length === 0) return null;
-  return options.length === 1 ? options[0] : { $or: options };
-};
+  if (queries.length === 0) return null;
+  return queries.length === 1 ? queries[0] : { $or: queries };
+}
 
-const normalizeStatusPayload = (incoming = {}, order) => {
-  const asObject =
-    incoming && typeof incoming === "object" && !Array.isArray(incoming)
-      ? { ...incoming }
-      : { Task: incoming };
+function coerceDate(value, fallback) {
+  if (!value) return fallback;
+  const dt = new Date(value);
+  return Number.isNaN(dt.getTime()) ? fallback : dt;
+}
 
-  const lastStatus = Array.isArray(order?.Status) && order.Status.length > 0
-    ? order.Status[order.Status.length - 1]
+function normalizeStatusInput(rawStatus, currentStatuses) {
+  const lastStatus = Array.isArray(currentStatuses)
+    ? currentStatuses[currentStatuses.length - 1] || {}
     : {};
 
-  const rawTask = asObject.Task ?? asObject.task;
-  const task = typeof rawTask === "string" ? rawTask.trim() : "";
+  let status = {};
+  if (typeof rawStatus === "string") {
+    status.Task = rawStatus.trim();
+  } else if (rawStatus && typeof rawStatus === "object" && !Array.isArray(rawStatus)) {
+    status = { ...rawStatus };
+  }
+
+  const task = typeof status.Task === "string" ? status.Task.trim() : "";
   if (!task) {
     return { error: "Task is required" };
   }
 
-  const assignedRaw = asObject.Assigned ?? asObject.assigned;
-  const assigned =
-    typeof assignedRaw === "string" && assignedRaw.trim()
-      ? assignedRaw.trim()
-      : typeof lastStatus?.Assigned === "string" && lastStatus.Assigned.trim()
+  const assignedSource =
+    typeof status.Assigned === "string" && status.Assigned.trim()
+      ? status.Assigned.trim()
+      : typeof lastStatus.Assigned === "string" && lastStatus.Assigned.trim()
         ? lastStatus.Assigned
         : "Unassigned";
 
   const now = new Date();
 
-  const deliveryRaw = asObject.Delivery_Date ?? asObject.deliveryDate;
-  const createdRaw = asObject.CreatedAt ?? asObject.createdAt;
-
-  const deliveryDate = coerceDate(deliveryRaw, lastStatus?.Delivery_Date ?? now);
-  const createdAt = coerceDate(createdRaw, now);
-
   return {
     Task: task,
-    Assigned: assigned,
-    Delivery_Date: deliveryDate,
-    CreatedAt: createdAt,
+    Assigned: assignedSource,
+    Delivery_Date: coerceDate(status.Delivery_Date, lastStatus.Delivery_Date ?? now),
+    CreatedAt: coerceDate(status.CreatedAt, now),
   };
-};
+}
 
-const updateOrderStatus = async ({ identifier, statusInput }) => {
+const updateOrderStatus = async (identifier, statusInput) => {
   try {
     const filter = buildOrderFilter(identifier);
     if (!filter) {
@@ -88,22 +80,25 @@ const updateOrderStatus = async ({ identifier, statusInput }) => {
       return { success: false, message: "Order not found" };
     }
 
-    const normalized = normalizeStatusPayload(statusInput, order);
-    if (normalized?.error) {
-      return { success: false, message: normalized.error };
+    order.Status = Array.isArray(order.Status) ? order.Status : [];
+    const normalizedStatus = normalizeStatusInput(statusInput, order.Status);
+    if (normalizedStatus?.error) {
+      return { success: false, message: normalizedStatus.error };
     }
 
-    const statusNumbers = Array.isArray(order.Status)
-      ? order.Status.map((s) => Number(s.Status_number) || 0)
-      : [];
-    const maxStatusNumber = statusNumbers.length > 0 ? Math.max(...statusNumbers) : 0;
+    const maxStatusNumber = order.Status.reduce((acc, status) => {
+      const value = Number(status.Status_number);
+      return Number.isNaN(value) ? acc : Math.max(acc, value);
+    }, 0);
 
-    order.Status.push({
-      ...normalized,
+    const nextStatus = {
+      ...normalizedStatus,
       Status_number: maxStatusNumber + 1,
-    });
+    };
 
+    order.Status.push(nextStatus);
     const saved = await order.save();
+
     return { success: true, result: saved };
   } catch (error) {
     console.error("Error updating order status:", error);
@@ -114,4 +109,3 @@ const updateOrderStatus = async ({ identifier, statusInput }) => {
 module.exports = {
   updateOrderStatus,
 };
-
