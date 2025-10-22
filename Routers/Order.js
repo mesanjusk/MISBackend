@@ -438,46 +438,116 @@ router.put("/updateDelivery/:id", async (req, res) => {
   }
 });
 
-/* ----------------------- LISTS ----------------------- */
+/* ----------------------- LISTS (LATEST-STATUS AWARE) ----------------------- */
+
+/**
+ * Helper pipeline stages to compute:
+ *  - latestStatus: last element of Status[]
+ *  - latestTaskLower: lowercased latestStatus.Task ("" if missing)
+ *  - hasBillable: any Items[].Amount > 0
+ */
+const latestStatusProjectionStages = [
+  {
+    $addFields: {
+      latestStatus: {
+        $cond: [
+          { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+          { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+          null,
+        ],
+      },
+    },
+  },
+  {
+    $addFields: {
+      latestTaskLower: {
+        $toLower: {
+          $trim: { input: { $ifNull: ["$latestStatus.Task", ""] } },
+        },
+      },
+      hasBillable: {
+        $anyElementTrue: {
+          $map: {
+            input: { $ifNull: ["$Items", []] },
+            as: "it",
+            in: {
+              $gt: [
+                {
+                  $toDouble: { $ifNull: ["$$it.Amount", 0] },
+                },
+                0,
+              ],
+            },
+          },
+        },
+      },
+    },
+  },
+];
+
+/**
+ * ALL ORDERS
+ * - latest status is NOT delivered / cancel / cancelled
+ */
 router.get("/GetOrderList", async (req, res) => {
   try {
-    const data = await Orders.find({});
-    const filteredData = data.filter((o) => {
-      const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
-      const cancelled = o.Status?.some((s) => norm(s.Task).toLowerCase() === "cancel");
-      return !(delivered || cancelled);
-    });
-    res.json({ success: true, result: filteredData });
+    const rows = await Orders.aggregate([
+      ...latestStatusProjectionStages,
+      {
+        $match: {
+          latestTaskLower: { $nin: ["delivered", "cancel", "cancelled"] },
+        },
+      },
+    ]);
+    res.json({ success: true, result: rows });
   } catch (err) {
+    console.error("GetOrderList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-const hasBillableAmount = (items) =>
-  Array.isArray(items) && items.some((it) => Number(it?.Amount) > 0);
-
+/**
+ * DELIVERED (NO BILL)
+ * - latest status is delivered
+ * - hasBillable = false (no Items[].Amount > 0)
+ */
 router.get("/GetDeliveredList", async (req, res) => {
   try {
-    const data = await Orders.find({}).lean();
-    const filtered = data.filter((o) => {
-      const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
-      return delivered && !hasBillableAmount(o.Items);
-    });
-    res.json({ success: true, result: filtered });
+    const rows = await Orders.aggregate([
+      ...latestStatusProjectionStages,
+      {
+        $match: {
+          latestTaskLower: "delivered",
+          hasBillable: false,
+        },
+      },
+    ]);
+    res.json({ success: true, result: rows });
   } catch (err) {
+    console.error("GetDeliveredList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
+/**
+ * BILLS
+ * - latest status is delivered
+ * - hasBillable = true (some Items[].Amount > 0)
+ */
 router.get("/GetBillList", async (req, res) => {
   try {
-    const data = await Orders.find({}).lean();
-    const filtered = data.filter((o) => {
-      const delivered = o.Status?.some((s) => norm(s.Task).toLowerCase() === "delivered");
-      return delivered && hasBillableAmount(o.Items);
-    });
-    res.json({ success: true, result: filtered });
+    const rows = await Orders.aggregate([
+      ...latestStatusProjectionStages,
+      {
+        $match: {
+          latestTaskLower: "delivered",
+          hasBillable: true,
+        },
+      },
+    ]);
+    res.json({ success: true, result: rows });
   } catch (err) {
+    console.error("GetBillList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
