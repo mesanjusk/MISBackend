@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const Orders = require("../Models/order");
 const Transaction = require("../Models/transaction");
 const { v4: uuid } = require("uuid");
+// keep import if you still use it elsewhere in the project
 const { updateOrderStatus } = require("../Controller/orderController");
 
 /* ----------------------- helpers ----------------------- */
@@ -13,7 +14,6 @@ const normLower = (s) => String(s || "").trim().toLowerCase();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** Resolve a Mongo filter from any incoming id type */
 function idToFilter(anyId) {
   const id = String(anyId || "").trim();
   if (!id) return null;
@@ -22,7 +22,6 @@ function idToFilter(anyId) {
   return { Order_uuid: id };
 }
 
-/** Append a new status entry and return the fresh order (lean) */
 async function appendStatus(filter, task, assignedHint = "DragDrop") {
   const order = await Orders.findOne(filter);
   if (!order) return { ok: false, code: 404, msg: "Order not found" };
@@ -50,19 +49,15 @@ async function appendStatus(filter, task, assignedHint = "DragDrop") {
   return { ok: true, order: fresh, entry };
 }
 
-/** Normalizes both old and new payload shapes */
 function parseStatusPayload(req) {
-  // Old shape used by legacy callers:
-  // { orderId, newStatus }  (newStatus may be string or { Task })
+  // legacy: { orderId, newStatus }  (newStatus = string | { Task })
   const oldOrderId = req.body?.orderId;
   const oldNewStatus = req.body?.newStatus;
 
-  // New DnD shape used by AllOrder.jsx:
-  // { Order_id, Task }
+  // DnD: { Order_id, Task }
   const dndId = req.body?.Order_id;
   const dndTask = req.body?.Task;
 
-  // Fallback to URL param (PUT /updateStatus/:id)
   let id = dndId || oldOrderId || req.params?.id;
   let task = dndTask;
 
@@ -72,7 +67,7 @@ function parseStatusPayload(req) {
   return { id: id ? String(id).trim() : "", task: task ? String(task).trim() : "" };
 }
 
-/* ----------------------- items/steps normalizers (unchanged) ----------------------- */
+/* ----------------------- normalizers ----------------------- */
 function normalizeItems(items) {
   if (!Array.isArray(items)) return [];
   return items
@@ -130,7 +125,7 @@ function normalizeSteps(steps) {
   }, []);
 }
 
-/* ----------------------- CREATE NEW ORDER (kept) ----------------------- */
+/* ----------------------- CREATE NEW ORDER ----------------------- */
 router.post("/addOrder", async (req, res) => {
   try {
     const {
@@ -205,9 +200,214 @@ router.post("/addOrder", async (req, res) => {
   }
 });
 
-/* ----------------------- DnD / STATUS (fixed) ----------------------- */
+/* ----------------------- UNIFIED VIEW ----------------------- */
+router.get("/all-data", async (req, res) => {
+  try {
+    const delivered = await Orders.find({ Status: { $elemMatch: { Task: "Delivered" } } });
 
-/** POST /order/updateStatus — understands {Order_id, Task} and {orderId, newStatus} */
+    const report = await Orders.find({
+      Status: { $elemMatch: { Task: "Delivered" } },
+      Items: { $exists: true, $not: { $size: 0 } },
+    });
+
+    const outstanding = await Orders.find({
+      Status: { $not: { $elemMatch: { Task: "Delivered" } } },
+    });
+
+    const allvendors = await Orders.aggregate([
+      {
+        $addFields: {
+          stepsNeedingVendor: {
+            $filter: {
+              input: "$Steps",
+              as: "st",
+              cond: {
+                $or: [
+                  { $eq: ["$$st.vendorId", null] },
+                  { $eq: ["$$st.vendorId", ""] },
+                  { $eq: ["$$st.posting.isPosted", false] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
+      {
+        $project: {
+          Order_uuid: 1,
+          Order_Number: 1,
+          Customer_uuid: 1,
+          ItemsRemarks: "$Items.Remark",
+          StepsPending: {
+            $map: {
+              input: "$stepsNeedingVendor",
+              as: "s",
+              in: {
+                stepId: "$$s._id",
+                label: "$$s.label",
+                vendorId: "$$s.vendorId",
+                vendorName: "$$s.vendorName",
+                costAmount: "$$s.costAmount",
+                isPosted: "$$s.posting.isPosted",
+              },
+            },
+          },
+        },
+      },
+      { $sort: { Order_Number: -1 } },
+    ]);
+
+    const bills = await Orders.find({
+      Status: { $elemMatch: { Task: "Delivered" } },
+      $or: [{ Items: { $exists: false } }, { Items: { $size: 0 } }],
+    });
+
+    res.json({ delivered, report, outstanding, allvendors, bills });
+  } catch (error) {
+    console.error("Error generating unified report:", error.message);
+    res.status(500).json({ error: "Failed to load report data" });
+  }
+});
+
+/* ----------------------- RAW FEED for AllVendors ----------------------- */
+router.get("/allvendors-raw", async (req, res) => {
+  try {
+    const deliveredOnly = String(req.query.deliveredOnly || "").toLowerCase() === "true";
+
+    const pipeline = [
+      {
+        $project: {
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Items: 1,
+          Steps: 1,
+          Status: 1,
+          latestStatus: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+              { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+              null,
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          RemarkText: {
+            $let: {
+              vars: {
+                rems: {
+                  $filter: {
+                    input: {
+                      $map: {
+                        input: { $ifNull: ["$Items", []] },
+                        as: "it",
+                        in: { $trim: { input: { $ifNull: ["$$it.Remark", ""] } } },
+                      },
+                    },
+                    as: "r",
+                    cond: { $ne: ["$$r", ""] },
+                  },
+                },
+              },
+              in: {
+                $reduce: {
+                  input: "$$rems",
+                  initialValue: "",
+                  in: {
+                    $cond: [
+                      { $eq: ["$$value", ""] },
+                      "$$this",
+                      { $concat: ["$$value", " | ", "$$this"] },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      ...(deliveredOnly ? [{ $match: { "latestStatus.Task": { $regex: /^delivered$/i } } }] : []),
+      { $sort: { Order_Number: -1 } },
+    ];
+
+    const docs = await Orders.aggregate(pipeline);
+    res.json({ rows: docs, total: docs.length });
+  } catch (e) {
+    console.error("allvendors-raw error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ----------------------- LEGACY PAGE: ALL VENDORS ----------------------- */
+router.get("/allvendors", async (req, res) => {
+  try {
+    const search = (req.query.search || "").trim();
+
+    const match = {};
+    if (search) {
+      const num = +search;
+      match.$or = [
+        { Order_Number: Number.isNaN(num) ? -1 : num },
+        { Customer_uuid: new RegExp(search, "i") },
+        { "Items.Remark": new RegExp(search, "i") },
+      ];
+    }
+
+    const rows = await Orders.aggregate([
+      { $match: Object.keys(match).length ? match : {} },
+      {
+        $addFields: {
+          stepsNeedingVendor: {
+            $filter: {
+              input: "$Steps",
+              as: "st",
+              cond: {
+                $or: [
+                  { $eq: ["$$st.vendorId", null] },
+                  { $eq: ["$$st.vendorId", ""] },
+                  { $eq: ["$$st.posting.isPosted", false] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $match: { "stepsNeedingVendor.0": { $exists: true } } },
+      {
+        $project: {
+          Order_uuid: 1,
+          Order_Number: 1,
+          Customer_uuid: 1,
+          Items: 1,
+          StepsPending: {
+            $map: {
+              input: "$stepsNeedingVendor",
+              as: "s",
+              in: {
+                stepId: "$$s._id",
+                label: "$$s.label",
+                vendorId: "$$s.vendorId",
+                vendorName: "$$s.vendorName",
+                costAmount: "$$s.costAmount",
+                isPosted: "$$s.posting.isPosted",
+              },
+            },
+          },
+        },
+      },
+      { $sort: { Order_Number: -1 } },
+    ]);
+
+    res.json({ rows, total: rows.length });
+  } catch (e) {
+    console.error("allvendors error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ----------------------- DnD STATUS (fixed & backward-compatible) ----------------------- */
 router.post("/updateStatus", async (req, res) => {
   try {
     const { id, task } = parseStatusPayload(req);
@@ -218,7 +418,7 @@ router.post("/updateStatus", async (req, res) => {
     const filter = idToFilter(id);
     if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
 
-    // Do the reliable local save first (so UI DnD always persists)
+    // Save reliably (don’t depend on legacy controller)
     const out = await appendStatus(filter, task, "DragDrop");
     if (!out.ok) return res.status(out.code || 500).json({ success: false, message: out.msg });
 
@@ -229,7 +429,6 @@ router.post("/updateStatus", async (req, res) => {
   }
 });
 
-/** PUT /order/updateStatus/:id — UI fallback */
 router.put("/updateStatus/:id", async (req, res) => {
   try {
     const id = String(req.params.id || "").trim();
@@ -250,7 +449,6 @@ router.put("/updateStatus/:id", async (req, res) => {
   }
 });
 
-/** Keep legacy route name working too */
 router.post("/addStatus", async (req, res) => {
   try {
     const { id, task } = parseStatusPayload(req);
@@ -299,7 +497,7 @@ router.put("/updateOrder/:id", async (req, res) => {
   }
 });
 
-/* ----------------------- UPDATE DELIVERY (Items only, atomic) ----------------------- */
+/* ----------------------- UPDATE DELIVERY (Items only) ----------------------- */
 router.put("/updateDelivery/:id", async (req, res) => {
   const { id } = req.params;
   const { Customer_uuid, Items } = req.body;
@@ -309,20 +507,15 @@ router.put("/updateDelivery/:id", async (req, res) => {
     const filter = isObjectId ? { _id: id } : { Order_uuid: id };
 
     const incoming = normalizeItems(Items || []);
-    if (!Customer_uuid && incoming.length === 0) {
-      return res.status(400).json({ success: false, message: "Nothing to update" });
+    if (Customer_uuid) {
+      await Orders.updateOne(filter, { $set: { Customer_uuid } });
     }
-
-    const update = {};
-    if (Customer_uuid) update.$set = { Customer_uuid };
-    if (incoming.length > 0) update.$push = { Items: { $each: incoming } };
-
-    const result = await Orders.updateOne(filter, update, { runValidators: false });
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+    if (incoming.length > 0) {
+      await Orders.updateOne(filter, { $push: { Items: { $each: incoming } } });
     }
 
     const refreshed = await Orders.findOne(filter).lean();
+    if (!refreshed) return res.status(404).json({ success: false, message: "Order not found" });
 
     return res.status(200).json({
       success: true,
@@ -337,7 +530,7 @@ router.put("/updateDelivery/:id", async (req, res) => {
   }
 });
 
-/* ----------------------- LISTS (LATEST-STATUS AWARE) ----------------------- */
+/* ----------------------- LATEST-STATUS AWARE LISTS ----------------------- */
 const latestStatusProjectionStages = [
   {
     $addFields: {
@@ -377,7 +570,6 @@ const latestStatusProjectionStages = [
   },
 ];
 
-/** ALL ORDERS (not delivered/cancel) */
 router.get("/GetOrderList", async (req, res) => {
   try {
     const rows = await Orders.aggregate([
@@ -395,7 +587,6 @@ router.get("/GetOrderList", async (req, res) => {
   }
 });
 
-/** DELIVERED (NO BILL) */
 router.get("/GetDeliveredList", async (req, res) => {
   try {
     const rows = await Orders.aggregate([
@@ -414,7 +605,6 @@ router.get("/GetDeliveredList", async (req, res) => {
   }
 });
 
-/** BILLS (Delivered with billable items) */
 router.get("/GetBillList", async (req, res) => {
   try {
     const rows = await Orders.aggregate([
@@ -471,8 +661,7 @@ router.get("/:id", async (req, res) => {
 router.get("/reports/vendor-missing", async (req, res) => {
   try {
     const page = parseInt(req.query.page || "1", 10);
-    the_limit = parseInt(req.query.limit || "20", 10);
-    const limit = the_limit;
+    const limit = parseInt(req.query.limit || "20", 10);
     const skip = (page - 1) * limit;
     const deliveredOnly = req.query.deliveredOnly === "true";
     const search = (req.query.search || "").trim();
@@ -591,7 +780,7 @@ router.post("/orders/:orderId/steps", async (req, res) => {
   }
 });
 
-/* ------------------ EDIT STEP (no posting side effects) ------------------ */
+/* ------------------ EDIT STEP ------------------ */
 router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   const { orderId, stepId } = req.params;
   const allowed = [
@@ -637,7 +826,7 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
   }
 });
 
-/* ************* ASSIGN VENDOR & POST (uses "purchase") ************* */
+/* --------- ASSIGN VENDOR & POST (purchase journal) --------- */
 router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => {
   const { orderId, stepId } = req.params;
   const { vendorId, vendorName, vendorCustomerUuid, costAmount, plannedDate, createdBy } = req.body;
@@ -684,7 +873,7 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
 
       const lines = [
         { Account_id: `${resolvedVendor}`, Type: "Debit", Amount: amount },
-        { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount },
+        { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount }, // Purchase A/c or Cash/Bank
       ];
 
       const txnDate = plannedDate ? new Date(plannedDate) : new Date();
@@ -729,7 +918,7 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
   }
 });
 
-/* ------------------ TOGGLE STEP (add on check, remove on uncheck) ------------------ */
+/* ------------------ TOGGLE STEP (add/remove) ------------------ */
 router.post("/steps/toggle", async (req, res) => {
   try {
     const { orderId, step = {}, checked } = req.body || {};
