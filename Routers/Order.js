@@ -354,19 +354,136 @@ router.get("/allvendors", async (req, res) => {
   }
 });
 
-/* ----------------------- STATUS APIs ----------------------- */
+/* ----------------------- STATUS: DnD-friendly + backward-compatible ----------------------- */
+
+/** Resolve a Mongo filter from any incoming id type */
+function idToFilter(anyId) {
+  const id = String(anyId || "").trim();
+  if (!id) return null;
+  if (mongoose.isValidObjectId(id)) return { _id: id };
+  if (/^\d+$/.test(id)) return { Order_Number: Number(id) };
+  return { Order_uuid: id };
+}
+
+/** Append a new status entry and return the fresh order (lean) */
+async function appendStatus(filter, task, assignedHint = "System") {
+  const order = await Orders.findOne(filter);
+  if (!order) return { ok: false, code: 404, msg: "Order not found" };
+
+  const now = new Date();
+  const last = Array.isArray(order.Status) && order.Status.length
+    ? order.Status[order.Status.length - 1]
+    : null;
+
+  const nextNo = Number(last?.Status_number || 0) + 1;
+
+  const entry = {
+    Task: String(task || "").trim() || "Other",
+    Assigned: last?.Assigned || assignedHint || "System",
+    Status_number: nextNo,
+    Delivery_Date: now,
+    CreatedAt: now,
+  };
+
+  order.Status = Array.isArray(order.Status) ? order.Status : [];
+  order.Status.push(entry);
+  await order.save();
+
+  const fresh = await Orders.findOne(filter).lean();
+  return { ok: true, order: fresh, entry };
+}
+
+/** Normalizes both old and new payload shapes */
+function parseStatusPayload(req) {
+  // Old shape used by some places:
+  // { orderId, newStatus }  where newStatus may be string or { Task }
+  const oldOrderId = req.body?.orderId;
+  const oldNewStatus = req.body?.newStatus;
+
+  // New DnD shape used by AllOrder.jsx:
+  // { Order_id, Task }
+  const dndId = req.body?.Order_id;
+  const dndTask = req.body?.Task;
+
+  let id = dndId || oldOrderId || req.params?.id;
+  let task = dndTask;
+
+  if (!task && typeof oldNewStatus === "string") task = oldNewStatus;
+  if (!task && oldNewStatus && typeof oldNewStatus === "object") task = oldNewStatus.Task;
+
+  return { id: id ? String(id).trim() : "", task: task ? String(task).trim() : "" };
+}
+
+/** POST /order/updateStatus  — accepts BOTH shapes */
 router.post("/updateStatus", async (req, res) => {
-  const { orderId, newStatus } = req.body;
-  const result = await updateOrderStatus(orderId, newStatus);
-  res.json(result);
+  try {
+    const { id, task } = parseStatusPayload(req);
+    if (!id || !task) {
+      return res.status(400).json({ success: false, message: "Order id and Task are required" });
+    }
+
+    const filter = idToFilter(id);
+    if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
+
+    // Try controller if you still want to keep old path working
+    // If your controller expects (orderId, newStatus), we pass the normalized values.
+    try {
+      if (typeof updateOrderStatus === "function") {
+        const legacy = await updateOrderStatus(id, task);
+        // If controller indicates success, return as-is (keeps old behavior)
+        if (legacy && legacy.success) return res.json(legacy);
+      }
+    } catch (_) {
+      // If controller path fails, fall through to local updater
+    }
+
+    const out = await appendStatus(filter, task, "DragDrop");
+    if (!out.ok) return res.status(out.code || 500).json({ success: false, message: out.msg });
+
+    return res.json({ success: true, message: "Status updated", result: out.order });
+  } catch (e) {
+    console.error("updateStatus error:", e);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
-router.post("/addStatus", async (req, res) => {
-  const { orderId, newStatus } = req.body;
+/** PUT /order/updateStatus/:id  — fallback used by frontend */
+router.put("/updateStatus/:id", async (req, res) => {
   try {
-    const result = await updateOrderStatus(orderId, newStatus);
-    res.json(result);
-  } catch (error) {
+    const id = String(req.params.id || "").trim();
+    const task = String(req.body?.Task || req.body?.task || "").trim();
+    if (!id || !task) {
+      return res.status(400).json({ success: false, message: "Order id and Task are required" });
+    }
+    const filter = idToFilter(id);
+    if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
+
+    const out = await appendStatus(filter, task, "DragDrop");
+    if (!out.ok) return res.status(out.code || 500).json({ success: false, message: out.msg });
+
+    return res.json({ success: true, message: "Status updated", result: out.order });
+  } catch (e) {
+    console.error("PUT /updateStatus/:id error:", e);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+/** POST /order/addStatus — keeps old route name, same handler */
+router.post("/addStatus", async (req, res) => {
+  try {
+    const { id, task } = parseStatusPayload(req);
+    if (!id || !task) {
+      return res.status(400).json({ success: false, message: "Order id and Task are required" });
+    }
+    const filter = idToFilter(id);
+    if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
+
+    const out = await appendStatus(filter, task, "API");
+    if (!out.ok) return res.status(out.code || 500).json({ success: false, message: out.msg });
+
+    return res.json({ success: true, message: "Status added", result: out.order });
+  } catch (e) {
+    console.error("addStatus error:", e);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
@@ -439,13 +556,6 @@ router.put("/updateDelivery/:id", async (req, res) => {
 });
 
 /* ----------------------- LISTS (LATEST-STATUS AWARE) ----------------------- */
-
-/**
- * Helper pipeline stages to compute:
- *  - latestStatus: last element of Status[]
- *  - latestTaskLower: lowercased latestStatus.Task ("" if missing)
- *  - hasBillable: any Items[].Amount > 0
- */
 const latestStatusProjectionStages = [
   {
     $addFields: {
@@ -485,10 +595,7 @@ const latestStatusProjectionStages = [
   },
 ];
 
-/**
- * ALL ORDERS
- * - latest status is NOT delivered / cancel / cancelled
- */
+/** ALL ORDERS (not delivered/cancel) */
 router.get("/GetOrderList", async (req, res) => {
   try {
     const rows = await Orders.aggregate([
@@ -506,11 +613,7 @@ router.get("/GetOrderList", async (req, res) => {
   }
 });
 
-/**
- * DELIVERED (NO BILL)
- * - latest status is delivered
- * - hasBillable = false (no Items[].Amount > 0)
- */
+/** DELIVERED (NO BILL) */
 router.get("/GetDeliveredList", async (req, res) => {
   try {
     const rows = await Orders.aggregate([
@@ -529,11 +632,7 @@ router.get("/GetDeliveredList", async (req, res) => {
   }
 });
 
-/**
- * BILLS
- * - latest status is delivered
- * - hasBillable = true (some Items[].Amount > 0)
- */
+/** BILLS (Delivered with billable items) */
 router.get("/GetBillList", async (req, res) => {
   try {
     const rows = await Orders.aggregate([
@@ -590,7 +689,7 @@ router.get("/:id", async (req, res) => {
 router.get("/reports/vendor-missing", async (req, res) => {
   try {
     const page = parseInt(req.query.page || "1", 10);
-    the_limit = parseInt(req.query.limit || "20", 10); // keep var name stable
+    the_limit = parseInt(req.query.limit || "20", 10);
     const limit = the_limit;
     const skip = (page - 1) * limit;
     const deliveredOnly = req.query.deliveredOnly === "true";
@@ -900,7 +999,7 @@ router.post("/steps/toggle", async (req, res) => {
       return res.json({ success: true, updated: true });
     }
 
-    // UNCHECK: remove by uuid OR normLabel OR case-insensitive label
+    // UNCHECK
     const pullOr = [];
     if (uuidStr) pullOr.push({ uuid: uuidStr });
     if (label) {
