@@ -355,67 +355,17 @@ router.get("/allvendors", async (req, res) => {
 });
 
 /* ----------------------- STATUS APIs ----------------------- */
-const resolveOrderIdentifier = (req, fallback) => {
-  const body = req.body || {};
-  return (
-    req.params?.id ||
-    body.orderId ||
-    body.Order_id ||
-    body.Order_uuid ||
-    body.orderUuid ||
-    body.order_uuid ||
-    body.id ||
-    body._id ||
-    fallback
-  );
-};
-
-const extractStatusPayload = (body = {}) => {
-  if (body) {
-    if (typeof body.newStatus === "string" && body.newStatus.trim()) {
-      return { Task: body.newStatus.trim() };
-    }
-
-    if (typeof body.newStatus === "object" && !Array.isArray(body.newStatus)) {
-      return body.newStatus;
-    }
-  }
-
-  const status = {};
-  const task = body.Task ?? body.task;
-  if (typeof task === "string" && task.trim()) status.Task = task.trim();
-
-  const assigned = body.Assigned ?? body.assigned;
-  if (typeof assigned === "string" && assigned.trim()) status.Assigned = assigned.trim();
-
-  if (body.Delivery_Date) status.Delivery_Date = body.Delivery_Date;
-  if (body.deliveryDate) status.Delivery_Date = body.deliveryDate;
-  if (body.CreatedAt) status.CreatedAt = body.CreatedAt;
-  if (body.createdAt) status.CreatedAt = body.createdAt;
-
-  return Object.keys(status).length ? status : {};
-};
-
 router.post("/updateStatus", async (req, res) => {
-  const identifier = resolveOrderIdentifier(req);
-  const statusPayload = extractStatusPayload(req.body);
-  const result = await updateOrderStatus(identifier, statusPayload);
-  res.status(result.success ? 200 : 400).json(result);
-});
-
-router.put("/updateStatus/:id", async (req, res) => {
-  const identifier = resolveOrderIdentifier(req, req.params.id);
-  const statusPayload = extractStatusPayload(req.body);
-  const result = await updateOrderStatus(identifier, statusPayload);
-  res.status(result.success ? 200 : 400).json(result);
+  const { orderId, newStatus } = req.body;
+  const result = await updateOrderStatus(orderId, newStatus);
+  res.json(result);
 });
 
 router.post("/addStatus", async (req, res) => {
+  const { orderId, newStatus } = req.body;
   try {
-    const identifier = resolveOrderIdentifier(req);
-    const statusPayload = extractStatusPayload(req.body);
-    const result = await updateOrderStatus(identifier, statusPayload);
-    res.status(result.success ? 200 : 400).json(result);
+    const result = await updateOrderStatus(orderId, newStatus);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
