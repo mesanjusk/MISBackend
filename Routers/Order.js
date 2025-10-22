@@ -21,7 +21,7 @@ function idToFilter(anyId) {
   const id = String(anyId || "").trim();
   if (!id) return null;
   if (mongoose.isValidObjectId(id)) return { _id: id };
-  if (/^\d+$/.test(id)) return { Order_Number: Number(id) };
+  if (/^\\d+$/.test(id)) return { Order_Number: Number(id) };
   return { Order_uuid: id };
 }
 
@@ -46,40 +46,36 @@ function parseStatusPayload(req) {
 }
 
 /**
- * Append a new Status entry atomically (findOneAndUpdate + $push).
- * Returns { ok, order?, entry?, code?, msg? } and logs helpful debug in non-prod.
+ * Append a new status entry using a single $push and immediately respond.
+ * We DO NOT fetch the whole doc afterwards (avoids serialization/transform issues).
+ * Returns { ok, code?, msg? }.
  */
-async function appendStatusAtomic(filter, task, assignedHint = "DragDrop") {
+async function pushStatusOnly(filter, task, assignedHint = "DragDrop") {
   try {
-    const doc = await Orders.findOne(filter, { Status: 1, _id: 1 }).lean();
+    // Read just the last Status_number & Assigned (light, fast)
+    const doc = await Orders.findOne(filter, { Status: { $slice: -1 }, _id: 1 }).lean();
     if (!doc) return { ok: false, code: 404, msg: "Order not found" };
 
-    const statusArr = Array.isArray(doc.Status) ? doc.Status : [];
-    const last = statusArr.length ? statusArr[statusArr.length - 1] : null;
-    const nextNo = Number(last?.Status_number || 0) + 1 || (statusArr.length + 1);
+    const last = Array.isArray(doc.Status) && doc.Status.length ? doc.Status[0] : null;
+    const nextNo = Number(last?.Status_number || 0) + 1;
 
     const now = new Date();
     const entry = {
       Task: String(task || "").trim() || "Other",
       Assigned: String(last?.Assigned || assignedHint || "System"),
-      Status_number: nextNo,
+      Status_number: Number.isFinite(nextNo) ? nextNo : 1,
       Delivery_Date: now,
       CreatedAt: now,
     };
-
     if (!entry.Task) return { ok: false, code: 400, msg: "Task is empty after normalization" };
 
-    const updated = await Orders.findOneAndUpdate(
-      filter,
-      { $push: { Status: entry } },
-      { new: true }
-    ).lean();
+    const upd = await Orders.updateOne(filter, { $push: { Status: entry } });
+    if (upd.matchedCount === 0) return { ok: false, code: 404, msg: "Order not found" };
+    if (upd.modifiedCount === 0) return { ok: false, code: 500, msg: "Failed to push status" };
 
-    if (!updated) return { ok: false, code: 500, msg: "Failed to push status" };
-
-    return { ok: true, order: updated, entry };
+    return { ok: true };
   } catch (e) {
-    console.error("[order.updateStatus] appendStatusAtomic error:", e);
+    console.error("[order.updateStatus] pushStatusOnly error:", e);
     return {
       ok: false,
       code: 500,
@@ -428,7 +424,7 @@ router.get("/allvendors", async (req, res) => {
   }
 });
 
-/* ----------------------- DnD STATUS (hardened & backward-compatible) ----------------------- */
+/* ----------------------- DnD STATUS (no-readback, success-on-push) ----------------------- */
 
 /** POST /order/updateStatus — accepts {Order_id, Task} and {orderId, newStatus} */
 router.post("/updateStatus", async (req, res) => {
@@ -441,13 +437,13 @@ router.post("/updateStatus", async (req, res) => {
   const filter = idToFilter(id);
   if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
 
-  const out = await appendStatusAtomic(filter, task, "DragDrop");
+  const out = await pushStatusOnly(filter, task, "DragDrop");
   if (!out.ok) {
     if (!isProd) console.error("[order.updateStatus] fail:", out.msg, { id, task, filter });
     return res.status(out.code || 500).json({ success: false, message: out.msg });
   }
 
-  return res.json({ success: true, message: "Status updated", result: out.order });
+  return res.json({ success: true, message: "Status updated" });
 });
 
 /** PUT /order/updateStatus/:id — UI fallback */
@@ -463,13 +459,13 @@ router.put("/updateStatus/:id", async (req, res) => {
   const filter = idToFilter(id);
   if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
 
-  const out = await appendStatusAtomic(filter, task, "DragDrop");
+  const out = await pushStatusOnly(filter, task, "DragDrop");
   if (!out.ok) {
     if (!isProd) console.error("[order.updateStatus/:id] fail:", out.msg, { id, task, filter });
     return res.status(out.code || 500).json({ success: false, message: out.msg });
   }
 
-  return res.json({ success: true, message: "Status updated", result: out.order });
+  return res.json({ success: true, message: "Status updated" });
 });
 
 /** POST /order/addStatus — legacy alias */
@@ -482,13 +478,13 @@ router.post("/addStatus", async (req, res) => {
   const filter = idToFilter(id);
   if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
 
-  const out = await appendStatusAtomic(filter, task, "API");
+  const out = await pushStatusOnly(filter, task, "API");
   if (!out.ok) {
     if (!isProd) console.error("[order.addStatus] fail:", out.msg, { id, task, filter });
     return res.status(out.code || 500).json({ success: false, message: out.msg });
   }
 
-  return res.json({ success: true, message: "Status added", result: out.order });
+  return res.json({ success: true, message: "Status added" });
 });
 
 /* ----------------------- UPDATE ORDER (generic) ----------------------- */
