@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+const mongoose = require('mongoose');
 
 const JournalEntrySchema = new mongoose.Schema({
   Account_id: { type: String },
