@@ -20,5 +20,4 @@ const OldTransactionSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-// The 3rd parameter MUST match the collection name in MongoDB
-export default mongoose.model("OldTransaction", OldTransactionSchema, "oldtransactions");
+module.exports = mongoose.model("OldTransaction", OldTransactionSchema, "oldtransactions");
