@@ -110,27 +110,20 @@ router.get("/GetTransactionList", async (req, res) => {
 
 router.get('/GetFilteredTransactions', async (req, res) => {
     try {
-        const startDateStr = req.query.startDate;
-        const endDateStr = req.query.endDate;
-        const customerNameFilter = req.query.customerName ? req.query.customerName.toLowerCase() : null;
+        const { startDate: startDateStr, endDate: endDateStr, customerName } = req.query;
 
+        let query = {};
 
-        const startDate = startDateStr ? new Date(startDateStr) : new Date('1970-01-01');
-        const endDate = endDateStr ? new Date(endDateStr) : new Date(); 
+        // ONLY APPLY DATE FILTER IF DATES ARE SENT
+        if (startDateStr || endDateStr) {
+            const startDate = startDateStr ? new Date(startDateStr) : new Date('1970-01-01');
+            const endDate = endDateStr ? new Date(endDateStr) : new Date();
+            endDate.setHours(23, 59, 59, 999);
 
-        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-            return res.status(400).json({ success: false, message: 'Invalid date format' });
+            query.Transaction_date = { $gte: startDate, $lte: endDate };
         }
 
-        endDate.setHours(23, 59, 59, 999);
-
-        const query = {
-            Transaction_date: {
-                $gte: startDate,
-                $lte: endDate
-            }
-        };
-
+        // Fetch all customers + transactions
         const [customers, transactions] = await Promise.all([
             Customer.find({}),
             OldTransaction.find(query)
@@ -141,24 +134,20 @@ router.get('/GetFilteredTransactions', async (req, res) => {
             return map;
         }, {});
 
-        console.log('Customer Map:', customerMap);
+        const filterName = customerName ? customerName.toLowerCase() : null;
 
         const filteredTransactions = transactions.filter(transaction => {
-            const journalEntries = transaction.Journal_entry || [];
-            const customerNames = journalEntries
-                .map(entry => customerMap[entry.Account_id])
-                .filter(name => name)
-                .map(name => name.toLowerCase());
+            const namesFromJournal = (transaction.Journal_entry || [])
+                .map(e => customerMap[e.Account_id])
+                .filter(Boolean)
+                .map(n => n.toLowerCase());
 
-            const matchesCustomer = customerNameFilter 
-                ? customerNames.some(name => name.includes(customerNameFilter))
+            return filterName 
+                ? namesFromJournal.some(n => n.includes(filterName))
                 : true;
-
-            return matchesCustomer;
         });
 
-
-        res.status(200).json({ success: true, result: filteredTransactions });
+        res.json({ success: true, result: filteredTransactions });
 
     } catch (err) {
         console.error("Error filtering transactions:", err);
