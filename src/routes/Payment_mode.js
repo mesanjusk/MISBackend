@@ -83,7 +83,9 @@ router.delete(
   "/DeletePayment/:paymentUuid",
   asyncHandler(async (req, res) => {
     const { paymentUuid } = req.params;
-    const result = await Payment_mode.findOneAndDelete({ Payment_uuid: paymentUuid });
+    const result = await Payment_mode.findOneAndDelete({
+      Payment_mode_uuid: paymentUuid,
+    });
 
     if (!result) {
       throw new AppError("payment not found", 404);
