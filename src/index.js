@@ -5,6 +5,9 @@ const socketIO = require("socket.io");
 const connectDB = require("./config/mongo");
 require("dotenv").config();
 const compression = require("compression");
+const AppError = require("./utils/AppError");
+const asyncHandler = require("./utils/asyncHandler");
+const { errorHandler, notFound } = require("./middleware/errorHandler");
 
 // Handle any unhandled promise rejections to avoid crashing the appsss
 process.on("unhandledRejection", (reason) => {
@@ -124,16 +127,19 @@ app.get("/whatsapp/status", (_req, res) => {
   res.json({ ready: isWhatsAppReady() });
 });
 
-app.post("/whatsapp/send-test", async (req, res) => {
-  const { number, message, mediaUrl } = req.body || {};
-  try {
+app.post(
+  "/whatsapp/send-test",
+  asyncHandler(async (req, res) => {
+    const { number, message, mediaUrl } = req.body || {};
+
+    if (!number || !message) {
+      throw new AppError("'number' and 'message' are required", 400);
+    }
+
     const result = await sendMessageToWhatsApp(number, message, mediaUrl);
     res.status(200).json(result);
-  } catch (err) {
-    console.error("❌ Failed to send message:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+  })
+);
 
 // ---------- Init DB + WhatsApp ----------
 (async () => {
@@ -144,6 +150,10 @@ app.post("/whatsapp/send-test", async (req, res) => {
     console.error("❌ Failed to initialize WhatsApp client:", err);
   }
 })();
+
+// ---------- Error handling ----------
+app.use(notFound);
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
