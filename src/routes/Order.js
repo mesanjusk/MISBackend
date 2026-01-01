@@ -427,46 +427,101 @@ router.get("/allvendors", async (req, res) => {
 /* ----------------------- DnD STATUS (no-readback, success-on-push) ----------------------- */
 
 /** POST /order/updateStatus — accepts {Order_id, Task} and {orderId, newStatus} */
-router.post("/updateStatus", async (req, res) => {
-  const { id, task } = parseStatusPayload(req);
-  if (!id || !task) {
-    if (!isProd) console.error("[order.updateStatus] bad payload:", { body: req.body });
-    return res.status(400).json({ success: false, message: "Order id and Task are required" });
+/* ----------------------- CREATE NEW ORDER ----------------------- */
+router.post("/addOrder", async (req, res) => {
+  try {
+    const {
+      Customer_uuid,
+      Status = [{}],
+      Steps = [],
+      Items = [],
+      Type,
+      isEnquiry,
+    } = req.body;
+
+    // 🔎 Decide if this request is only an enquiry
+    const isEnquiryOnly =
+      (typeof isEnquiry === "boolean" && isEnquiry) ||
+      (typeof Type === "string" && Type.trim().toLowerCase() === "enquiry");
+
+    const now = new Date();
+
+    // 🔴 If enquiry → initial Task = "Enquiry", else keep "Design"
+    const statusDefaults = {
+      Task: isEnquiryOnly ? "Enquiry" : "Design",
+      Assigned: "Sai",
+      Status_number: 1,
+      Delivery_Date: now,
+      CreatedAt: now,
+    };
+
+    const updatedStatus = (Status || []).map((s) => ({
+      ...statusDefaults,
+      ...s,
+      Delivery_Date: toDate(s?.Delivery_Date, now),
+      CreatedAt: toDate(s?.CreatedAt, now),
+    }));
+
+    if (
+      !updatedStatus[0]?.Task ||
+      !updatedStatus[0]?.Assigned ||
+      !updatedStatus[0]?.Delivery_Date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Task, Assigned, and Delivery_Date are required in Status[0].",
+      });
+    }
+
+    const flatSteps = normalizeSteps(Steps);
+    const lineItems = normalizeItems(Items);
+
+    const topRemark =
+      (req.body &&
+        (req.body.Remark ||
+          req.body.remark ||
+          req.body.note ||
+          req.body.comments)) ||
+      "";
+    if (lineItems.length === 0 && String(topRemark).trim()) {
+      lineItems.push({
+        Item: "Order Note",
+        Quantity: 0,
+        Rate: 0,
+        Amount: 0,
+        Priority: "Normal",
+        Remark: String(topRemark).trim(),
+      });
+    }
+
+    const lastOrder = await Orders.findOne().sort({ Order_Number: -1 }).lean();
+    const newOrderNumber = lastOrder ? lastOrder.Order_Number + 1 : 1;
+
+    const newOrder = new Orders({
+      Order_uuid: uuid(),
+      Order_Number: newOrderNumber,
+      Customer_uuid,
+      Status: updatedStatus,
+      Steps: flatSteps,
+      Items: lineItems,
+    });
+
+    await newOrder.save();
+
+    res.json({
+      success: true,
+      message: isEnquiryOnly
+        ? "Enquiry added successfully"
+        : "Order added successfully",
+      orderId: newOrder._id,
+      orderNumber: newOrderNumber,
+    });
+  } catch (error) {
+    console.error("Error saving order:", error);
+    res.status(500).json({ success: false, message: "Failed to add order" });
   }
-
-  const filter = idToFilter(id);
-  if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
-
-  const out = await pushStatusOnly(filter, task, "DragDrop");
-  if (!out.ok) {
-    if (!isProd) console.error("[order.updateStatus] fail:", out.msg, { id, task, filter });
-    return res.status(out.code || 500).json({ success: false, message: out.msg });
-  }
-
-  return res.json({ success: true, message: "Status updated" });
 });
 
-/** PUT /order/updateStatus/:id — UI fallback */
-router.put("/updateStatus/:id", async (req, res) => {
-  const id = String(req.params.id || "").trim();
-  const task = String(req.body?.Task || req.body?.task || "").trim();
-
-  if (!id || !task) {
-    if (!isProd) console.error("[order.updateStatus/:id] bad payload:", { params: req.params, body: req.body });
-    return res.status(400).json({ success: false, message: "Order id and Task are required" });
-  }
-
-  const filter = idToFilter(id);
-  if (!filter) return res.status(400).json({ success: false, message: "Invalid Order id" });
-
-  const out = await pushStatusOnly(filter, task, "DragDrop");
-  if (!out.ok) {
-    if (!isProd) console.error("[order.updateStatus/:id] fail:", out.msg, { id, task, filter });
-    return res.status(out.code || 500).json({ success: false, message: out.msg });
-  }
-
-  return res.json({ success: true, message: "Status updated" });
-});
 
 /** POST /order/addStatus — legacy alias */
 router.post("/addStatus", async (req, res) => {
