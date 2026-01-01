@@ -143,7 +143,6 @@ function normalizeSteps(steps) {
 }
 
 /* ----------------------- CREATE NEW ORDER ----------------------- */
-/* ----------------------- CREATE NEW ORDER ----------------------- */
 router.post("/addOrder", async (req, res) => {
   try {
     const {
@@ -156,9 +155,15 @@ router.post("/addOrder", async (req, res) => {
     } = req.body;
 
     // 🔎 Decide if this request is only an enquiry
+    const rawType =
+      typeof Type === "string" ? Type.trim().toLowerCase() : "";
+
     const isEnquiryOnly =
       (typeof isEnquiry === "boolean" && isEnquiry) ||
-      (typeof Type === "string" && Type.trim().toLowerCase() === "enquiry");
+      rawType === "enquiry" ||
+      rawType === "inquiry" ||
+      rawType.includes("enquiry") ||
+      rawType.includes("inquiry");
 
     const now = new Date();
 
