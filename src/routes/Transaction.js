@@ -4,21 +4,44 @@ const Transaction = require("../repositories/transaction");
 const Customer = require("../repositories/customer");
 const { v4: uuid } = require("uuid");
 const multer = require("multer");
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const cloudinary = require('../utils/cloudinary.js');
+const cloudinary = require("../utils/cloudinary.js");
 
-// Cloudinary Storage for multer
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'transactions',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
-    transformation: [{ width: 1920, height: 1080, crop: 'limit', quality: 'auto:best' }],
-  },
-});
-
+// Multer using in-memory storage; we will stream files to Cloudinary manually
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+// Helper to upload a file buffer to Cloudinary and return the secure URL
+async function uploadToCloudinary(file) {
+  if (!file) return null;
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "transactions",
+        resource_type: "image",
+        allowed_formats: ["jpg", "png", "jpeg", "webp"],
+        transformation: [
+          {
+            width: 1920,
+            height: 1080,
+            crop: "limit",
+            quality: "auto:best",
+          },
+        ],
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result.secure_url);
+      }
+    );
+
+    stream.end(file.buffer);
+  });
+}
+
+// =================== ROUTES ===================
+
+// Add Transaction
 router.post("/addTransaction", upload.single("image"), async (req, res) => {
   try {
     const {
@@ -30,13 +53,33 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       Total_Credit,
       Payment_mode,
       Created_by,
+      Journal_entry: journalEntryRaw,
+      Customer_uuid,
     } = req.body;
 
-    let { Journal_entry } = req.body;
+    if (
+      !Description ||
+      !Transaction_date ||
+      !Total_Debit ||
+      !Total_Credit ||
+      !Payment_mode ||
+      !Created_by
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Required fields are missing.",
+      });
+    }
 
+    // Parse Journal_entry (can be JSON string from frontend)
+    let Journal_entry = [];
     try {
-      if (typeof Journal_entry === "string") {
-        Journal_entry = JSON.parse(Journal_entry);
+      if (typeof journalEntryRaw === "string") {
+        Journal_entry = JSON.parse(journalEntryRaw);
+      } else if (Array.isArray(journalEntryRaw)) {
+        Journal_entry = journalEntryRaw;
+      } else {
+        Journal_entry = [];
       }
     } catch (parseErr) {
       return res.status(400).json({
@@ -58,12 +101,17 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       });
     }
 
+    // ⬇️ NEW: upload to Cloudinary (if file present)
     const file = req.file;
-    const imageUrl = file ? file.path : null;
+    const imageUrl = file ? await uploadToCloudinary(file) : null;
 
     // Generate new Transaction ID
-    const lastTransaction = await Transaction.findOne().sort({ Transaction_id: -1 });
-    const newTransactionNumber = lastTransaction ? lastTransaction.Transaction_id + 1 : 1;
+    const lastTransaction = await Transaction.findOne().sort({
+      Transaction_id: -1,
+    });
+    const newTransactionNumber = lastTransaction
+      ? lastTransaction.Transaction_id + 1
+      : 1;
 
     const newTransaction = new Transaction({
       Transaction_uuid: uuid(),
@@ -78,183 +126,211 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       Description,
       image: imageUrl,
       Created_by,
+      Customer_uuid: Customer_uuid || null,
     });
 
     await newTransaction.save();
 
-    return res.json({ success: true, message: "Transaction added successfully" });
-
+    return res.status(201).json({
+      success: true,
+      message: "Transaction created successfully",
+      result: newTransaction,
+    });
   } catch (error) {
-    console.error("Error saving Transaction:", error);
-    return res.status(500).json({ success: false, message: "Failed to add Transaction" });
+    console.error("Error in /addTransaction:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 });
 
-router.get("/GetTransactionList", async (req, res) => {
-    try {
-        const data = await Transaction.find({});
-        if (data.length) {
-            res.json({ success: true, result: data.filter(a => a.Description) });
-        } else {
-            res.json({ success: false, message: "Transaction Not found" });
-        }
-    } catch (err) {
-        console.error("Error fetching Transaction:", err);
-        res.status(500).json({ success: false, message: err });
-    }
-});
-
-router.get('/GetFilteredTransactions', async (req, res) => {
-    try {
-        const startDateStr = req.query.startDate;
-        const endDateStr = req.query.endDate;
-        const customerNameFilter = req.query.customerName ? req.query.customerName.toLowerCase() : null;
-
-
-        const startDate = startDateStr ? new Date(startDateStr) : new Date('1970-01-01');
-        const endDate = endDateStr ? new Date(endDateStr) : new Date(); 
-
-        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-            return res.status(400).json({ success: false, message: 'Invalid date format' });
-        }
-
-        endDate.setHours(23, 59, 59, 999);
-
-        const query = {
-            Transaction_date: {
-                $gte: startDate,
-                $lte: endDate
-            }
-        };
-
-        const [customers, transactions] = await Promise.all([
-            Customer.find({}),
-            Transaction.find(query)
-        ]);
-
-        const customerMap = customers.reduce((map, customer) => {
-            map[customer.Customer_uuid] = customer.Customer_name;
-            return map;
-        }, {});
-
-        console.log('Customer Map:', customerMap);
-
-        const filteredTransactions = transactions.filter(transaction => {
-            const journalEntries = transaction.Journal_entry || [];
-            const customerNames = journalEntries
-                .map(entry => customerMap[entry.Account_id])
-                .filter(name => name)
-                .map(name => name.toLowerCase());
-
-            const matchesCustomer = customerNameFilter 
-                ? customerNames.some(name => name.includes(customerNameFilter))
-                : true;
-
-            return matchesCustomer;
-        });
-
-
-        res.status(200).json({ success: true, result: filteredTransactions });
-
-    } catch (err) {
-        console.error("Error filtering transactions:", err);
-        res.status(500).json({ success: false, message: 'Database query failed' });
-    }
-});
-router.post('/CheckMultipleCustomers', async (req, res) => {
-    try {
-        const { ids } = req.body;
-        const linkedTransactions = await Transaction.find({ Customer_id: { $in: ids } }).distinct('Customer_id');
-        res.status(200).json({ linkedIds: linkedTransactions });
-    } catch (err) {
-        res.status(500).json({ error: 'Error checking linked transactions' });
-    }
-});
-
-
-router.get('/CheckCustomer/:customerUuid', async (req, res) => {
-  const { customerUuid } = req.params;
-
+// Get all transactions with optional filters
+router.get("/", async (req, res) => {
   try {
-      const transactionExists = await Transaction.findOne({
-          'Journal_entry.Account_id': customerUuid
+    const { fromDate, toDate, paymentMode, createdBy, customerUuid } = req.query;
+
+    const filter = {};
+
+    if (fromDate || toDate) {
+      filter.Transaction_date = {};
+      if (fromDate) filter.Transaction_date.$gte = new Date(fromDate);
+      if (toDate) filter.Transaction_date.$lte = new Date(toDate);
+    }
+
+    if (paymentMode) filter.Payment_mode = paymentMode;
+    if (createdBy) filter.Created_by = createdBy;
+    if (customerUuid) filter.Customer_uuid = customerUuid;
+
+    const transactions = await Transaction.find(filter)
+      .sort({ Transaction_date: -1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      result: transactions,
+    });
+  } catch (error) {
+    console.error("Error in GET /transactions:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch transactions",
+    });
+  }
+});
+
+// Get single transaction by uuid
+router.get("/:uuid", async (req, res) => {
+  try {
+    const { uuid: transactionUuid } = req.params;
+
+    const tx = await Transaction.findOne({
+      Transaction_uuid: transactionUuid,
+    }).lean();
+
+    if (!tx) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
       });
-
-      return res.json({ exists: !!transactionExists }); 
-  } catch (error) {
-      console.error('Error checking transactions:', error);
-      return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-router.put('/updateByTransactionId/:transactionId', async (req, res) => {
-  const { transactionId } = req.params;
-  const {
-    updatedDescription,
-    updatedAmount,
-    updatedDate,
-    creditAccountId,
-    debitAccountId
-  } = req.body;
-
-  try {
-    const txn = await Transaction.findOne({ Transaction_id: parseInt(transactionId) });
-
-    if (!txn) {
-      return res.status(404).json({ success: false, message: 'Transaction not found' });
     }
 
-    txn.Description = updatedDescription;
-    txn.Transaction_date = updatedDate;
+    return res.json({
+      success: true,
+      result: tx,
+    });
+  } catch (error) {
+    console.error("Error in GET /transactions/:uuid:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch transaction",
+    });
+  }
+});
 
-    txn.Journal_entry = txn.Journal_entry.map((entry) => {
-      if (entry.Type.toLowerCase() === 'credit') {
-        return { ...entry, Account_id: creditAccountId, Amount: updatedAmount };
-      } else if (entry.Type.toLowerCase() === 'debit') {
-        return { ...entry, Account_id: debitAccountId, Amount: updatedAmount };
+// Update transaction (without changing ID)
+router.put("/:uuid", upload.single("image"), async (req, res) => {
+  try {
+    const { uuid: transactionUuid } = req.params;
+
+    const {
+      Description,
+      Transaction_date,
+      Order_uuid,
+      Order_number,
+      Total_Debit,
+      Total_Credit,
+      Payment_mode,
+      Created_by,
+      Journal_entry: journalEntryRaw,
+      Customer_uuid,
+    } = req.body;
+
+    // Parse Journal_entry as in create route
+    let Journal_entry = [];
+    try {
+      if (typeof journalEntryRaw === "string") {
+        Journal_entry = JSON.parse(journalEntryRaw);
+      } else if (Array.isArray(journalEntryRaw)) {
+        Journal_entry = journalEntryRaw;
+      } else {
+        Journal_entry = [];
       }
-      return entry;
+    } catch (parseErr) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid JSON format for Journal_entry",
+      });
+    }
+
+    const file = req.file;
+    const imageUrl = file ? await uploadToCloudinary(file) : undefined;
+
+    const updateData = {
+      Description,
+      Transaction_date,
+      Order_uuid,
+      Order_number,
+      Total_Debit,
+      Total_Credit,
+      Payment_mode,
+      Created_by,
+      Journal_entry,
+      Customer_uuid: Customer_uuid || null,
+    };
+
+    // Only overwrite image if we actually uploaded a new one
+    if (imageUrl !== undefined) {
+      updateData.image = imageUrl;
+    }
+
+    const updated = await Transaction.findOneAndUpdate(
+      { Transaction_uuid: transactionUuid },
+      updateData,
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Transaction updated successfully",
+      result: updated,
+    });
+  } catch (error) {
+    console.error("Error in PUT /transactions/:uuid:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update transaction",
+    });
+  }
+});
+
+// Delete transaction
+router.delete("/:uuid", async (req, res) => {
+  try {
+    const { uuid: transactionUuid } = req.params;
+
+    const deleted = await Transaction.findOneAndDelete({
+      Transaction_uuid: transactionUuid,
     });
 
-    txn.Total_Credit = updatedAmount;
-    txn.Total_Debit = updatedAmount;
-
-    await txn.save();
-
-    res.json({ success: true, message: 'Transaction updated successfully' });
-  } catch (error) {
-    console.error('Update error:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
-
-// Delete a specific Journal Entry inside a Transaction by Transaction_id and Account_id
-router.delete('/deleteByTransactionId/:transactionId', async (req, res) => {
-  const { transactionId } = req.params;
-
-  try {
-    const deleted = await Transaction.findOneAndDelete({ Transaction_id: parseInt(transactionId) });
-
     if (!deleted) {
-      return res.status(404).json({ success: false, message: 'Transaction not found' });
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
     }
 
-    return res.json({ success: true, message: 'Transaction deleted successfully' });
+    return res.json({
+      success: true,
+      message: "Transaction deleted successfully",
+    });
   } catch (error) {
-    console.error('Error deleting transaction:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error in DELETE /transactions/:uuid:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete transaction",
+    });
   }
 });
 
-
-router.get('/distinctPaymentModes', async (req, res) => {
+// Distinct payment modes
+router.get("/distinctPaymentModes", async (req, res) => {
   try {
     const modes = await Transaction.distinct("Payment_mode");
     res.json({ success: true, result: modes });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch modes" });
+    console.error("Error in GET /transactions/distinctPaymentModes:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch modes" });
   }
 });
-
 
 module.exports = router;
