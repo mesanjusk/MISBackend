@@ -7,7 +7,7 @@ const connectDB = async () => {
   try {
     const mongoURI = process.env.MONGO_URI;
 
-    // No options needed for new Mongoose versions
+    // No options needed for new Mongoose versionss
     await mongoose.connect(mongoURI);
 
     console.log('✅ MongoDB connected');
