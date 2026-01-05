@@ -1,9 +1,9 @@
+require("dotenv").config(); 
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const socketIO = require("socket.io");
 const connectDB = require("./config/mongo");
-require("dotenv").config();
 const compression = require("compression");
 const AppError = require("./utils/AppError");
 const asyncHandler = require("./utils/asyncHandler");
