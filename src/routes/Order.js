@@ -316,6 +316,7 @@ router.get("/all-data", async (req, res) => {
  * - frontend old: { billStatus: "paid" }
  * - frontend new: { status: "paid" }
  */
+// ------------------ BILL STATUS (Paid/Unpaid) ------------------
 router.patch("/bills/:id/status", async (req, res) => {
   try {
     const id = String(req.params.id || "").trim();
@@ -324,38 +325,49 @@ router.patch("/bills/:id/status", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid Order id" });
     }
 
-    const incomingRaw = req.body?.billStatus ?? req.body?.status ?? "";
-    const incoming = String(incomingRaw).toLowerCase().trim();
-
+    const incoming = String(req.body?.billStatus || "").toLowerCase().trim();
     if (!["paid", "unpaid"].includes(incoming)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "status must be 'paid' or 'unpaid'" });
+      return res.status(400).json({
+        success: false,
+        message: "billStatus must be 'paid' or 'unpaid'",
+      });
     }
 
     const paidBy = req.body?.paidBy ? String(req.body.paidBy).trim() : null;
     const paidNote = req.body?.paidNote ? String(req.body.paidNote).trim() : null;
 
+    const billPaidAt = incoming === "paid" ? new Date() : null;
+
     const set = {
       billStatus: incoming,
-      billPaidAt: incoming === "paid" ? new Date() : null,
+      billPaidAt,
       billPaidBy: incoming === "paid" ? (paidBy || "system") : null,
       billPaidNote: incoming === "paid" ? paidNote : null,
       billPaidTxnUuid: incoming === "paid" ? (req.body?.txnUuid || null) : null,
       billPaidTxnId: incoming === "paid" ? (req.body?.txnId ?? null) : null,
     };
 
-    const updated = await Orders.findOneAndUpdate(filter, { $set: set }, { new: true }).lean();
-    if (!updated) {
+    // ✅ Update only (fast + safe)
+    const upd = await Orders.updateOne(filter, { $set: set }, { runValidators: false });
+    if (upd.matchedCount === 0) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
 
-    return res.json({ success: true, result: updated });
+    // ✅ Return minimal fields (prevents response failure after DB update)
+    return res.json({
+      success: true,
+      result: {
+        billStatus: incoming,
+        billPaidAt,
+        billPaidBy: incoming === "paid" ? (paidBy || "system") : null,
+      },
+    });
   } catch (e) {
     console.error("PATCH /order/bills/:id/status error:", e);
     return res.status(500).json({ success: false, message: e.message });
   }
 });
+
 
 /* ----------------------- LATEST-STATUS AWARE LISTS ----------------------- */
 const latestStatusProjectionStages = [
