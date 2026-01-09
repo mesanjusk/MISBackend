@@ -21,7 +21,7 @@ function idToFilter(anyId) {
   const id = String(anyId || "").trim();
   if (!id) return null;
   if (mongoose.isValidObjectId(id)) return { _id: id };
-  if (/^\\d+$/.test(id)) return { Order_Number: Number(id) };
+  if (/^\d+$/.test(id)) return { Order_Number: Number(id) };
   return { Order_uuid: id };
 }
 
@@ -155,8 +155,7 @@ router.post("/addOrder", async (req, res) => {
     } = req.body;
 
     // 🔎 Decide if this request is only an enquiry
-    const rawType =
-      typeof Type === "string" ? Type.trim().toLowerCase() : "";
+    const rawType = typeof Type === "string" ? Type.trim().toLowerCase() : "";
 
     const isEnquiryOnly =
       (typeof isEnquiry === "boolean" && isEnquiry) ||
@@ -231,9 +230,7 @@ router.post("/addOrder", async (req, res) => {
 
     res.json({
       success: true,
-      message: isEnquiryOnly
-        ? "Enquiry added successfully"
-        : "Order added successfully",
+      message: isEnquiryOnly ? "Enquiry added successfully" : "Order added successfully",
       orderId: newOrder._id,
       orderNumber: newOrderNumber,
     });
@@ -242,7 +239,6 @@ router.post("/addOrder", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to add order" });
   }
 });
-
 
 /* ----------------------- UNIFIED VIEW ----------------------- */
 router.get("/all-data", async (req, res) => {
@@ -314,7 +310,12 @@ router.get("/all-data", async (req, res) => {
   }
 });
 
-// ------------------ BILL STATUS (Paid/Unpaid) ------------------
+/* ------------------ BILL STATUS (Paid/Unpaid) ------------------ */
+/**
+ * Supports BOTH payload shapes:
+ * - frontend old: { billStatus: "paid" }
+ * - frontend new: { status: "paid" }
+ */
 router.patch("/bills/:id/status", async (req, res) => {
   try {
     const id = String(req.params.id || "").trim();
@@ -323,11 +324,13 @@ router.patch("/bills/:id/status", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid Order id" });
     }
 
-    const incoming = String(req.body?.billStatus || "").toLowerCase().trim();
+    const incomingRaw = req.body?.billStatus ?? req.body?.status ?? "";
+    const incoming = String(incomingRaw).toLowerCase().trim();
+
     if (!["paid", "unpaid"].includes(incoming)) {
       return res
         .status(400)
-        .json({ success: false, message: "billStatus must be 'paid' or 'unpaid'" });
+        .json({ success: false, message: "status must be 'paid' or 'unpaid'" });
     }
 
     const paidBy = req.body?.paidBy ? String(req.body.paidBy).trim() : null;
@@ -354,6 +357,241 @@ router.patch("/bills/:id/status", async (req, res) => {
   }
 });
 
+/* ----------------------- LATEST-STATUS AWARE LISTS ----------------------- */
+const latestStatusProjectionStages = [
+  {
+    $addFields: {
+      latestStatus: {
+        $cond: [
+          { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+          { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+          null,
+        ],
+      },
+    },
+  },
+  {
+    $addFields: {
+      latestTaskLower: {
+        $toLower: {
+          $trim: { input: { $ifNull: ["$latestStatus.Task", ""] } },
+        },
+      },
+      hasBillable: {
+        $anyElementTrue: {
+          $map: {
+            input: { $ifNull: ["$Items", []] },
+            as: "it",
+            in: {
+              $gt: [
+                {
+                  $toDouble: { $ifNull: ["$$it.Amount", 0] },
+                },
+                0,
+              ],
+            },
+          },
+        },
+      },
+    },
+  },
+];
+
+router.get("/GetOrderList", async (req, res) => {
+  try {
+    const rows = await Orders.aggregate([
+      ...latestStatusProjectionStages,
+      {
+        $match: {
+          latestTaskLower: { $nin: ["delivered", "cancel", "cancelled"] },
+        },
+      },
+    ]);
+    res.json({ success: true, result: rows });
+  } catch (err) {
+    console.error("GetOrderList error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/GetDeliveredList", async (req, res) => {
+  try {
+    const rows = await Orders.aggregate([
+      ...latestStatusProjectionStages,
+      {
+        $match: {
+          latestTaskLower: "delivered",
+          hasBillable: false,
+        },
+      },
+    ]);
+    res.json({ success: true, result: rows });
+  } catch (err) {
+    console.error("GetDeliveredList error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/GetBillList", async (req, res) => {
+  try {
+    const rows = await Orders.aggregate([
+      ...latestStatusProjectionStages,
+      {
+        $match: {
+          latestTaskLower: "delivered",
+          hasBillable: true,
+        },
+      },
+    ]);
+    res.json({ success: true, result: rows });
+  } catch (err) {
+    console.error("GetBillList error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* ----------------------- ✅ NEW: PAGED BILLS LIST ----------------------- */
+/**
+ * GET /order/GetBillListPaged?page=1&limit=50&search=&task=&paid=
+ * - search: matches Customer_uuid, Items.Remark, Order_Number (if numeric)
+ * - task: mostly redundant because bills are delivered only, but kept for your UI
+ * - paid: paid/unpaid
+ */
+router.get("/GetBillListPaged", async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200);
+    const skip = (page - 1) * limit;
+
+    const search = String(req.query.search || "").trim();
+    const task = String(req.query.task || "").trim().toLowerCase();
+    const paid = String(req.query.paid || "").trim().toLowerCase();
+
+    const rx = search ? new RegExp(escapeRegex(search), "i") : null;
+
+    // safer numeric convert for Amount (handles ₹, commas, etc.)
+    const amountToDouble = (path) => ({
+      $convert: {
+        input: {
+          $replaceAll: {
+            input: {
+              $replaceAll: {
+                input: {
+                  $replaceAll: {
+                    input: { $toString: { $ifNull: [path, "0"] } },
+                    find: "₹",
+                    replacement: "",
+                  },
+                },
+                find: ",",
+                replacement: "",
+              },
+            },
+            find: " ",
+            replacement: "",
+          },
+        },
+        to: "double",
+        onError: 0,
+        onNull: 0,
+      },
+    });
+
+    const pipeline = [
+      // latestStatus + billable + paid normalize
+      {
+        $addFields: {
+          latestStatus: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
+              { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
+              null,
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          latestTaskLower: {
+            $toLower: { $trim: { input: { $ifNull: ["$latestStatus.Task", ""] } } },
+          },
+          billStatusLower: {
+            $toLower: { $trim: { input: { $ifNull: ["$billStatus", ""] } } },
+          },
+          hasBillable: {
+            $anyElementTrue: {
+              $map: {
+                input: { $ifNull: ["$Items", []] },
+                as: "it",
+                in: { $gt: [amountToDouble("$$it.Amount"), 0] },
+              },
+            },
+          },
+        },
+      },
+
+      // bills = delivered + billable
+      { $match: { latestTaskLower: "delivered", hasBillable: true } },
+
+      ...(task ? [{ $match: { latestTaskLower: task } }] : []),
+      ...(paid ? [{ $match: { billStatusLower: paid } }] : []),
+
+      ...(rx
+        ? [
+            {
+              $match: {
+                $or: [
+                  { Customer_uuid: rx },
+                  { "Items.Remark": rx },
+                  ...(Number.isFinite(Number(search)) ? [{ Order_Number: Number(search) }] : []),
+                ],
+              },
+            },
+          ]
+        : []),
+
+      { $sort: { Order_Number: -1 } },
+
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          total: [{ $count: "count" }],
+        },
+      },
+    ];
+
+    const result = await Orders.aggregate(pipeline);
+    const rows = result?.[0]?.data || [];
+    const total = result?.[0]?.total?.[0]?.count || 0;
+
+    return res.json({ success: true, result: rows, total, page, limit });
+  } catch (err) {
+    console.error("GetBillListPaged error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* ----------------------- CUSTOMER CHECKS ----------------------- */
+router.get("/CheckCustomer/:customerUuid", async (req, res) => {
+  const { customerUuid } = req.params;
+  try {
+    const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
+    res.json({ exists: !!orderExists });
+  } catch (error) {
+    console.error("Error checking orders:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+router.post("/CheckMultipleCustomers", async (req, res) => {
+  try {
+    const { ids } = req.body;
+    const linked = await Orders.find({ Customer_uuid: { $in: ids } }).distinct("Customer_uuid");
+    res.status(200).json({ linkedIds: linked });
+  } catch (err) {
+    res.status(500).json({ error: "Error checking linked orders" });
+  }
+});
 
 /* ----------------------- RAW FEED for AllVendors ----------------------- */
 router.get("/allvendors-raw", async (req, res) => {
@@ -619,133 +857,6 @@ router.put("/updateDelivery/:id", async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "Error updating order", error: error.message });
-  }
-});
-
-/* ----------------------- LATEST-STATUS AWARE LISTS ----------------------- */
-const latestStatusProjectionStages = [
-  {
-    $addFields: {
-      latestStatus: {
-        $cond: [
-          { $gt: [{ $size: { $ifNull: ["$Status", []] } }, 0] },
-          { $arrayElemAt: ["$Status", { $subtract: [{ $size: "$Status" }, 1] }] },
-          null,
-        ],
-      },
-    },
-  },
-  {
-    $addFields: {
-      latestTaskLower: {
-        $toLower: {
-          $trim: { input: { $ifNull: ["$latestStatus.Task", ""] } },
-        },
-      },
-      hasBillable: {
-        $anyElementTrue: {
-          $map: {
-            input: { $ifNull: ["$Items", []] },
-            as: "it",
-            in: {
-              $gt: [
-                {
-                  $toDouble: { $ifNull: ["$$it.Amount", 0] },
-                },
-                0,
-              ],
-            },
-          },
-        },
-      },
-    },
-  },
-];
-
-router.get("/GetOrderList", async (req, res) => {
-  try {
-    const rows = await Orders.aggregate([
-      ...latestStatusProjectionStages,
-      {
-        $match: {
-          latestTaskLower: { $nin: ["delivered", "cancel", "cancelled"] },
-        },
-      },
-    ]);
-    res.json({ success: true, result: rows });
-  } catch (err) {
-    console.error("GetOrderList error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.get("/GetDeliveredList", async (req, res) => {
-  try {
-    const rows = await Orders.aggregate([
-      ...latestStatusProjectionStages,
-      {
-        $match: {
-          latestTaskLower: "delivered",
-          hasBillable: false,
-        },
-      },
-    ]);
-    res.json({ success: true, result: rows });
-  } catch (err) {
-    console.error("GetDeliveredList error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.get("/GetBillList", async (req, res) => {
-  try {
-    const rows = await Orders.aggregate([
-      ...latestStatusProjectionStages,
-      {
-        $match: {
-          latestTaskLower: "delivered",
-          hasBillable: true,
-        },
-      },
-    ]);
-    res.json({ success: true, result: rows });
-  } catch (err) {
-    console.error("GetBillList error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-/* ----------------------- CUSTOMER CHECKS ----------------------- */
-router.get("/CheckCustomer/:customerUuid", async (req, res) => {
-  const { customerUuid } = req.params;
-  try {
-    const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
-    res.json({ exists: !!orderExists });
-  } catch (error) {
-    console.error("Error checking orders:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
-});
-
-router.post("/CheckMultipleCustomers", async (req, res) => {
-  try {
-    const { ids } = req.body;
-    const linked = await Orders.find({ Customer_uuid: { $in: ids } }).distinct("Customer_uuid");
-    res.status(200).json({ linkedIds: linked });
-  } catch (err) {
-    res.status(500).json({ error: "Error checking linked orders" });
-  }
-});
-
-/* ----------------------- GET BY ID ----------------------- */
-router.get("/:id", async (req, res) => {
-  const orderId = req.params.id;
-  try {
-    const order = await Orders.findById(orderId);
-    if (!order) return res.status(404).json({ message: "Order not found" });
-    res.json(order);
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
   }
 });
 
@@ -1076,6 +1187,22 @@ router.post("/steps/toggle", async (req, res) => {
   } catch (e) {
     console.error("/order/steps/toggle error", e);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+/* ----------------------- ✅ IMPORTANT: KEEP THIS LAST ----------------------- */
+/* GET BY ID (must be LAST, otherwise it captures /GetBillListPaged etc.) */
+router.get("/:id", async (req, res) => {
+  const orderId = req.params.id;
+  try {
+    if (!mongoose.isValidObjectId(orderId)) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
+    const order = await Orders.findById(orderId);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
   }
 });
 
