@@ -2,11 +2,16 @@
 const mongoose = require("mongoose");
 
 const MONGO_URI =
-  process.env.MONGO_URI ||
-  "mongodb+srv://sanjuahuja:cY7NtMKm8M10MbUs@cluster0.wdfsd.mongodb.net/MISSK"; // <-- change if not using env
+  process.env.MONGO_URI || process.env.MONGODB_URI || process.env.MONGO_URL;
 
 (async () => {
   try {
+    if (!MONGO_URI) {
+      throw new Error(
+        "MongoDB connection string is not set. Provide MONGO_URI, MONGODB_URI, or MONGO_URL."
+      );
+    }
+
     await mongoose.connect(MONGO_URI, {});
 
     const Orders = mongoose.connection.collection("orders");
