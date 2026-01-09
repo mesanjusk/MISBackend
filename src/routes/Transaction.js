@@ -1,8 +1,10 @@
 const express = require("express");
 const router = express.Router();
+
 const Transaction = require("../repositories/transaction");
-const Customer = require("../repositories/customer");
+const Orders = require("../repositories/order"); // ✅ NEW: to update bill status in Orders
 const { v4: uuid } = require("uuid");
+
 const multer = require("multer");
 const cloudinary = require("../utils/cloudinary.js");
 
@@ -39,6 +41,65 @@ async function uploadToCloudinary(file) {
   });
 }
 
+/* ----------------- helpers ----------------- */
+const toNum = (v) => {
+  const n = Number(String(v ?? "").replace(/[₹,\s]/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+};
+
+function buildOrderFilter(Order_uuid, Order_number) {
+  const ou = String(Order_uuid || "").trim();
+  const on = toNum(Order_number);
+  if (ou) return { Order_uuid: ou };
+  if (on) return { Order_Number: on };
+  return null;
+}
+
+async function markOrderPaid({ Order_uuid, Order_number, txn }) {
+  const filter = buildOrderFilter(Order_uuid, Order_number);
+  if (!filter) return; // nothing to link
+
+  const paidBy = String(txn?.Created_by || "system").trim();
+  const paidNote = String(txn?.Description || "").trim();
+
+  await Orders.updateOne(filter, {
+    $set: {
+      billStatus: "paid",
+      billPaidAt: new Date(),
+      billPaidBy: paidBy || "system",
+      billPaidNote: paidNote || null,
+      billPaidTxnUuid: txn?.Transaction_uuid || null,
+      billPaidTxnId: txn?.Transaction_id ?? null,
+    },
+  });
+}
+
+async function maybeMarkOrderUnpaid({ Order_uuid, Order_number }) {
+  const filter = buildOrderFilter(Order_uuid, Order_number);
+  if (!filter) return;
+
+  // If any transaction still exists for the same order, keep paid
+  const stillExists = await Transaction.exists({
+    $or: [
+      ...(Order_uuid ? [{ Order_uuid: String(Order_uuid).trim() }] : []),
+      ...(toNum(Order_number) ? [{ Order_number: toNum(Order_number) }] : []),
+    ],
+  });
+
+  if (stillExists) return;
+
+  await Orders.updateOne(filter, {
+    $set: {
+      billStatus: "unpaid",
+      billPaidAt: null,
+      billPaidBy: null,
+      billPaidNote: null,
+      billPaidTxnUuid: null,
+      billPaidTxnId: null,
+    },
+  });
+}
+
 // =================== ROUTES ===================
 
 // Add Transaction
@@ -60,8 +121,8 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
     if (
       !Description ||
       !Transaction_date ||
-      !Total_Debit ||
-      !Total_Credit ||
+      Total_Debit === undefined ||
+      Total_Credit === undefined ||
       !Payment_mode ||
       !Created_by
     ) {
@@ -93,7 +154,7 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       !Journal_entry.length ||
       !Journal_entry[0].Account_id ||
       !Journal_entry[0].Type ||
-      !Journal_entry[0].Amount
+      Journal_entry[0].Amount === undefined
     ) {
       return res.status(400).json({
         success: false,
@@ -101,7 +162,7 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       });
     }
 
-    // ⬇️ NEW: upload to Cloudinary (if file present)
+    // upload to Cloudinary (if file present)
     const file = req.file;
     const imageUrl = file ? await uploadToCloudinary(file) : null;
 
@@ -116,11 +177,11 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
     const newTransaction = new Transaction({
       Transaction_uuid: uuid(),
       Transaction_id: newTransactionNumber,
-      Order_uuid,
-      Order_number,
+      Order_uuid: Order_uuid || null,
+      Order_number: toNum(Order_number) || null,
       Transaction_date,
-      Total_Debit,
-      Total_Credit,
+      Total_Debit: toNum(Total_Debit),
+      Total_Credit: toNum(Total_Credit),
       Journal_entry,
       Payment_mode,
       Description,
@@ -130,6 +191,9 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
     });
 
     await newTransaction.save();
+
+    // ✅ NEW: Auto mark bill paid in Orders if linked to an order
+    await markOrderPaid({ Order_uuid, Order_number, txn: newTransaction });
 
     return res.status(201).json({
       success: true,
@@ -249,10 +313,10 @@ router.put("/:uuid", upload.single("image"), async (req, res) => {
     const updateData = {
       Description,
       Transaction_date,
-      Order_uuid,
-      Order_number,
-      Total_Debit,
-      Total_Credit,
+      Order_uuid: Order_uuid || null,
+      Order_number: toNum(Order_number) || null,
+      Total_Debit: toNum(Total_Debit),
+      Total_Credit: toNum(Total_Credit),
       Payment_mode,
       Created_by,
       Journal_entry,
@@ -277,6 +341,9 @@ router.put("/:uuid", upload.single("image"), async (req, res) => {
       });
     }
 
+    // ✅ keep order paid (in case edited txn adds Order_uuid / Order_number)
+    await markOrderPaid({ Order_uuid: updated.Order_uuid, Order_number: updated.Order_number, txn: updated });
+
     return res.json({
       success: true,
       message: "Transaction updated successfully",
@@ -296,16 +363,21 @@ router.delete("/:uuid", async (req, res) => {
   try {
     const { uuid: transactionUuid } = req.params;
 
-    const deleted = await Transaction.findOneAndDelete({
-      Transaction_uuid: transactionUuid,
-    });
-
-    if (!deleted) {
+    // get tx first (to know order link)
+    const tx = await Transaction.findOne({ Transaction_uuid: transactionUuid }).lean();
+    if (!tx) {
       return res.status(404).json({
         success: false,
         message: "Transaction not found",
       });
     }
+
+    const deleted = await Transaction.findOneAndDelete({
+      Transaction_uuid: transactionUuid,
+    });
+
+    // ✅ NEW: if no other transactions for same order, mark unpaid
+    await maybeMarkOrderUnpaid({ Order_uuid: tx.Order_uuid, Order_number: tx.Order_number });
 
     return res.json({
       success: true,
@@ -327,9 +399,7 @@ router.get("/distinctPaymentModes", async (req, res) => {
     res.json({ success: true, result: modes });
   } catch (error) {
     console.error("Error in GET /transactions/distinctPaymentModes:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch modes" });
+    res.status(500).json({ success: false, message: "Failed to fetch modes" });
   }
 });
 

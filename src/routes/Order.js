@@ -314,6 +314,47 @@ router.get("/all-data", async (req, res) => {
   }
 });
 
+// ------------------ BILL STATUS (Paid/Unpaid) ------------------
+router.patch("/bills/:id/status", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const filter = idToFilter(id);
+    if (!filter) {
+      return res.status(400).json({ success: false, message: "Invalid Order id" });
+    }
+
+    const incoming = String(req.body?.billStatus || "").toLowerCase().trim();
+    if (!["paid", "unpaid"].includes(incoming)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "billStatus must be 'paid' or 'unpaid'" });
+    }
+
+    const paidBy = req.body?.paidBy ? String(req.body.paidBy).trim() : null;
+    const paidNote = req.body?.paidNote ? String(req.body.paidNote).trim() : null;
+
+    const set = {
+      billStatus: incoming,
+      billPaidAt: incoming === "paid" ? new Date() : null,
+      billPaidBy: incoming === "paid" ? (paidBy || "system") : null,
+      billPaidNote: incoming === "paid" ? paidNote : null,
+      billPaidTxnUuid: incoming === "paid" ? (req.body?.txnUuid || null) : null,
+      billPaidTxnId: incoming === "paid" ? (req.body?.txnId ?? null) : null,
+    };
+
+    const updated = await Orders.findOneAndUpdate(filter, { $set: set }, { new: true }).lean();
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    return res.json({ success: true, result: updated });
+  } catch (e) {
+    console.error("PATCH /order/bills/:id/status error:", e);
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+
 /* ----------------------- RAW FEED for AllVendors ----------------------- */
 router.get("/allvendors-raw", async (req, res) => {
   try {
