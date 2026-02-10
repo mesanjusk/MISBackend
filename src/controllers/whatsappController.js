@@ -5,8 +5,10 @@ const { encrypt } = require('../utils/crypto');
 const {
   exchangeCodeForShortLivedToken,
   exchangeForLongLivedToken,
+  debugToken,
   fetchBusinesses,
   fetchWabaForBusiness,
+  verifyWebhookSignature,
 } = require('../services/metaApiService');
 const {
   sendTextMessage,
@@ -14,6 +16,20 @@ const {
   sendMediaMessage,
   syncApprovedTemplates,
 } = require('../services/whatsappMessageService');
+
+const sanitizeAccount = (account) => ({
+  id: account._id,
+  userId: account.userId,
+  businessId: account.businessId,
+  wabaId: account.wabaId,
+  phoneNumberId: account.phoneNumberId,
+  displayName: account.displayName,
+  tokenExpiresAt: account.tokenExpiresAt,
+  createdAt: account.createdAt,
+  updatedAt: account.updatedAt,
+});
+
+const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
 
 const pickEmbeddedSignupTargets = ({ businesses, selectedBusinessId, selectedWabaId, selectedPhoneNumberId }) => {
   const selectedBusiness = businesses.find((b) => b.id === selectedBusinessId) || businesses[0];
@@ -43,15 +59,32 @@ const pickEmbeddedSignupTargets = ({ businesses, selectedBusinessId, selectedWab
   };
 };
 
-const exchangeMetaToken = asyncHandler(async (req, res) => {
-  const { code, redirectUri, businessId, wabaId, phoneNumberId, displayName } = req.body;
-
-  if (!code || !redirectUri) {
-    throw new AppError('code and redirectUri are required', 400);
+const resolveShortLivedToken = async ({ code, redirectUri, shortLivedToken }) => {
+  if (shortLivedToken) {
+    return { access_token: shortLivedToken };
   }
 
-  const shortLivedTokenData = await exchangeCodeForShortLivedToken({ code, redirectUri });
+  if (!code || !redirectUri) {
+    throw new AppError('Either shortLivedToken OR (code + redirectUri) is required', 400);
+  }
+
+  return exchangeCodeForShortLivedToken({ code, redirectUri });
+};
+
+const exchangeMetaToken = asyncHandler(async (req, res) => {
+  const {
+    code,
+    redirectUri,
+    shortLivedToken,
+    businessId,
+    wabaId,
+    phoneNumberId,
+    displayName,
+  } = req.body;
+
+  const shortLivedTokenData = await resolveShortLivedToken({ code, redirectUri, shortLivedToken });
   const longLivedTokenData = await exchangeForLongLivedToken(shortLivedTokenData.access_token);
+  await debugToken(longLivedTokenData.access_token);
 
   const businesses = await fetchBusinesses(longLivedTokenData.access_token);
   const hydratedBusinesses = [];
@@ -87,13 +120,13 @@ const exchangeMetaToken = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     message: 'WhatsApp account linked successfully',
-    account,
+    account: sanitizeAccount(account),
   });
 });
 
 const listAccounts = asyncHandler(async (req, res) => {
   const accounts = await WhatsAppAccount.find({ userId: req.user.id }).sort({ createdAt: -1 });
-  res.status(200).json({ success: true, data: accounts });
+  res.status(200).json({ success: true, data: accounts.map(sanitizeAccount) });
 });
 
 const deleteAccount = asyncHandler(async (req, res) => {
@@ -110,10 +143,13 @@ const sendText = asyncHandler(async (req, res) => {
     throw new AppError('accountId, to and body are required', 400);
   }
 
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Recipient number is invalid', 400);
+
   const data = await sendTextMessage({
     accountId,
     userId: req.user.id,
-    to,
+    to: normalizedTo,
     body,
     customerLastMessageAt,
   });
@@ -127,10 +163,13 @@ const sendTemplate = asyncHandler(async (req, res) => {
     throw new AppError('accountId, to and templateName are required', 400);
   }
 
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Recipient number is invalid', 400);
+
   const data = await sendTemplateMessage({
     accountId,
     userId: req.user.id,
-    to,
+    to: normalizedTo,
     templateName,
     languageCode,
     components,
@@ -146,10 +185,13 @@ const sendMedia = asyncHandler(async (req, res) => {
     throw new AppError('accountId, to, mediaType and mediaId|link are required', 400);
   }
 
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Recipient number is invalid', 400);
+
   const data = await sendMediaMessage({
     accountId,
     userId: req.user.id,
-    to,
+    to: normalizedTo,
     mediaType,
     mediaId,
     link,
@@ -184,6 +226,15 @@ const verifyWebhook = asyncHandler(async (req, res) => {
 });
 
 const receiveWebhook = asyncHandler(async (req, res) => {
+  const enforceSignature = process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE !== 'false';
+  if (enforceSignature) {
+    const signature = req.headers['x-hub-signature-256'];
+    const signed = verifyWebhookSignature(req.rawBody, signature);
+    if (!signed) {
+      throw new AppError('Webhook signature verification failed', 401);
+    }
+  }
+
   const body = req.body;
   const events = [];
 

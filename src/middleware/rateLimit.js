@@ -2,6 +2,13 @@ const AppError = require('../utils/AppError');
 
 const buckets = new Map();
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of buckets.entries()) {
+    if (now > bucket.expiresAt) buckets.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
 const createRateLimiter = ({ windowMs, maxRequests }) => (req, _res, next) => {
   const key = `${req.user?.id || req.ip}:${req.path}`;
   const now = Date.now();
