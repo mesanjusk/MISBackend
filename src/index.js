@@ -36,6 +36,7 @@ const Usertasks = require("./routes/Usertask");
 const OrderMigrate = require("./routes/OrderMigrate");
 const paymentFollowupRouter = require("./routes/paymentFollowup");
 const Dashboard = require("./routes/Dashboard");
+const WhatsAppCloud = require("./routes/WhatsAppCloud");
 
 // WhatsApp Services
 const {
@@ -80,6 +81,7 @@ app.use("/api/usertasks", Usertasks);
 app.use("/api/orders-migrate", OrderMigrate);
 app.use("/api/paymentfollowup", paymentFollowupRouter);
 app.use("/api/dashboard", Dashboard);
+app.use("/api/whatsapp", WhatsAppCloud);
 
 // ---------- Legacy paths (optional) ----------
 app.use("/user", Users);
