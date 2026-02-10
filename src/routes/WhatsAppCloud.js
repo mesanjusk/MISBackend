@@ -2,6 +2,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const {
+  getMetaConfig,
   exchangeMetaToken,
   listAccounts,
   deleteAccount,
@@ -20,6 +21,7 @@ const messagingLimiter = createRateLimiter({ windowMs: 60 * 1000, maxRequests: 3
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
 
+router.get('/meta/config', requireAuth, getMetaConfig);
 router.post('/meta/exchange-token', requireAuth, exchangeMetaToken);
 router.get('/accounts', requireAuth, listAccounts);
 router.delete('/accounts/:id', requireAuth, deleteAccount);

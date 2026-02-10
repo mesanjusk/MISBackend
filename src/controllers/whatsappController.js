@@ -71,6 +71,23 @@ const resolveShortLivedToken = async ({ code, redirectUri, shortLivedToken }) =>
   return exchangeCodeForShortLivedToken({ code, redirectUri });
 };
 
+
+const getMetaConfig = asyncHandler(async (_req, res) => {
+  const metaAppId = process.env.VITE_META_APP_ID || process.env.META_APP_ID;
+
+  if (!metaAppId) {
+    throw new AppError('META_APP_ID (or VITE_META_APP_ID) is not configured on server', 500);
+  }
+
+  res.status(200).json({
+    success: true,
+    data: {
+      metaAppId,
+      apiVersion: process.env.META_API_VERSION || 'v18.0',
+    },
+  });
+});
+
 const exchangeMetaToken = asyncHandler(async (req, res) => {
   const {
     code,
@@ -272,6 +289,7 @@ const receiveWebhook = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  getMetaConfig,
   exchangeMetaToken,
   listAccounts,
   deleteAccount,
