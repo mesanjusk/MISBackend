@@ -17,6 +17,8 @@ const getAxios = () => {
 const META_API_VERSION = process.env.META_API_VERSION || 'v18.0';
 const GRAPH_BASE = `https://graph.facebook.com/${META_API_VERSION}`;
 
+const getMetaAppId = () => process.env.META_APP_ID || process.env.VITE_META_APP_ID;
+
 const parseMetaError = (error) => {
   const metaError = error.response?.data?.error;
   if (!metaError) {
@@ -56,7 +58,7 @@ const httpPost = async (url, payload, headers = {}) => {
 };
 
 const exchangeCodeForShortLivedToken = async ({ code, redirectUri }) => {
-  const clientId = process.env.META_APP_ID;
+  const clientId = getMetaAppId();
   const clientSecret = process.env.META_APP_SECRET;
 
   if (!clientId || !clientSecret) {
@@ -74,7 +76,7 @@ const exchangeCodeForShortLivedToken = async ({ code, redirectUri }) => {
 };
 
 const exchangeForLongLivedToken = async (shortLivedToken) => {
-  const clientId = process.env.META_APP_ID;
+  const clientId = getMetaAppId();
   const clientSecret = process.env.META_APP_SECRET;
 
   return httpGet(`${GRAPH_BASE}/oauth/access_token`, {
@@ -88,7 +90,7 @@ const exchangeForLongLivedToken = async (shortLivedToken) => {
 };
 
 const debugToken = async (inputToken) => {
-  const appId = process.env.META_APP_ID;
+  const appId = getMetaAppId();
   const appSecret = process.env.META_APP_SECRET;
   if (!appId || !appSecret) {
     throw new AppError('META_APP_ID and META_APP_SECRET are required', 500);
