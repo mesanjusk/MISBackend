@@ -7,6 +7,7 @@ const Transaction = require("../repositories/transaction");
 const Order = require("../repositories/order");
 
 // LOGIN
+// LOGIN
 router.post("/login", async (req, res) => {
   const { User_name, Password } = req.body;
 
@@ -15,19 +16,35 @@ router.post("/login", async (req, res) => {
     if (!user) return res.json({ status: "notexist" });
 
     if (Password === user.Password) {
+
+      // ✅ CREATE JWT TOKEN
+      const token = jwt.sign(
+        {
+          id: user._id,   // VERY IMPORTANT (used in authenticateToken)
+          userName: user.User_name,
+          userGroup: user.User_group,
+        },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: "1d" }
+      );
+
+      // ✅ SEND TOKEN TO FRONTEND
       res.json({
         status: "exist",
+        token: token,
         userGroup: user.User_group,
         userMobile: user.Mobile_number,
       });
+
     } else {
       res.json({ status: "invalid", message: "Invalid credentials." });
     }
   } catch (e) {
     console.error("Error during login:", e);
-    res.json({ status: "fail" });
+    res.status(500).json({ status: "fail" });
   }
 });
+
 
 // ADD USER
 router.post("/addUser", async (req, res) => {
