@@ -17,17 +17,23 @@ const router = express.Router();
 
 const messagingLimiter = createRateLimiter({ windowMs: 60 * 1000, maxRequests: 30 });
 
+// Webhook (no auth)
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
 
-router.post('/meta/exchange-token', requireAuth, exchangeMetaToken);
+// 🔥 FIXED ROUTE (matches frontend)
+router.post('/embedded-signup/exchange-code', requireAuth, exchangeMetaToken);
+
+// Account management
 router.get('/accounts', requireAuth, listAccounts);
 router.delete('/accounts/:id', requireAuth, deleteAccount);
 
+// Messaging
 router.post('/send-text', requireAuth, messagingLimiter, sendText);
 router.post('/send-template', requireAuth, messagingLimiter, sendTemplate);
 router.post('/send-media', requireAuth, messagingLimiter, sendMedia);
 
+// Templates
 router.get('/templates', requireAuth, getTemplates);
 
 module.exports = router;
