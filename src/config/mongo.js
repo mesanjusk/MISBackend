@@ -2,10 +2,15 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    const mongoURI = process.env.MONGO_URI;
+    const mongoURI =
+      process.env.MONGO_URI ||
+      process.env.MONGODB_URI ||
+      process.env.MONGO_URL;
 
     if (!mongoURI) {
-      throw new Error("MONGO_URI is not set");
+      throw new Error(
+        "MongoDB connection string is not set. Provide MONGO_URI, MONGODB_URI, or MONGO_URL."
+      );
     }
 
     await mongoose.connect(mongoURI, { autoIndex: true });
