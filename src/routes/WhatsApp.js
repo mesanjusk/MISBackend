@@ -12,7 +12,7 @@ const {
   getTemplates,
   verifyWebhook,
   receiveWebhook,
-} = require('../controllers/whatsappController');
+} = require('../controllers/whatsappController.js');
 
 // Embedded Signup (Meta)
 router.post('/embedded-signup/exchange-code', exchangeMetaToken);
