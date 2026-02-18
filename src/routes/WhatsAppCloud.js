@@ -2,20 +2,18 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
-// 🔥 SAFE CONTROLLER IMPORT (Render/Linux safe)
-const whatsappController = require('../controllers/whatsappController.js');
-
-// Destructure AFTER import (prevents undefined crash)
-const exchangeMetaToken = whatsappController.exchangeMetaToken;
-const listAccounts = whatsappController.listAccounts;
-const deleteAccount = whatsappController.deleteAccount;
-const sendText = whatsappController.sendText;
-const sendTemplate = whatsappController.sendTemplate;
-const sendMedia = whatsappController.sendMedia;
-const getTemplates = whatsappController.getTemplates;
-const verifyWebhook = whatsappController.verifyWebhook;
-const receiveWebhook = whatsappController.receiveWebhook;
-const manualConnect = whatsappController.manualConnect;
+const {
+  exchangeMetaToken,
+  manualConnect, // ⭐ IMPORTANT
+  listAccounts,
+  deleteAccount,
+  sendText,
+  sendTemplate,
+  sendMedia,
+  getTemplates,
+  verifyWebhook,
+  receiveWebhook,
+} = require('../controllers/whatsappController');
 
 const router = express.Router();
 
@@ -24,55 +22,43 @@ const messagingLimiter = createRateLimiter({
   maxRequests: 30,
 });
 
-// 🔍 Debug logs (IMPORTANT for Render debugging)
-console.log('WhatsApp Controller Loaded:', {
-  exchangeMetaToken: typeof exchangeMetaToken,
-  manualConnect: typeof manualConnect,
-  listAccounts: typeof listAccounts,
+// ================== DEBUG ROUTE (KEEP THIS) ==================
+router.get('/test', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'WhatsApp Cloud Router Active',
+  });
 });
+// =============================================================
 
-// ========================
-// Webhook (NO AUTH)
-// ========================
+// Webhook (NO auth)
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
 
-// ========================
-// EMBEDDED SIGNUP (META)
-// ========================
+// Embedded signup
 router.post(
   '/embedded-signup/exchange-code',
   requireAuth,
   exchangeMetaToken
 );
 
-// ========================
-// ⭐ MANUAL CONNECT (FIXED)
-// ========================
-if (typeof manualConnect === 'function') {
-  router.post('/manual-connect', requireAuth, manualConnect);
-} else {
-  console.error(
-    '❌ ERROR: manualConnect is undefined. Check controllers/whatsappController export & filename case.'
-  );
-}
+// ⭐ MANUAL CONNECT (TEMP SaaS MODE)
+router.post(
+  '/manual-connect',
+  requireAuth,
+  manualConnect
+);
 
-// ========================
-// ACCOUNT MANAGEMENT
-// ========================
+// Account management
 router.get('/accounts', requireAuth, listAccounts);
 router.delete('/accounts/:id', requireAuth, deleteAccount);
 
-// ========================
-// MESSAGING ROUTES
-// ========================
+// Messaging
 router.post('/send-text', requireAuth, messagingLimiter, sendText);
 router.post('/send-template', requireAuth, messagingLimiter, sendTemplate);
 router.post('/send-media', requireAuth, messagingLimiter, sendMedia);
 
-// ========================
-// TEMPLATES
-// ========================
+// Templates
 router.get('/templates', requireAuth, getTemplates);
 
 module.exports = router;
