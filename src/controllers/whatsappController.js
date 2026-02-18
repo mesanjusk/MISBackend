@@ -306,6 +306,7 @@ const manualConnect = asyncHandler(async (req, res) => {
 
 module.exports = {
   exchangeMetaToken,
+  manualConnect, // ⭐ MUST EXIST
   listAccounts,
   deleteAccount,
   sendText,

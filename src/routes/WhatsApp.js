@@ -3,6 +3,7 @@ const router = express.Router();
 
 const {
   exchangeMetaToken,
+  manualConnect, // ⭐ FIX: ADD THIS
   listAccounts,
   deleteAccount,
   sendText,
@@ -11,13 +12,12 @@ const {
   getTemplates,
   verifyWebhook,
   receiveWebhook,
-  manualConnect, // ⭐ ADD THIS
 } = require('../controllers/whatsappController');
 
-// 🔥 REQUIRED FOR EMBEDDED SIGNUP (Meta TP flow)
+// Embedded Signup (Meta)
 router.post('/embedded-signup/exchange-code', exchangeMetaToken);
 
-// ⭐ NEW: Manual Connect (Temporary for SaaS clients without TP approval)
+// ⭐ TEMPORARY MANUAL CONNECT (for SaaS clients without TP approval)
 router.post('/manual-connect', manualConnect);
 
 // Account routes
@@ -32,9 +32,8 @@ router.post('/send-media', sendMedia);
 // Templates
 router.get('/templates', getTemplates);
 
-// Webhook (Meta)
+// Webhook
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
-
 
 module.exports = router;
