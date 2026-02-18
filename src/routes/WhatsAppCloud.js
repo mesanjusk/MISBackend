@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+
 const {
   exchangeMetaToken,
   listAccounts,
@@ -11,18 +12,25 @@ const {
   getTemplates,
   verifyWebhook,
   receiveWebhook,
+  manualConnect, // ⭐ ADD THIS
 } = require('../controllers/whatsappController');
 
 const router = express.Router();
 
-const messagingLimiter = createRateLimiter({ windowMs: 60 * 1000, maxRequests: 30 });
+const messagingLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  maxRequests: 30,
+});
 
 // Webhook (no auth)
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
 
-// 🔥 FIXED ROUTE (matches frontend)
+// Embedded signup (matches frontend)
 router.post('/embedded-signup/exchange-code', requireAuth, exchangeMetaToken);
+
+// ⭐ NEW: Manual connect (TEMP for SaaS clients)
+router.post('/manual-connect', requireAuth, manualConnect);
 
 // Account management
 router.get('/accounts', requireAuth, listAccounts);

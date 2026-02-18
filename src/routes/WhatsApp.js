@@ -11,10 +11,14 @@ const {
   getTemplates,
   verifyWebhook,
   receiveWebhook,
+  manualConnect, // ⭐ ADD THIS
 } = require('../controllers/whatsappController');
 
-// 🔥 REQUIRED FOR EMBEDDED SIGNUP
+// 🔥 REQUIRED FOR EMBEDDED SIGNUP (Meta TP flow)
 router.post('/embedded-signup/exchange-code', exchangeMetaToken);
+
+// ⭐ NEW: Manual Connect (Temporary for SaaS clients without TP approval)
+router.post('/manual-connect', manualConnect);
 
 // Account routes
 router.get('/accounts', listAccounts);
@@ -28,8 +32,9 @@ router.post('/send-media', sendMedia);
 // Templates
 router.get('/templates', getTemplates);
 
-// Webhook
+// Webhook (Meta)
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
+
 
 module.exports = router;

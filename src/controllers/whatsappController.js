@@ -271,6 +271,39 @@ const receiveWebhook = asyncHandler(async (req, res) => {
   return res.status(200).json({ received: true });
 });
 
+const manualConnect = asyncHandler(async (req, res) => {
+  const { accessToken, phoneNumberId, wabaId, displayName } = req.body;
+
+  if (!accessToken || !phoneNumberId || !wabaId) {
+    throw new AppError('accessToken, phoneNumberId and wabaId are required', 400);
+  }
+
+  // Optional: validate token with Meta debug API (production safe)
+  await debugToken(accessToken);
+
+  // Save manual account (SaaS multi-client support)
+  const account = await WhatsAppAccount.findOneAndUpdate(
+    { userId: req.user?.id, phoneNumberId },
+    {
+      userId: req.user?.id,
+      businessId: wabaId, // fallback mapping
+      wabaId,
+      phoneNumberId,
+      displayName: displayName || 'Manual Connected Account',
+      accessToken: encrypt(accessToken),
+      tokenExpiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000), // 60 days fallback
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  res.status(200).json({
+    success: true,
+    message: 'WhatsApp account connected manually (Temporary Mode)',
+    account: sanitizeAccount(account),
+  });
+});
+
+
 module.exports = {
   exchangeMetaToken,
   listAccounts,
