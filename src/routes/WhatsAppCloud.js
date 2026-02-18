@@ -43,13 +43,6 @@ router.post(
 );
 
 // ⭐ MANUAL CONNECT (TEMP SaaS MODE)
-router.options('/manual-connect', (_req, res) => {
-  res.set('Allow', 'POST, OPTIONS');
-  return res.sendStatus(204);
-});
-
-
-
 router.post(
   '/manual-connect',
   requireAuth,
