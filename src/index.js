@@ -1,15 +1,13 @@
-require("dotenv").config(); 
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const socketIO = require("socket.io");
 const connectDB = require("./config/mongo");
 const compression = require("compression");
-const AppError = require("./utils/AppError");
-const asyncHandler = require("./utils/asyncHandler");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
 
-// Handle any unhandled promise rejections to avoid crashing the appsss
+// Handle any unhandled promise rejections
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled Rejection:", reason);
 });
@@ -38,31 +36,27 @@ const paymentFollowupRouter = require("./routes/paymentFollowup");
 const Dashboard = require("./routes/Dashboard");
 const WhatsAppCloud = require("./routes/WhatsAppCloud");
 
-// WhatsApp Services
-const {
-  setupWhatsApp,
-  getLatestQR,
-  isWhatsAppReady,
-  sendMessageToWhatsApp,
-} = require("./services/whatsappService");
-
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, { cors: { origin: "*" } });
 
 // ---------- Core middleware ----------
 app.use(cors());
-app.use(express.json({
-  limit: "50mb",
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
-  },
-}));
+app.use(
+  express.json({
+    limit: "50mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(compression());
 
 // ---------- Health check ----------
-app.get("/", (_req, res) => res.json({ ok: true, service: "MIS Backend" }));
+app.get("/", (_req, res) =>
+  res.json({ ok: true, service: "MIS Backend" })
+);
 
 // ---------- API namespace ----------
 app.use("/api/users", Users);
@@ -112,50 +106,9 @@ app.use("/usertask", Usertasks);
 app.use("/paymentfollowup", paymentFollowupRouter);
 app.use("/dashboard", Dashboard);
 
-// ---------- WhatsApp ----------
-app.get("/whatsapp/qr", (req, res) => {
-  const qr = getLatestQR();
-  if (qr) res.status(200).json({ qr });
-  else res.status(404).json({ message: "QR not ready" });
-});
-
-app.get("/qr", (req, res) => {
-  const qr = getLatestQR();
-  if (!qr) return res.send("QR not ready");
-  res.send(`
-    <html><body>
-      <h2>Scan QR to Login WhatsApp</h2>
-      <img src="${qr}" style="width:300px;" />
-    </body></html>
-  `);
-});
-
-app.get("/whatsapp/status", (_req, res) => {
-  res.json({ ready: isWhatsAppReady() });
-});
-
-app.post(
-  "/whatsapp/send-test",
-  asyncHandler(async (req, res) => {
-    const { number, message, mediaUrl } = req.body || {};
-
-    if (!number || !message) {
-      throw new AppError("'number' and 'message' are required", 400);
-    }
-
-    const result = await sendMessageToWhatsApp(number, message, mediaUrl);
-    res.status(200).json(result);
-  })
-);
-
-// ---------- Init DB + WhatsApp ----------
+// ---------- Init DB ----------
 (async () => {
   await connectDB();
-  try {
-    await setupWhatsApp(io, process.env.SESSION_ID || "admin");
-  } catch (err) {
-    console.error("❌ Failed to initialize WhatsApp client:", err);
-  }
 })();
 
 // ---------- Error handling ----------
