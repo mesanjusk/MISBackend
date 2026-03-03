@@ -3,14 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
 const {
-  exchangeMetaToken,
-  manualConnect, // ⭐ IMPORTANT
-  listAccounts,
-  deleteAccount,
   sendText,
-  sendTemplate,
-  sendMedia,
-  getTemplates,
   verifyWebhook,
   receiveWebhook,
 } = require('../controllers/whatsappController');
@@ -22,43 +15,19 @@ const messagingLimiter = createRateLimiter({
   maxRequests: 30,
 });
 
-// ================== DEBUG ROUTE (KEEP THIS) ==================
+// Test route
 router.get('/test', (req, res) => {
   res.status(200).json({
     success: true,
-    message: 'WhatsApp Cloud Router Active',
+    message: 'WhatsApp Single Business Mode Active',
   });
 });
-// =============================================================
 
-// Webhook (NO auth)
+// Webhook (no auth)
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
 
-// Embedded signup
-router.post(
-  '/embedded-signup/exchange-code',
-  requireAuth,
-  exchangeMetaToken
-);
-
-// ⭐ MANUAL CONNECT (TEMP SaaS MODE)
-router.post(
-  '/manual-connect',
-  requireAuth,
-  manualConnect
-);
-
-// Account management
-router.get('/accounts', requireAuth, listAccounts);
-router.delete('/accounts/:id', requireAuth, deleteAccount);
-
-// Messaging
+// Send message
 router.post('/send-text', requireAuth, messagingLimiter, sendText);
-router.post('/send-template', requireAuth, messagingLimiter, sendTemplate);
-router.post('/send-media', requireAuth, messagingLimiter, sendMedia);
-
-// Templates
-router.get('/templates', requireAuth, getTemplates);
 
 module.exports = router;
