@@ -4,7 +4,7 @@ const whatsappMessageSchema = new mongoose.Schema(
   {
     from: { type: String, trim: true },
     to: { type: String, trim: true },
-    messageId: { type: String, trim: true, index: true },
+    messageId: { type: String, trim: true, index: true, sparse: true },
     type: {
       type: String,
       enum: ['text', 'image', 'video', 'audio', 'document', 'unknown'],

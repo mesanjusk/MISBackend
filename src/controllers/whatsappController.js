@@ -7,7 +7,7 @@ const WhatsAppMessage = require('../models/WhatsAppMessage');
 const {
   WHATSAPP_ACCESS_TOKEN,
   WHATSAPP_PHONE_NUMBER_ID,
-  WHATSAPP_API_VERSION,
+  WHATSAPP_API_VERSION = 'v20.0',
 } = process.env;
 
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
@@ -17,6 +17,11 @@ const graphUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_
 const getMessageType = (type) => {
   const allowedTypes = ['text', 'image', 'video', 'audio', 'document'];
   return allowedTypes.includes(type) ? type : 'unknown';
+};
+
+const getAllowedStatus = (status) => {
+  const allowedStatuses = ['sent', 'delivered', 'read', 'failed'];
+  return allowedStatuses.includes(status) ? status : 'failed';
 };
 
 /* ============================================================
@@ -101,6 +106,13 @@ const receiveWebhook = asyncHandler(async (req, res) => {
 
   if (enforceSignature) {
     const signature = req.headers['x-hub-signature-256'];
+    if (!process.env.WHATSAPP_APP_SECRET) {
+      throw new AppError('WHATSAPP_APP_SECRET is required for webhook signature validation', 500);
+    }
+
+    if (!req.rawBody) {
+      throw new AppError('Raw webhook body is required for signature validation', 400);
+    }
 
     const expectedSignature =
       'sha256=' +
@@ -109,7 +121,13 @@ const receiveWebhook = asyncHandler(async (req, res) => {
         .update(req.rawBody)
         .digest('hex');
 
-    if (signature !== expectedSignature) {
+    if (!signature) {
+      throw new AppError('Missing webhook signature', 401);
+    }
+
+    const provided = Buffer.from(signature);
+    const expected = Buffer.from(expectedSignature);
+    if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
       throw new AppError('Invalid webhook signature', 401);
     }
   }
@@ -155,11 +173,9 @@ const receiveWebhook = asyncHandler(async (req, res) => {
           { messageId },
           {
             $set: {
-              from: String(statusItem?.recipient_id || ''),
-              to: metadataPhone,
-              status: ['sent', 'delivered', 'read', 'failed'].includes(statusItem?.status)
-                ? statusItem.status
-                : 'failed',
+              from: metadataPhone,
+              to: String(statusItem?.recipient_id || ''),
+              status: getAllowedStatus(statusItem?.status),
               timestamp: statusItem?.timestamp
                 ? new Date(Number(statusItem.timestamp) * 1000)
                 : new Date(),
