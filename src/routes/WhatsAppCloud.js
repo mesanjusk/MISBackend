@@ -6,6 +6,7 @@ const {
   sendText,
   verifyWebhook,
   receiveWebhook,
+  getMessages,
 } = require('../controllers/whatsappController');
 
 const router = express.Router();
@@ -15,19 +16,9 @@ const messagingLimiter = createRateLimiter({
   maxRequests: 30,
 });
 
-// Test route
-router.get('/test', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'WhatsApp Single Business Mode Active',
-  });
-});
-
-// Webhook (no auth)
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
-
-// Send message
 router.post('/send-text', requireAuth, messagingLimiter, sendText);
+router.get('/messages', requireAuth, getMessages);
 
 module.exports = router;
