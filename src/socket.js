@@ -1,17 +1,33 @@
-const socketIO = require('socket.io');
+const { Server } = require("socket.io");
 
-let ioInstance = null;
+const ioInstances = [];
 
-const initSocket = (server) => {
-  ioInstance = socketIO(server, {
-    cors: { origin: '*' },
+const buildCorsOptions = () => {
+  const allowedOrigins = process.env.SOCKET_IO_CORS_ORIGIN;
+
+  if (!allowedOrigins) {
+    return { origin: "*" };
+  }
+
+  return {
+    origin: allowedOrigins.split(",").map((origin) => origin.trim()),
+  };
+};
+
+const initSocket = (server, serverLabel = "default") => {
+  const ioInstance = new Server(server, {
+    cors: buildCorsOptions(),
   });
 
-  ioInstance.on('connection', (socket) => {
-    console.log(`[socket.io] Client connected: ${socket.id}`);
+  ioInstances.push(ioInstance);
 
-    socket.on('disconnect', (reason) => {
-      console.log(`[socket.io] Client disconnected: ${socket.id} (${reason})`);
+  ioInstance.on("connection", (socket) => {
+    console.log(`[socket.io:${serverLabel}] Client connected: ${socket.id}`);
+
+    socket.on("disconnect", (reason) => {
+      console.log(
+        `[socket.io:${serverLabel}] Client disconnected: ${socket.id} (${reason})`
+      );
     });
   });
 
@@ -19,13 +35,17 @@ const initSocket = (server) => {
 };
 
 const emitNewMessage = (message) => {
-  if (!ioInstance) {
-    console.warn('[socket.io] Cannot emit new_message because Socket.IO is not initialized yet');
+  if (!ioInstances.length) {
+    console.warn(
+      "[socket.io] Cannot emit new_message because Socket.IO is not initialized yet"
+    );
     return;
   }
 
-  console.log('[socket.io] Emitting new_message event');
-  ioInstance.emit('new_message', message);
+  console.log("[socket.io] Emitting new_message event");
+  ioInstances.forEach((ioInstance) => {
+    ioInstance.emit("new_message", message);
+  });
 };
 
 module.exports = {
