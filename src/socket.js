@@ -18,8 +18,6 @@ const initSocket = (server) => {
   return ioInstance;
 };
 
-const getIO = () => ioInstance;
-
 const emitNewMessage = (message) => {
   if (!ioInstance) {
     console.warn('[socket.io] Cannot emit new_message because Socket.IO is not initialized yet');
@@ -32,6 +30,5 @@ const emitNewMessage = (message) => {
 
 module.exports = {
   initSocket,
-  getIO,
   emitNewMessage,
 };

@@ -16,9 +16,7 @@ const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
 
 const graphUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
-const extractIncomingMessagePayload = (body) => {
-  return body?.entry?.[0]?.changes?.[0]?.value || null;
-};
+const extractIncomingMessagePayload = (body) => body?.entry?.[0]?.changes?.[0]?.value || null;
 
 const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
@@ -28,6 +26,37 @@ const parseWebhookTimestamp = (timestampInSeconds) => {
   }
 
   return new Date(parsedTimestamp * 1000);
+};
+
+const extractMessageBody = (message) => {
+  if (!message) {
+    return '';
+  }
+
+  if (message.text?.body) {
+    return message.text.body;
+  }
+
+  if (message.button?.text) {
+    return message.button.text;
+  }
+
+  if (message.interactive?.button_reply?.title) {
+    return message.interactive.button_reply.title;
+  }
+
+  if (message.interactive?.list_reply?.title) {
+    return message.interactive.list_reply.title;
+  }
+
+  return '';
+};
+
+const saveAndEmitMessage = async (payload) => {
+  const savedMessage = await Message.create(payload);
+  console.log(`[whatsapp] Saved ${savedMessage.direction || 'unknown'} message ${savedMessage._id}`);
+  emitNewMessage(savedMessage.toObject());
+  return savedMessage;
 };
 
 /* ============================================================
@@ -45,6 +74,8 @@ const sendText = asyncHandler(async (req, res) => {
     throw new AppError('Invalid recipient number', 400);
   }
 
+  console.log(`[whatsapp] Sending outgoing text message to ${normalizedTo}`);
+
   const response = await axios.post(
     graphUrl,
     {
@@ -61,6 +92,15 @@ const sendText = asyncHandler(async (req, res) => {
     }
   );
 
+  await saveAndEmitMessage({
+    from: WHATSAPP_PHONE_NUMBER_ID || '',
+    to: normalizedTo,
+    body,
+    timestamp: new Date(),
+    status: 'sent',
+    direction: 'outgoing',
+  });
+
   res.status(200).json({
     success: true,
     data: response.data,
@@ -73,7 +113,9 @@ const sendText = asyncHandler(async (req, res) => {
 const getMessages = asyncHandler(async (_req, res) => {
   console.log('[whatsapp] Fetching messages from MongoDB');
 
-  const messages = await Message.find({}).sort({ timestamp: 1, time: 1, createdAt: 1 });
+  const messages = await Message.find({})
+    .sort({ timestamp: 1, time: 1, createdAt: 1 })
+    .lean();
 
   console.log(`[whatsapp] Returning ${messages.length} message(s)`);
 
@@ -129,17 +171,14 @@ const receiveWebhook = asyncHandler(async (req, res) => {
     return res.status(200).json({ received: true });
   }
 
-  const savedMessage = await Message.create({
+  await saveAndEmitMessage({
     from: incomingMessage.from || '',
     to: value?.metadata?.display_phone_number || value?.metadata?.phone_number_id || '',
-    body: incomingMessage?.text?.body || '',
+    body: extractMessageBody(incomingMessage),
     timestamp: parseWebhookTimestamp(incomingMessage.timestamp),
     status: 'received',
     direction: 'incoming',
   });
-
-  console.log(`[whatsapp] Saved incoming message ${savedMessage._id}`);
-  emitNewMessage(savedMessage);
 
   return res.status(200).json({ received: true });
 });
