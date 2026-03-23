@@ -38,7 +38,7 @@ const { initSocket } = require("./socket");
 
 const app = express();
 const server = http.createServer(app);
-initSocket(server, "primary");
+initSocket(server);
 
 // ---------- Core middleware ----------
 app.use(cors());
@@ -115,22 +115,8 @@ app.use("/dashboard", Dashboard);
 app.use(notFound);
 app.use(errorHandler);
 
-const PORT = Number(process.env.PORT) || 10000;
-const LEGACY_SOCKET_PORT = Number(process.env.LEGACY_SOCKET_PORT) || 5000;
-const shouldStartLegacySocketServer =
-  process.env.NODE_ENV !== "production" && LEGACY_SOCKET_PORT !== PORT;
+const PORT = Number(process.env.PORT) || 5000;
 
 server.listen(PORT, () => {
-  console.log(`🚀 API server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
-
-if (shouldStartLegacySocketServer) {
-  const legacySocketServer = http.createServer(app);
-  initSocket(legacySocketServer, "legacy");
-
-  legacySocketServer.listen(LEGACY_SOCKET_PORT, () => {
-    console.log(
-      `🔌 Legacy Socket.IO compatibility server running on port ${LEGACY_SOCKET_PORT}`
-    );
-  });
-}
