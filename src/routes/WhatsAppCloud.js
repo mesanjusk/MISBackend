@@ -4,6 +4,7 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 
 const {
   sendText,
+  getMessages,
   verifyWebhook,
   receiveWebhook,
 } = require('../controllers/whatsappController');
@@ -22,6 +23,9 @@ router.get('/test', (req, res) => {
     message: 'WhatsApp Single Business Mode Active',
   });
 });
+
+// Messages API
+router.get('/messages', getMessages);
 
 // Webhook (no auth)
 router.get('/webhook', verifyWebhook);

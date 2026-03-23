@@ -2,7 +2,6 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
-const socketIO = require("socket.io");
 const connectDB = require("./config/mongo");
 const compression = require("compression");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
@@ -35,10 +34,11 @@ const OrderMigrate = require("./routes/OrderMigrate");
 const paymentFollowupRouter = require("./routes/paymentFollowup");
 const Dashboard = require("./routes/Dashboard");
 const WhatsAppCloud = require("./routes/WhatsAppCloud");
+const { initSocket } = require("./socket");
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIO(server, { cors: { origin: "*" } });
+initSocket(server);
 
 // ---------- Core middleware ----------
 app.use(cors());
