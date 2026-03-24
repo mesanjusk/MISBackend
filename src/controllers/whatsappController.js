@@ -16,7 +16,16 @@ const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
 
 const graphUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
-const extractIncomingMessagePayload = (body) => body?.entry?.[0]?.changes?.[0]?.value || null;
+const extractIncomingMessagePayloads = (body) => {
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
+
+  return entries.flatMap((entry) => {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    return changes
+      .map((change) => change?.value)
+      .filter((value) => value && Array.isArray(value.messages) && value.messages.length > 0);
+  });
+};
 
 const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
@@ -156,8 +165,9 @@ const verifyWebhook = asyncHandler(async (req, res) => {
 ============================================================ */
 const receiveWebhook = asyncHandler(async (req, res) => {
   const enforceSignature = process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE !== 'false';
+  const hasAppSecret = Boolean(WHATSAPP_APP_SECRET);
 
-  if (enforceSignature) {
+  if (enforceSignature && hasAppSecret) {
     const signature = req.headers['x-hub-signature-256'];
     const rawBody = req.rawBody || '';
 
@@ -171,30 +181,38 @@ const receiveWebhook = asyncHandler(async (req, res) => {
     if (signature !== expectedSignature) {
       throw new AppError('Invalid webhook signature', 401);
     }
+  } else if (enforceSignature && !hasAppSecret) {
+    console.warn('[whatsapp] Signature enforcement skipped: WHATSAPP_APP_SECRET is not configured');
   }
 
   console.log('Incoming webhook body:', JSON.stringify(req.body, null, 2));
 
-  const value = extractIncomingMessagePayload(req.body);
-  const incomingMessage = value?.messages?.[0];
-  console.log('Parsed message:', incomingMessage);
-
-  if (!incomingMessage) {
-    console.log('[whatsapp] Webhook received without messages[0]; skipping DB save');
+  const valuesWithMessages = extractIncomingMessagePayloads(req.body);
+  if (!valuesWithMessages.length) {
+    console.log('[whatsapp] Webhook received without message payloads; skipping DB save');
     return res.status(200).json({ received: true });
   }
 
-  const payload = {
-    from: incomingMessage.from || '',
-    to: value?.metadata?.phone_number_id || value?.metadata?.display_phone_number || '',
-    body: extractMessageBody(incomingMessage) || 'Unsupported message',
-    timestamp: parseWebhookTimestamp(incomingMessage.timestamp),
-    status: 'received',
-    direction: 'incoming',
-  };
+  const incomingPayloads = valuesWithMessages.flatMap((value) => {
+    return value.messages.map((incomingMessage) => ({
+      from: incomingMessage.from || '',
+      to: value?.metadata?.phone_number_id || value?.metadata?.display_phone_number || '',
+      body: extractMessageBody(incomingMessage) || 'Unsupported message',
+      timestamp: parseWebhookTimestamp(incomingMessage.timestamp),
+      status: 'received',
+      direction: 'incoming',
+      type: 'incoming',
+      text: extractMessageBody(incomingMessage) || 'Unsupported message',
+      time: parseWebhookTimestamp(incomingMessage.timestamp),
+    }));
+  });
+
+  console.log(`[whatsapp] Parsed ${incomingPayloads.length} incoming message(s)`);
 
   try {
-    await saveAndEmitMessage(payload);
+    for (const payload of incomingPayloads) {
+      await saveAndEmitMessage(payload);
+    }
   } catch (error) {
     console.error('Webhook save error:', error);
     throw error;
