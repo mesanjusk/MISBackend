@@ -194,7 +194,8 @@ const receiveWebhook = asyncHandler(async (req, res) => {
   };
 
   try {
-    await saveAndEmitMessage(payload);
+    const savedMessage = await Message.create(payload);
+    emitNewMessage(savedMessage.toObject());
   } catch (error) {
     console.error('Webhook save error:', error);
     throw error;
