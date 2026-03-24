@@ -148,92 +148,73 @@ const getMessages = asyncHandler(async (_req, res) => {
 /* ============================================================
    WEBHOOK VERIFY
 ============================================================ */
-const verifyWebhook = asyncHandler(async (req, res) => {
-  const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+const verifyWebhook = (req, res) => {
+  try {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
 
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+      return res.status(200).send(challenge);
+    }
 
-  if (mode === 'subscribe' && token === verifyToken) {
-    return res.status(200).send(challenge);
+    return res.sendStatus(403);
+  } catch (error) {
+    console.error('[whatsapp] Webhook verification error:', error);
+    return res.sendStatus(403);
   }
-
-  throw new AppError('Webhook verification failed', 403);
-});
+};
 
 /* ============================================================
    WEBHOOK RECEIVE
 ============================================================ */
-const receiveWebhook = asyncHandler(async (req, res) => {
-  const enforceSignature = process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE !== 'false';
-  const hasAppSecret = Boolean(WHATSAPP_APP_SECRET);
+const receiveWebhook = (req, res) => {
+  try {
+    const enforceSignature = process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE !== 'false';
+    const hasAppSecret = Boolean(WHATSAPP_APP_SECRET);
 
-  if (enforceSignature && hasAppSecret) {
-    const signature = req.headers['x-hub-signature-256'];
-    const rawBody = req.rawBody || '';
+    if (enforceSignature && hasAppSecret) {
+      const signature = req.headers['x-hub-signature-256'];
+      const rawBody = req.rawBody || '';
 
-    const expectedSignature =
-      'sha256=' +
-      crypto
-        .createHmac('sha256', WHATSAPP_APP_SECRET)
-        .update(rawBody)
-        .digest('hex');
+      const expectedSignature =
+        'sha256=' +
+        crypto
+          .createHmac('sha256', WHATSAPP_APP_SECRET)
+          .update(rawBody)
+          .digest('hex');
 
-    if (signature !== expectedSignature) {
-      throw new AppError('Invalid webhook signature', 401);
+      if (signature !== expectedSignature) {
+        console.warn('[whatsapp] Invalid webhook signature');
+        return res.status(200).json({ received: true });
+      }
+    } else if (enforceSignature && !hasAppSecret) {
+      console.warn('[whatsapp] Signature enforcement skipped: WHATSAPP_APP_SECRET is not configured');
     }
-  } else if (enforceSignature && !hasAppSecret) {
-    console.warn('[whatsapp] Signature enforcement skipped: WHATSAPP_APP_SECRET is not configured');
-  }
 
-  console.log('Incoming webhook body:', JSON.stringify(req.body, null, 2));
+    const messageEvents = req.body?.entry?.[0]?.changes?.[0]?.value?.messages;
 
-  const valuesWithMessages = extractIncomingMessagePayloads(req.body);
-  if (!valuesWithMessages.length) {
-    console.log('[whatsapp] Webhook received without message payloads; skipping DB save');
+    if (!Array.isArray(messageEvents) || messageEvents.length === 0) {
+      console.log('No message event received');
+      return res.status(200).json({ received: true });
+    }
+
+    messageEvents.forEach((incomingMessage) => {
+      const structuredLog = {
+        from: incomingMessage?.from || null,
+        message: incomingMessage?.text?.body || '',
+        timestamp: incomingMessage?.timestamp || null,
+      };
+
+      console.log('[whatsapp] Incoming message:', structuredLog);
+    });
+
+    return res.status(200).json({ received: true });
+  } catch (error) {
+    console.error('[whatsapp] Webhook receive error:', error);
     return res.status(200).json({ received: true });
   }
-
-  const incomingPayloads = valuesWithMessages.flatMap((value) => {
-    return value.messages.map((incomingMessage) => {
-      const parsedTimestamp = parseWebhookTimestamp(incomingMessage.timestamp);
-      const extractedBody = extractMessageBody(incomingMessage) || 'Unsupported message';
-      const destinationNumber =
-        value?.metadata?.phone_number_id ||
-        value?.metadata?.display_phone_number ||
-        WHATSAPP_PHONE_NUMBER_ID ||
-        '';
-
-      return {
-        fromMe: false,
-        from: incomingMessage.from || '',
-        to: destinationNumber,
-        message: extractedBody,
-        body: extractedBody,
-        timestamp: parsedTimestamp,
-        status: 'received',
-        direction: 'incoming',
-        type: 'incoming',
-        text: extractedBody,
-        time: parsedTimestamp,
-      };
-    });
-  });
-
-  console.log(`[whatsapp] Parsed ${incomingPayloads.length} incoming message(s)`);
-
-  try {
-    for (const payload of incomingPayloads) {
-      await saveAndEmitMessage(payload);
-    }
-  } catch (error) {
-    console.error('Webhook save error:', error);
-    throw error;
-  }
-
-  return res.status(200).json({ received: true });
-});
+};
 
 module.exports = {
   sendText,
