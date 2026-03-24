@@ -154,7 +154,9 @@ const verifyWebhook = (req, res) => {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+
+    if (mode === 'subscribe' && token === verifyToken) {
       return res.status(200).send(challenge);
     }
 
@@ -192,24 +194,58 @@ const receiveWebhook = (req, res) => {
       console.warn('[whatsapp] Signature enforcement skipped: WHATSAPP_APP_SECRET is not configured');
     }
 
-    const messageEvents = req.body?.entry?.[0]?.changes?.[0]?.value?.messages;
+    const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+    const messageEvents = value?.messages;
 
     if (!Array.isArray(messageEvents) || messageEvents.length === 0) {
       console.log('No message event received');
       return res.status(200).json({ received: true });
     }
 
-    messageEvents.forEach((incomingMessage) => {
+    const destinationNumber =
+      value?.metadata?.phone_number_id ||
+      value?.metadata?.display_phone_number ||
+      WHATSAPP_PHONE_NUMBER_ID ||
+      '';
+
+    const incomingPayloads = messageEvents.map((incomingMessage) => {
+      const parsedTimestamp = parseWebhookTimestamp(incomingMessage?.timestamp);
+      const extractedBody = incomingMessage?.text?.body || extractMessageBody(incomingMessage) || '';
+
       const structuredLog = {
         from: incomingMessage?.from || null,
-        message: incomingMessage?.text?.body || '',
+        message: extractedBody,
         timestamp: incomingMessage?.timestamp || null,
       };
 
       console.log('[whatsapp] Incoming message:', structuredLog);
+
+      return {
+        fromMe: false,
+        from: incomingMessage?.from || '',
+        to: destinationNumber,
+        message: extractedBody,
+        body: extractedBody,
+        timestamp: parsedTimestamp,
+        status: 'received',
+        direction: 'incoming',
+        type: 'incoming',
+        text: extractedBody,
+        time: parsedTimestamp,
+      };
     });
 
-    return res.status(200).json({ received: true });
+    res.status(200).json({ received: true });
+
+    setImmediate(async () => {
+      try {
+        for (const payload of incomingPayloads) {
+          await saveAndEmitMessage(payload);
+        }
+      } catch (error) {
+        console.error('[whatsapp] Webhook async processing error:', error);
+      }
+    });
   } catch (error) {
     console.error('[whatsapp] Webhook receive error:', error);
     return res.status(200).json({ received: true });
