@@ -5,7 +5,10 @@ let ioInstance = null;
 const initSocket = (server) => {
   ioInstance = new Server(server, {
     cors: {
-      origin: ["https://dash.sanjusk.in", "http://localhost:5173"],
+      origin: [
+        "https://dash.sanjusk.in",
+        "http://localhost:5173"
+      ],
       methods: ["GET", "POST"],
       credentials: true,
     },
