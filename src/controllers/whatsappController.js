@@ -114,8 +114,10 @@ const sendText = asyncHandler(async (req, res) => {
   }
 
   await saveAndEmitMessage({
+    fromMe: true,
     from: WHATSAPP_PHONE_NUMBER_ID || '',
     to: normalizedTo,
+    message: body,
     body,
     timestamp: new Date(),
     status: 'sent',
@@ -195,8 +197,10 @@ const receiveWebhook = asyncHandler(async (req, res) => {
 
   const incomingPayloads = valuesWithMessages.flatMap((value) => {
     return value.messages.map((incomingMessage) => ({
+      fromMe: false,
       from: incomingMessage.from || '',
       to: value?.metadata?.phone_number_id || value?.metadata?.display_phone_number || '',
+      message: extractMessageBody(incomingMessage) || 'Unsupported message',
       body: extractMessageBody(incomingMessage) || 'Unsupported message',
       timestamp: parseWebhookTimestamp(incomingMessage.timestamp),
       status: 'received',
