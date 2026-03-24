@@ -173,24 +173,32 @@ const receiveWebhook = asyncHandler(async (req, res) => {
     }
   }
 
-  console.log('Webhook event:', JSON.stringify(req.body));
+  console.log('Incoming webhook body:', JSON.stringify(req.body, null, 2));
 
   const value = extractIncomingMessagePayload(req.body);
   const incomingMessage = value?.messages?.[0];
+  console.log('Parsed message:', incomingMessage);
 
   if (!incomingMessage) {
     console.log('[whatsapp] Webhook received without messages[0]; skipping DB save');
     return res.status(200).json({ received: true });
   }
 
-  await saveAndEmitMessage({
+  const payload = {
     from: incomingMessage.from || '',
-    to: value?.metadata?.display_phone_number || value?.metadata?.phone_number_id || '',
-    body: extractMessageBody(incomingMessage),
+    to: value?.metadata?.phone_number_id || value?.metadata?.display_phone_number || '',
+    body: extractMessageBody(incomingMessage) || 'Unsupported message',
     timestamp: parseWebhookTimestamp(incomingMessage.timestamp),
     status: 'received',
     direction: 'incoming',
-  });
+  };
+
+  try {
+    await saveAndEmitMessage(payload);
+  } catch (error) {
+    console.error('Webhook save error:', error);
+    throw error;
+  }
 
   return res.status(200).json({ received: true });
 });
