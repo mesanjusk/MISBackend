@@ -75,22 +75,34 @@ const sendText = asyncHandler(async (req, res) => {
   }
 
   console.log(`[whatsapp] Sending outgoing text message to ${normalizedTo}`);
+  console.log("Graph URL:", graphUrl);
 
-  const response = await axios.post(
-    graphUrl,
-    {
-      messaging_product: 'whatsapp',
-      to: normalizedTo,
-      type: 'text',
-      text: { body },
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-        'Content-Type': 'application/json',
+  let response;
+
+  try {
+    response = await axios.post(
+      graphUrl,
+      {
+        messaging_product: 'whatsapp',
+        to: normalizedTo,
+        type: 'text',
+        text: { body },
       },
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  } catch (err) {
+    console.error("❌ META API ERROR FULL:", err.response?.data || err.message);
+
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message,
+    });
+  }
 
   await saveAndEmitMessage({
     from: WHATSAPP_PHONE_NUMBER_ID || '',
