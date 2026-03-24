@@ -34,6 +34,10 @@ const OrderMigrate = require("./routes/OrderMigrate");
 const paymentFollowupRouter = require("./routes/paymentFollowup");
 const Dashboard = require("./routes/Dashboard");
 const WhatsAppCloud = require("./routes/WhatsAppCloud");
+const {
+  verifyWebhook,
+  receiveWebhook,
+} = require("./controllers/whatsappController");
 const { initSocket } = require("./socket");
 
 const app = express();
@@ -81,6 +85,13 @@ app.use("/api/orders-migrate", OrderMigrate);
 app.use("/api/paymentfollowup", paymentFollowupRouter);
 app.use("/api/dashboard", Dashboard);
 app.use("/api/whatsapp", WhatsAppCloud);
+
+// ---------- WhatsApp webhook aliases ----------
+// Keep existing /api/whatsapp/webhook route and add direct aliases commonly used by Meta setup.
+app.get("/webhook", verifyWebhook);
+app.post("/webhook", receiveWebhook);
+app.get("/whatsapp/webhook", verifyWebhook);
+app.post("/whatsapp/webhook", receiveWebhook);
 
 // ---------- Legacy paths (optional) ----------
 app.use("/user", Users);
