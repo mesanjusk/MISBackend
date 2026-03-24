@@ -3,14 +3,14 @@ const { Server } = require("socket.io");
 let ioInstance = null;
 
 const buildCorsOptions = () => {
-  const allowedOrigins = process.env.SOCKET_IO_CORS_ORIGIN;
-
-  if (!allowedOrigins) {
-    return { origin: "*" };
-  }
-
   return {
-    origin: allowedOrigins.split(",").map((origin) => origin.trim()),
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "https://your-frontend-domain.com", // 🔁 replace with your real frontend URL
+    ],
+    methods: ["GET", "POST"],
+    credentials: true,
   };
 };
 
