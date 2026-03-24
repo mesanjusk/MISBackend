@@ -196,19 +196,29 @@ const receiveWebhook = asyncHandler(async (req, res) => {
   }
 
   const incomingPayloads = valuesWithMessages.flatMap((value) => {
-    return value.messages.map((incomingMessage) => ({
-      fromMe: false,
-      from: incomingMessage.from || '',
-      to: value?.metadata?.phone_number_id || value?.metadata?.display_phone_number || '',
-      message: extractMessageBody(incomingMessage) || 'Unsupported message',
-      body: extractMessageBody(incomingMessage) || 'Unsupported message',
-      timestamp: parseWebhookTimestamp(incomingMessage.timestamp),
-      status: 'received',
-      direction: 'incoming',
-      type: 'incoming',
-      text: extractMessageBody(incomingMessage) || 'Unsupported message',
-      time: parseWebhookTimestamp(incomingMessage.timestamp),
-    }));
+    return value.messages.map((incomingMessage) => {
+      const parsedTimestamp = parseWebhookTimestamp(incomingMessage.timestamp);
+      const extractedBody = extractMessageBody(incomingMessage) || 'Unsupported message';
+      const destinationNumber =
+        value?.metadata?.phone_number_id ||
+        value?.metadata?.display_phone_number ||
+        WHATSAPP_PHONE_NUMBER_ID ||
+        '';
+
+      return {
+        fromMe: false,
+        from: incomingMessage.from || '',
+        to: destinationNumber,
+        message: extractedBody,
+        body: extractedBody,
+        timestamp: parsedTimestamp,
+        status: 'received',
+        direction: 'incoming',
+        type: 'incoming',
+        text: extractedBody,
+        time: parsedTimestamp,
+      };
+    });
   });
 
   console.log(`[whatsapp] Parsed ${incomingPayloads.length} incoming message(s)`);
