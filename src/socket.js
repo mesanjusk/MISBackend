@@ -2,21 +2,13 @@ const { Server } = require("socket.io");
 
 let ioInstance = null;
 
-const buildCorsOptions = () => {
-  return {
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:3000",
-      "https://your-frontend-domain.com", // 🔁 replace with your real frontend URL
-    ],
-    methods: ["GET", "POST"],
-    credentials: true,
-  };
-};
-
 const initSocket = (server) => {
   ioInstance = new Server(server, {
-    cors: buildCorsOptions(),
+    cors: {
+      origin: ["https://dash.sanjusk.in", "http://localhost:5173"],
+      methods: ["GET", "POST"],
+      credentials: true,
+    },
   });
 
   ioInstance.on("connection", (socket) => {
