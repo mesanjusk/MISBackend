@@ -16,48 +16,21 @@ const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
 
 const graphUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
-const extractIncomingMessagePayloads = (body) => {
-  const entries = Array.isArray(body?.entry) ? body.entry : [];
-
-  return entries.flatMap((entry) => {
-    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-    return changes
-      .map((change) => change?.value)
-      .filter((value) => value && Array.isArray(value.messages) && value.messages.length > 0);
-  });
-};
-
+/* ============================================================
+   COMMON HELPERS
+============================================================ */
 const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
-
-  if (Number.isNaN(parsedTimestamp)) {
-    return new Date();
-  }
-
+  if (Number.isNaN(parsedTimestamp)) return new Date();
   return new Date(parsedTimestamp * 1000);
 };
 
 const extractMessageBody = (message) => {
-  if (!message) {
-    return '';
-  }
-
-  if (message.text?.body) {
-    return message.text.body;
-  }
-
-  if (message.button?.text) {
-    return message.button.text;
-  }
-
-  if (message.interactive?.button_reply?.title) {
-    return message.interactive.button_reply.title;
-  }
-
-  if (message.interactive?.list_reply?.title) {
-    return message.interactive.list_reply.title;
-  }
-
+  if (!message) return '';
+  if (message.text?.body) return message.text.body;
+  if (message.button?.text) return message.button.text;
+  if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title;
+  if (message.interactive?.list_reply?.title) return message.interactive.list_reply.title;
   return '';
 };
 
@@ -69,7 +42,7 @@ const saveAndEmitMessage = async (payload) => {
 };
 
 /* ============================================================
-   SEND TEXT MESSAGE (Single Business Mode)
+   SEND TEXT (ONLY WORKS IN 24H WINDOW)
 ============================================================ */
 const sendText = asyncHandler(async (req, res) => {
   const { to, body } = req.body;
@@ -83,13 +56,8 @@ const sendText = asyncHandler(async (req, res) => {
     throw new AppError('Invalid recipient number', 400);
   }
 
-  console.log(`[whatsapp] Sending outgoing text message to ${normalizedTo}`);
-  console.log("Graph URL:", graphUrl);
-
-  let response;
-
   try {
-    response = await axios.post(
+    const response = await axios.post(
       graphUrl,
       {
         messaging_product: 'whatsapp',
@@ -104,43 +72,102 @@ const sendText = asyncHandler(async (req, res) => {
         },
       }
     );
+
+    await saveAndEmitMessage({
+      fromMe: true,
+      from: WHATSAPP_PHONE_NUMBER_ID || '',
+      to: normalizedTo,
+      message: body,
+      body,
+      timestamp: new Date(),
+      status: 'sent',
+      direction: 'outgoing',
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: response.data,
+    });
+
   } catch (err) {
-    console.error("❌ META API ERROR FULL:", err.response?.data || err.message);
+    console.error("❌ TEXT ERROR:", err.response?.data || err.message);
 
     return res.status(500).json({
       success: false,
       error: err.response?.data || err.message,
     });
   }
+});
 
-  await saveAndEmitMessage({
-    fromMe: true,
-    from: WHATSAPP_PHONE_NUMBER_ID || '',
-    to: normalizedTo,
-    message: body,
-    body,
-    timestamp: new Date(),
-    status: 'sent',
-    direction: 'outgoing',
-  });
+/* ============================================================
+   ✅ SEND TEMPLATE (NEW - USE THIS)
+============================================================ */
+const sendTemplate = asyncHandler(async (req, res) => {
+  const { to, template_name, language = "en", components = [] } = req.body;
 
-  res.status(200).json({
-    success: true,
-    data: response.data,
-  });
+  if (!to || !template_name) {
+    throw new AppError('to and template_name are required', 400);
+  }
+
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) {
+    throw new AppError('Invalid recipient number', 400);
+  }
+
+  try {
+    const response = await axios.post(
+      graphUrl,
+      {
+        messaging_product: 'whatsapp',
+        to: normalizedTo,
+        type: 'template',
+        template: {
+          name: template_name,
+          language: { code: language },
+          components: components,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    await saveAndEmitMessage({
+      fromMe: true,
+      from: WHATSAPP_PHONE_NUMBER_ID || '',
+      to: normalizedTo,
+      message: `[TEMPLATE] ${template_name}`,
+      body: `[TEMPLATE] ${template_name}`,
+      timestamp: new Date(),
+      status: 'sent',
+      direction: 'outgoing',
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: response.data,
+    });
+
+  } catch (err) {
+    console.error("❌ TEMPLATE ERROR:", err.response?.data || err.message);
+
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message,
+    });
+  }
 });
 
 /* ============================================================
    GET MESSAGES
 ============================================================ */
 const getMessages = asyncHandler(async (_req, res) => {
-  console.log('[whatsapp] Fetching messages from MongoDB');
-
   const messages = await Message.find({})
     .sort({ timestamp: 1, time: 1, createdAt: 1 })
     .lean();
-
-  console.log(`[whatsapp] Returning ${messages.length} message(s)`);
 
   return res.json({ data: messages });
 });
@@ -190,15 +217,12 @@ const receiveWebhook = (req, res) => {
         console.warn('[whatsapp] Invalid webhook signature');
         return res.status(200).json({ received: true });
       }
-    } else if (enforceSignature && !hasAppSecret) {
-      console.warn('[whatsapp] Signature enforcement skipped: WHATSAPP_APP_SECRET is not configured');
     }
 
     const value = req.body?.entry?.[0]?.changes?.[0]?.value;
     const messageEvents = value?.messages;
 
-    if (!Array.isArray(messageEvents) || messageEvents.length === 0) {
-      console.log('No message event received');
+    if (!Array.isArray(messageEvents)) {
       return res.status(200).json({ received: true });
     }
 
@@ -208,28 +232,19 @@ const receiveWebhook = (req, res) => {
       WHATSAPP_PHONE_NUMBER_ID ||
       '';
 
-    const incomingPayloads = messageEvents.map((incomingMessage) => {
-      const parsedTimestamp = parseWebhookTimestamp(incomingMessage?.timestamp);
-      const extractedBody = incomingMessage?.text?.body || extractMessageBody(incomingMessage) || '';
-
-      const structuredLog = {
-        from: incomingMessage?.from || null,
-        message: extractedBody,
-        timestamp: incomingMessage?.timestamp || null,
-      };
-
-      console.log('[whatsapp] Incoming message:', structuredLog);
+    const incomingPayloads = messageEvents.map((msg) => {
+      const parsedTimestamp = parseWebhookTimestamp(msg?.timestamp);
+      const extractedBody = extractMessageBody(msg);
 
       return {
         fromMe: false,
-        from: incomingMessage?.from || '',
+        from: msg?.from || '',
         to: destinationNumber,
         message: extractedBody,
         body: extractedBody,
         timestamp: parsedTimestamp,
         status: 'received',
         direction: 'incoming',
-        type: 'incoming',
         text: extractedBody,
         time: parsedTimestamp,
       };
@@ -238,22 +253,20 @@ const receiveWebhook = (req, res) => {
     res.status(200).json({ received: true });
 
     setImmediate(async () => {
-      try {
-        for (const payload of incomingPayloads) {
-          await saveAndEmitMessage(payload);
-        }
-      } catch (error) {
-        console.error('[whatsapp] Webhook async processing error:', error);
+      for (const payload of incomingPayloads) {
+        await saveAndEmitMessage(payload);
       }
     });
+
   } catch (error) {
-    console.error('[whatsapp] Webhook receive error:', error);
+    console.error('[whatsapp] Webhook error:', error);
     return res.status(200).json({ received: true });
   }
 };
 
 module.exports = {
   sendText,
+  sendTemplate, // ✅ NEW
   getMessages,
   verifyWebhook,
   receiveWebhook,
