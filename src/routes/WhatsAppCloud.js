@@ -1,10 +1,8 @@
 const express = require('express');
+const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
-const router = express.Router();
-
-// Controllers
 const {
   exchangeMetaToken,
   manualConnect,
@@ -14,46 +12,47 @@ const {
   sendTemplate,
   sendMedia,
   getTemplates,
-  getMessages,
   verifyWebhook,
   receiveWebhook,
-} = require('../controllers/whatsappController.js');
+  getMessages,
+} = require('../controllers/whatsappController');
 
-// ---------------------- Embedded Signup (Meta) ----------------------
-router.post('/embedded-signup/exchange-code', exchangeMetaToken);
-
-// ---------------------- Temporary Manual Connect ----------------------
-router.post('/manual-connect', manualConnect);
-
-// ---------------------- Accounts ----------------------
-router.get('/accounts', listAccounts);
-router.delete('/accounts/:id', deleteAccount);
-
-// ---------------------- Messaging ----------------------
+// Rate limiter for sending messages
 const messagingLimiter = createRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 30,
 });
 
+// ---------- Embedded Signup ----------
+router.post('/embedded-signup/exchange-code', exchangeMetaToken);
+
+// ---------- Manual connect (for SaaS clients) ----------
+router.post('/manual-connect', manualConnect);
+
+// ---------- Account routes ----------
+router.get('/accounts', listAccounts);
+router.delete('/accounts/:id', deleteAccount);
+
+// ---------- Messaging routes ----------
 router.post('/send-text', requireAuth, messagingLimiter, sendText);
-router.post('/send-template', sendTemplate); // No auth required if needed
-router.post('/send-media', sendMedia);
+router.post('/send-template', requireAuth, messagingLimiter, sendTemplate);
+router.post('/send-media', requireAuth, messagingLimiter, sendMedia);
 
-// ---------------------- Templates ----------------------
-router.get('/templates', getTemplates);
+// ---------- Templates ----------
+router.get('/templates', requireAuth, getTemplates);
 
-// ---------------------- Messages ----------------------
-router.get('/messages', getMessages);
+// ---------- Messages API ----------
+router.get('/messages', requireAuth, getMessages);
 
-// ---------------------- Webhook ----------------------
+// ---------- Webhook (no auth) ----------
 router.get('/webhook', verifyWebhook);
 router.post('/webhook', receiveWebhook);
 
-// ---------------------- Test Route ----------------------
+// ---------- Test route ----------
 router.get('/test', (_req, res) => {
   res.status(200).json({
     success: true,
-    message: 'WhatsApp Cloud Router Active',
+    message: 'WhatsApp API Active',
   });
 });
 
