@@ -17,7 +17,7 @@ const {
 // Embedded Signup (Meta)
 router.post('/embedded-signup/exchange-code', exchangeMetaToken);
 
-// ⭐ TEMPORARY MANUAL CONNECT (for SaaS clients without TP approval)
+// ⭐ TEMPORARYy MANUAL CONNECT (for SaaS clients without TP approval)
 router.post('/manual-connect', manualConnect);
 
 // Account routes
