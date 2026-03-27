@@ -35,6 +35,7 @@ const OrderMigrate = require("./routes/OrderMigrate");
 const paymentFollowupRouter = require("./routes/paymentFollowup");
 const Dashboard = require("./routes/Dashboard");
 const WhatsAppCloud = require("./routes/WhatsAppCloud");
+const Contacts = require("./routes/Contact");
 const webhookRouter = require("./routes/webhook");
 const {
   verifyWebhook,
@@ -88,6 +89,7 @@ app.use("/api/orders-migrate", OrderMigrate);
 app.use("/api/paymentfollowup", paymentFollowupRouter);
 app.use("/api/dashboard", Dashboard);
 app.use("/api/whatsapp", WhatsAppCloud);
+app.use("/api/contacts", Contacts);
 
 // ---------- WhatsApp webhook aliases ----------
 app.use("/webhook", webhookRouter);
@@ -118,6 +120,7 @@ app.use("/usertasks", Usertasks);
 app.use("/usertask", Usertasks);
 app.use("/paymentfollowup", paymentFollowupRouter);
 app.use("/dashboard", Dashboard);
+app.use("/contacts", Contacts);
 
 // ---------- Init DB ----------
 (async () => {

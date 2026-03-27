@@ -4,6 +4,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const Message = require('../repositories/Message');
 const CampaignMessageStatus = require('../repositories/CampaignMessageStatus');
+const Contact = require('../repositories/contact');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
@@ -95,6 +96,29 @@ const saveAndEmitMessage = async (payload) => {
   console.log(`[whatsapp] Saved ${savedMessage.direction || 'unknown'} message ${savedMessage._id}`);
   emitNewMessage(savedMessage.toObject());
   return { message: savedMessage, isDuplicate: false };
+};
+
+const upsertContactFromIncomingMessage = async (payload) => {
+  const phone = normalizePhone(payload?.from);
+  if (!phone) return;
+
+  await Contact.findOneAndUpdate(
+    { phone },
+    {
+      $setOnInsert: {
+        phone,
+        name: '',
+        tags: [],
+        customFields: {},
+        assignedAgent: '',
+      },
+      $set: {
+        lastMessage: String(payload?.message || payload?.body || payload?.text || ''),
+        lastSeen: payload?.timestamp || new Date(),
+      },
+    },
+    { upsert: true, new: false }
+  );
 };
 
 
@@ -500,6 +524,12 @@ const receiveWebhook = (req, res) => {
 
       for (const payload of incomingPayloads) {
         try {
+          try {
+            await upsertContactFromIncomingMessage(payload);
+          } catch (contactError) {
+            console.error('[whatsapp] Failed to upsert contact:', contactError);
+          }
+
           const { isDuplicate } = await saveAndEmitMessage(payload);
           console.log(
             `[whatsapp] Message saved: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
