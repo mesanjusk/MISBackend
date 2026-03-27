@@ -71,43 +71,60 @@ const sendText = asyncHandler(async (req, res) => {
 });
 
 // ================== SEND TEMPLATE ==================
+// ================== SEND TEMPLATE ==================
 const sendTemplate = asyncHandler(async (req, res) => {
-  const { to, template_name, language = "en_US", components = [] } = req.body;
+  const {
+    to,
+    template_name,
+    language = "en_US",
+    components = []
+  } = req.body;
 
   if (!to || !template_name) {
     throw new AppError('to and template_name are required', 400);
   }
 
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) {
+    throw new AppError('Invalid recipient number', 400);
+  }
+
+  // ✅ Ensure body component exists
+  let finalComponents = components;
+
   if (!components.length) {
     throw new AppError('Template parameters missing', 400);
   }
 
-  const normalizedTo = normalizePhone(to);
+  // ✅ Clean empty parameters (VERY IMPORTANT)
+  finalComponents = components.map((comp) => {
+    if (comp.type === "body") {
+      return {
+        ...comp,
+        parameters: comp.parameters.filter(p => p.text && p.text.trim() !== "")
+      };
+    }
+    return comp;
+  });
 
-  console.log("📤 FINAL TEMPLATE PAYLOAD:", JSON.stringify({
+  // ✅ Debug log
+  const finalPayload = {
     messaging_product: 'whatsapp',
     to: normalizedTo,
     type: 'template',
     template: {
       name: template_name,
       language: { code: language },
-      components
+      components: finalComponents
     }
-  }, null, 2));
+  };
+
+  console.log("📤 FINAL TEMPLATE PAYLOAD:", JSON.stringify(finalPayload, null, 2));
 
   try {
     const response = await axios.post(
       graphUrl,
-      {
-        messaging_product: 'whatsapp',
-        to: normalizedTo,
-        type: 'template',
-        template: {
-          name: template_name,
-          language: { code: language },
-          components
-        }
-      },
+      finalPayload,
       {
         headers: {
           Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
@@ -116,10 +133,28 @@ const sendTemplate = asyncHandler(async (req, res) => {
       }
     );
 
-    return res.status(200).json({ success: true, data: response.data });
+    console.log("✅ TEMPLATE SENT SUCCESS:", response.data);
+
+    // ✅ Save message
+    await saveAndEmitMessage({
+      fromMe: true,
+      from: WHATSAPP_PHONE_NUMBER_ID || '',
+      to: normalizedTo,
+      message: template_name,
+      body: template_name,
+      timestamp: new Date(),
+      status: 'sent',
+      direction: 'outgoing',
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: response.data
+    });
 
   } catch (err) {
     console.error("❌ META REAL ERROR:", JSON.stringify(err.response?.data, null, 2));
+
     return res.status(500).json({
       success: false,
       error: err.response?.data || err.message
