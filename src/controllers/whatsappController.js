@@ -24,10 +24,54 @@ const parseWebhookTimestamp = (timestampInSeconds) => {
 const extractMessageBody = (message) => {
   if (!message) return '';
   if (message.text?.body) return message.text.body;
+  if (message.image?.link) return message.image.link;
   if (message.button?.text) return message.button.text;
   if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title;
   if (message.interactive?.list_reply?.title) return message.interactive.list_reply.title;
   return '';
+};
+
+const extractIncomingMessageData = (message) => {
+  const messageType = message?.type || 'text';
+  const parsedTimestamp = parseWebhookTimestamp(message?.timestamp);
+  const textBody = extractMessageBody(message);
+
+  if (messageType === 'image') {
+    const imageUrl = message?.image?.link || '';
+    return {
+      type: 'image',
+      message: imageUrl || textBody || `image:${message?.image?.id || ''}`,
+      timestamp: parsedTimestamp,
+      messageId: message?.id || '',
+    };
+  }
+
+  if (messageType === 'button') {
+    return {
+      type: 'button',
+      message: message?.button?.text || textBody,
+      timestamp: parsedTimestamp,
+      messageId: message?.id || '',
+    };
+  }
+
+  if (messageType === 'interactive') {
+    const buttonReply = message?.interactive?.button_reply?.title;
+    const listReply = message?.interactive?.list_reply?.title;
+    return {
+      type: buttonReply ? 'button_reply' : 'template_reply',
+      message: buttonReply || listReply || textBody,
+      timestamp: parsedTimestamp,
+      messageId: message?.id || '',
+    };
+  }
+
+  return {
+    type: messageType || 'text',
+    message: textBody,
+    timestamp: parsedTimestamp,
+    messageId: message?.id || '',
+  };
 };
 
 const saveAndEmitMessage = async (payload) => {
@@ -230,6 +274,7 @@ const verifyWebhook = (req, res) => {
 
 const receiveWebhook = (req, res) => {
   try {
+    console.log('[whatsapp] Incoming webhook received');
     const enforceSignature = process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE !== 'false';
     const hasAppSecret = Boolean(WHATSAPP_APP_SECRET);
 
@@ -244,26 +289,65 @@ const receiveWebhook = (req, res) => {
       }
     }
 
-    const value = req.body?.entry?.[0]?.changes?.[0]?.value;
-    const messageEvents = value?.messages;
-    if (!Array.isArray(messageEvents)) return res.status(200).json({ received: true });
+    const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
+    const incomingPayloads = [];
 
-    const destinationNumber = value?.metadata?.phone_number_id || value?.metadata?.display_phone_number || WHATSAPP_PHONE_NUMBER_ID || '';
-    const incomingPayloads = messageEvents.map((msg) => ({
-      fromMe: false,
-      from: msg?.from || '',
-      to: destinationNumber,
-      message: extractMessageBody(msg),
-      body: extractMessageBody(msg),
-      timestamp: parseWebhookTimestamp(msg?.timestamp),
-      status: 'received',
-      direction: 'incoming',
-      text: extractMessageBody(msg),
-      time: parseWebhookTimestamp(msg?.timestamp),
-    }));
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+
+      for (const change of changes) {
+        const value = change?.value || {};
+        const messageEvents = value?.messages;
+
+        if (!Array.isArray(messageEvents)) {
+          console.log('[whatsapp] No messages array in webhook payload');
+          continue;
+        }
+
+        const destinationNumber =
+          value?.metadata?.phone_number_id ||
+          value?.metadata?.display_phone_number ||
+          WHATSAPP_PHONE_NUMBER_ID ||
+          '';
+
+        for (const msg of messageEvents) {
+          const parsed = extractIncomingMessageData(msg);
+          const payload = {
+            fromMe: false,
+            from: msg?.from || '',
+            to: destinationNumber,
+            message: parsed.message,
+            body: parsed.message,
+            timestamp: parsed.timestamp,
+            status: 'received',
+            direction: 'incoming',
+            text: parsed.message,
+            time: parsed.timestamp,
+            messageId: parsed.messageId,
+            type: parsed.type,
+          };
+
+          console.log(
+            `[whatsapp] Message parsed: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
+          );
+          incomingPayloads.push(payload);
+        }
+      }
+    }
 
     res.status(200).json({ received: true });
-    setImmediate(async () => { for (const payload of incomingPayloads) await saveAndEmitMessage(payload); });
+    setImmediate(async () => {
+      for (const payload of incomingPayloads) {
+        try {
+          await saveAndEmitMessage(payload);
+          console.log(
+            `[whatsapp] Message saved: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
+          );
+        } catch (saveError) {
+          console.error('[whatsapp] Failed to save incoming message:', saveError);
+        }
+      }
+    });
   } catch (error) {
     console.error('[whatsapp] Webhook error:', error);
     return res.status(200).json({ received: true });
