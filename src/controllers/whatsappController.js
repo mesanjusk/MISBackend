@@ -4,6 +4,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const Message = require('../repositories/Message');
 const { emitNewMessage } = require('../socket');
+const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 
 const {
   WHATSAPP_ACCESS_TOKEN,
@@ -91,33 +92,119 @@ const saveAndEmitMessage = async (payload) => {
   return savedMessage;
 };
 
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const dispatchTextMessage = async ({ to, body }) => {
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
+
+  const response = await axios.post(
+    graphUrl,
+    { messaging_product: 'whatsapp', to: normalizedTo, type: 'text', text: { body } },
+    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+  );
+
+  await saveAndEmitMessage({
+    fromMe: true,
+    from: WHATSAPP_PHONE_NUMBER_ID || '',
+    to: normalizedTo,
+    message: body,
+    body,
+    timestamp: new Date(),
+    status: 'sent',
+    direction: 'outgoing',
+    type: 'text',
+    text: body,
+    time: new Date(),
+  });
+
+  return response.data;
+};
+
+const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', components = [] }) => {
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
+
+  const response = await axios.post(
+    graphUrl,
+    {
+      messaging_product: 'whatsapp',
+      to: normalizedTo,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: language },
+        components,
+      },
+    },
+    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+  );
+
+  await saveAndEmitMessage({
+    fromMe: true,
+    from: WHATSAPP_PHONE_NUMBER_ID || '',
+    to: normalizedTo,
+    message: templateName,
+    body: templateName,
+    timestamp: new Date(),
+    status: 'sent',
+    direction: 'outgoing',
+    type: 'template',
+    text: templateName,
+    time: new Date(),
+  });
+
+  return response.data;
+};
+
+const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
+  if (!incomingPayload || incomingPayload.type !== 'text') return;
+
+  const incomingText = String(incomingPayload.message || '').trim();
+  if (!incomingText) return;
+
+  const matchedRule = await resolveAutoReplyRule(incomingText);
+  const fallbackReply = String(
+    process.env.WHATSAPP_FALLBACK_REPLY || 'Thanks for your message. We will get back to you shortly.'
+  ).trim();
+
+  const replyType = matchedRule?.replyType || (fallbackReply ? 'text' : null);
+  const reply = matchedRule?.reply || fallbackReply;
+
+  if (!replyType || !reply) {
+    return;
+  }
+
+  const delayMs = resolveReplyDelayMs(matchedRule);
+  if (delayMs > 0) {
+    await wait(delayMs);
+  }
+
+  if (replyType === 'template') {
+    await dispatchTemplateMessage({
+      to: incomingPayload.from,
+      templateName: reply,
+      language: 'en_US',
+      components: [],
+    });
+    return;
+  }
+
+  await dispatchTextMessage({
+    to: incomingPayload.from,
+    body: reply,
+  });
+};
+
 // ================== SEND TEXT ==================
 const sendText = asyncHandler(async (req, res) => {
   const { to, body } = req.body;
   if (!to || !body) throw new AppError('to and body are required', 400);
 
-  const normalizedTo = normalizePhone(to);
-  if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
-
   try {
-    const response = await axios.post(
-      graphUrl,
-      { messaging_product: 'whatsapp', to: normalizedTo, type: 'text', text: { body } },
-      { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
-    );
-
-    await saveAndEmitMessage({
-      fromMe: true,
-      from: WHATSAPP_PHONE_NUMBER_ID || '',
-      to: normalizedTo,
-      message: body,
-      body,
-      timestamp: new Date(),
-      status: 'sent',
-      direction: 'outgoing',
-    });
-
-    return res.status(200).json({ success: true, data: response.data });
+    const data = await dispatchTextMessage({ to, body });
+    return res.status(200).json({ success: true, data });
   } catch (err) {
     console.error("❌ TEXT ERROR:", err.response?.data || err.message);
     return res.status(500).json({ success: false, error: err.response?.data || err.message });
@@ -176,34 +263,18 @@ const sendTemplate = asyncHandler(async (req, res) => {
   console.log("📤 FINAL TEMPLATE PAYLOAD:", JSON.stringify(finalPayload, null, 2));
 
   try {
-    const response = await axios.post(
-      graphUrl,
-      finalPayload,
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    console.log("✅ TEMPLATE SENT SUCCESS:", response.data);
-
-    // ✅ Save message
-    await saveAndEmitMessage({
-      fromMe: true,
-      from: WHATSAPP_PHONE_NUMBER_ID || '',
+    const data = await dispatchTemplateMessage({
       to: normalizedTo,
-      message: template_name,
-      body: template_name,
-      timestamp: new Date(),
-      status: 'sent',
-      direction: 'outgoing',
+      templateName: template_name,
+      language,
+      components: finalComponents,
     });
+
+    console.log("✅ TEMPLATE SENT SUCCESS:", data);
 
     return res.status(200).json({
       success: true,
-      data: response.data
+      data
     });
 
   } catch (err) {
@@ -353,6 +424,7 @@ const receiveWebhook = (req, res) => {
           console.log(
             `[whatsapp] Message saved: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
           );
+          await sendAutoReplyForIncomingMessage(payload);
         } catch (saveError) {
           console.error('[whatsapp] Failed to save incoming message:', saveError);
         }
