@@ -178,8 +178,42 @@ const getTemplates = asyncHandler(async (_req, res) => {
 });
 
 // ================== GET MESSAGES ==================
-const getMessages = asyncHandler(async (_req, res) => {
-  const messages = await Message.find({}).sort({ timestamp: 1, time: 1, createdAt: 1 }).lean();
+const getMessages = asyncHandler(async (req, res) => {
+  const sortOrder = String(req.query.sort || '').toLowerCase();
+  const includeUiFields = String(req.query.includeUiFields || '').toLowerCase() === 'true';
+  const includeUnreadCount = String(req.query.includeUnreadCount || '').toLowerCase() === 'true';
+
+  // Keep legacy/default behavior exactly the same unless optional query param is explicitly used.
+  const isLatestFirst = sortOrder === 'latest' || sortOrder === 'desc';
+  const sort = isLatestFirst ? { timestamp: -1, time: -1, createdAt: -1 } : { timestamp: 1, time: 1, createdAt: 1 };
+
+  const rawMessages = await Message.find({}).sort(sort).lean();
+
+  const messages = includeUiFields
+    ? rawMessages.map((message) => {
+        const baseTime = message.timestamp || message.time || message.createdAt;
+        const messageDate = baseTime ? new Date(baseTime) : null;
+        const isValidDate = messageDate && !Number.isNaN(messageDate.getTime());
+
+        return {
+          ...message,
+          formattedTime: isValidDate
+            ? messageDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+            : '',
+          groupedDate: isValidDate ? messageDate.toISOString().split('T')[0] : '',
+        };
+      })
+    : rawMessages;
+
+  if (includeUnreadCount) {
+    const unreadCount = rawMessages.reduce((count, message) => {
+      const incoming = message.direction === 'incoming' || message.fromMe === false;
+      const markedAsRead = message.status === 'read';
+      return incoming && !markedAsRead ? count + 1 : count;
+    }, 0);
+
+    return res.json({ data: messages, unreadCount });
+  }
   return res.json({ data: messages });
 });
 
