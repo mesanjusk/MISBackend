@@ -15,6 +15,7 @@ const {
   verifyWebhook,
   receiveWebhook,
   getMessages,
+  getAnalytics,
 } = require('../controllers/whatsappController');
 
 // Rate limiter for sending messages
@@ -43,6 +44,7 @@ router.get('/templates', requireAuth, getTemplates);
 
 // ---------- Messages API ----------
 router.get('/messages', requireAuth, getMessages);
+router.get('/analytics', requireAuth, getAnalytics);
 
 // ---------- Webhook (no auth) ----------
 router.get('/webhook', verifyWebhook);

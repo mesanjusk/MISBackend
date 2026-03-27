@@ -3,6 +3,7 @@ const AppError = require('../utils/AppError');
 const axios = require('axios');
 const crypto = require('crypto');
 const Message = require('../repositories/Message');
+const CampaignMessageStatus = require('../repositories/CampaignMessageStatus');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
@@ -109,6 +110,8 @@ const dispatchTextMessage = async ({ to, body }) => {
     { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
   );
 
+  const metaMessageId = response?.data?.messages?.[0]?.id || '';
+
   await saveAndEmitMessage({
     fromMe: true,
     from: WHATSAPP_PHONE_NUMBER_ID || '',
@@ -121,6 +124,7 @@ const dispatchTextMessage = async ({ to, body }) => {
     type: 'text',
     text: body,
     time: new Date(),
+    messageId: metaMessageId,
   });
 
   return response.data;
@@ -145,6 +149,8 @@ const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', c
     { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
   );
 
+  const metaMessageId = response?.data?.messages?.[0]?.id || '';
+
   await saveAndEmitMessage({
     fromMe: true,
     from: WHATSAPP_PHONE_NUMBER_ID || '',
@@ -157,9 +163,54 @@ const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', c
     type: 'template',
     text: templateName,
     time: new Date(),
+    messageId: metaMessageId,
   });
 
   return response.data;
+};
+
+const normalizeStatus = (rawStatus) => {
+  const normalized = String(rawStatus || '').toLowerCase();
+  if (['sent', 'delivered', 'read', 'failed'].includes(normalized)) {
+    return normalized;
+  }
+  return '';
+};
+
+const parseStatusTimestamp = (timestampInSeconds) => {
+  const parsedTimestamp = Number(timestampInSeconds);
+  return Number.isNaN(parsedTimestamp) ? new Date() : new Date(parsedTimestamp * 1000);
+};
+
+const persistStatusEvents = async (statusEvents = []) => {
+  for (const statusEvent of statusEvents) {
+    const messageId = String(statusEvent?.id || '').trim();
+    const status = normalizeStatus(statusEvent?.status);
+
+    if (!messageId || !status) {
+      continue;
+    }
+
+    const timestamp = parseStatusTimestamp(statusEvent?.timestamp);
+    const campaignId = String(statusEvent?.conversation?.id || '').trim();
+
+    await CampaignMessageStatus.findOneAndUpdate(
+      { messageId, status },
+      { $setOnInsert: { messageId, status, timestamp, campaignId } },
+      { upsert: true, new: false }
+    );
+
+    await Message.updateOne(
+      { messageId },
+      {
+        $set: {
+          status,
+          timestamp,
+          time: timestamp,
+        },
+      }
+    );
+  }
 };
 
 const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
@@ -373,6 +424,7 @@ const receiveWebhook = (req, res) => {
 
     const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
     const incomingPayloads = [];
+    const statusPayloads = [];
 
     for (const entry of entries) {
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
@@ -380,6 +432,11 @@ const receiveWebhook = (req, res) => {
       for (const change of changes) {
         const value = change?.value || {};
         const messageEvents = value?.messages;
+        const statusEvents = Array.isArray(value?.statuses) ? value.statuses : [];
+
+        if (statusEvents.length > 0) {
+          statusPayloads.push(...statusEvents);
+        }
 
         if (!Array.isArray(messageEvents)) {
           console.log('[whatsapp] No messages array in webhook payload');
@@ -420,6 +477,12 @@ const receiveWebhook = (req, res) => {
 
     res.status(200).json({ received: true });
     setImmediate(async () => {
+      try {
+        await persistStatusEvents(statusPayloads);
+      } catch (statusError) {
+        console.error('[whatsapp] Failed to persist status events:', statusError);
+      }
+
       for (const payload of incomingPayloads) {
         try {
           const { isDuplicate } = await saveAndEmitMessage(payload);
@@ -451,6 +514,82 @@ const receiveWebhook = (req, res) => {
   }
 };
 
+const getAnalytics = asyncHandler(async (req, res) => {
+  const includeCampaignWise =
+    String(req.query.campaignWise || '').toLowerCase() === 'true' ||
+    String(req.query.includeCampaignWise || '').toLowerCase() === 'true';
+
+  const [totalSentMessages, deliveredMessages, readMessages, failedMessages] = await Promise.all([
+    CampaignMessageStatus.distinct('messageId', { status: 'sent' }),
+    CampaignMessageStatus.distinct('messageId', { status: 'delivered' }),
+    CampaignMessageStatus.distinct('messageId', { status: 'read' }),
+    CampaignMessageStatus.distinct('messageId', { status: 'failed' }),
+  ]);
+
+  const totalSent = totalSentMessages.length;
+  const deliveredCount = deliveredMessages.length;
+  const readCount = readMessages.length;
+  const failedCount = failedMessages.length;
+
+  const calculatePercentage = (count) => (totalSent > 0 ? Number(((count / totalSent) * 100).toFixed(2)) : 0);
+
+  const analytics = {
+    totalSent,
+    deliveredPercentage: calculatePercentage(deliveredCount),
+    readPercentage: calculatePercentage(readCount),
+    failedPercentage: calculatePercentage(failedCount),
+  };
+
+  if (includeCampaignWise) {
+    const campaignWise = await CampaignMessageStatus.aggregate([
+      { $match: { campaignId: { $ne: '' }, status: { $in: ['sent', 'delivered', 'read', 'failed'] } } },
+      {
+        $group: {
+          _id: '$campaignId',
+          sent: { $addToSet: { $cond: [{ $eq: ['$status', 'sent'] }, '$messageId', null] } },
+          delivered: { $addToSet: { $cond: [{ $eq: ['$status', 'delivered'] }, '$messageId', null] } },
+          read: { $addToSet: { $cond: [{ $eq: ['$status', 'read'] }, '$messageId', null] } },
+          failed: { $addToSet: { $cond: [{ $eq: ['$status', 'failed'] }, '$messageId', null] } },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          campaignId: '$_id',
+          totalSent: {
+            $size: { $filter: { input: '$sent', as: 'messageId', cond: { $ne: ['$$messageId', null] } } },
+          },
+          deliveredCount: {
+            $size: { $filter: { input: '$delivered', as: 'messageId', cond: { $ne: ['$$messageId', null] } } },
+          },
+          readCount: {
+            $size: { $filter: { input: '$read', as: 'messageId', cond: { $ne: ['$$messageId', null] } } },
+          },
+          failedCount: {
+            $size: { $filter: { input: '$failed', as: 'messageId', cond: { $ne: ['$$messageId', null] } } },
+          },
+        },
+      },
+      { $sort: { campaignId: 1 } },
+    ]);
+
+    analytics.campaignWise = campaignWise.map((item) => {
+      const base = item.totalSent || 0;
+      const toPercent = (count) => (base > 0 ? Number(((count / base) * 100).toFixed(2)) : 0);
+
+      return {
+        campaignId: item.campaignId,
+        totalSent: base,
+        deliveredPercentage: toPercent(item.deliveredCount || 0),
+        readPercentage: toPercent(item.readCount || 0),
+        failedPercentage: toPercent(item.failedCount || 0),
+      };
+    });
+  }
+
+  return res.status(200).json({ success: true, data: analytics });
+});
+
 module.exports = {
   exchangeMetaToken: asyncHandler(async (_req, _res) => { /* stub */ }),
   manualConnect: asyncHandler(async (_req, _res) => { /* stub */ }),
@@ -461,6 +600,7 @@ module.exports = {
   sendMedia: asyncHandler(async (_req, _res) => { /* stub */ }),
   getTemplates,
   getMessages,
+  getAnalytics,
   verifyWebhook,
   receiveWebhook,
 };

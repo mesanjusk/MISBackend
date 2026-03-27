@@ -38,6 +38,7 @@ const webhookRouter = require("./routes/webhook");
 const {
   verifyWebhook,
   receiveWebhook,
+  getAnalytics,
 } = require("./controllers/whatsappController");
 const { initSocket } = require("./socket");
 
@@ -91,6 +92,7 @@ app.use("/api/whatsapp", WhatsAppCloud);
 app.use("/webhook", webhookRouter);
 app.get("/whatsapp/webhook", verifyWebhook);
 app.post("/whatsapp/webhook", receiveWebhook);
+app.get("/analytics", getAnalytics);
 
 // ---------- Legacy paths (optional) ----------
 app.use("/user", Users);
