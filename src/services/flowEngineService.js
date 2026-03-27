@@ -44,7 +44,10 @@ const findTriggeredFlow = async (incomingText) => {
   const keyword = normalizeKeyword(incomingText);
   if (!keyword) return null;
 
-  const candidateFlows = await Flow.find({ isActive: true }).sort({ createdAt: 1 }).lean();
+  const candidateFlows =
+    typeof Flow.findActiveFlows === 'function'
+      ? await Flow.findActiveFlows().lean()
+      : await Flow.find({ isActive: true }).sort({ createdAt: 1 }).lean();
   return (
     candidateFlows.find((flow) =>
       Array.isArray(flow.triggerKeywords) &&
@@ -58,12 +61,14 @@ const findTriggeredFlow = async (incomingText) => {
 
 const renderButtonPrompt = (node) => {
   const prefix = normalizeText(node.message) || 'Please choose an option:';
-  const options = Array.isArray(node.buttons) ? node.buttons : [];
+  const options = Array.isArray(node.options) && node.options.length ? node.options : Array.isArray(node.buttons) ? node.buttons : [];
   if (!options.length) return prefix;
 
   const lines = options.map((button, index) => `${index + 1}. ${button.label}`);
   return `${prefix}\n${lines.join('\n')}`;
 };
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const handleApiCallNode = async (node, session) => {
   const config = node.apiConfig || {};
@@ -109,8 +114,19 @@ const processSession = async ({ flow, session, incomingText, incomingReplyId }) 
       break;
     }
 
-    if (node.type === 'message') {
+    if (node.type === 'message' || node.type === 'text') {
       if (node.message) outgoingMessages.push(node.message);
+      session.awaiting = { nodeId: null, inputType: null };
+      currentNodeId = getFallbackNextNodeId(flow, node);
+      session.currentNodeId = currentNodeId || node.id;
+      continue;
+    }
+
+    if (node.type === 'delay') {
+      const safeDelayMs = Math.max(0, Number(node.delayMs) || 0);
+      if (safeDelayMs > 0) {
+        await wait(safeDelayMs);
+      }
       session.awaiting = { nodeId: null, inputType: null };
       currentNodeId = getFallbackNextNodeId(flow, node);
       session.currentNodeId = currentNodeId || node.id;
@@ -142,7 +158,7 @@ const processSession = async ({ flow, session, incomingText, incomingReplyId }) 
       continue;
     }
 
-    if (node.type === 'button') {
+    if (node.type === 'button' || (Array.isArray(node.options) && node.options.length > 0)) {
       const waitingForThisNode = session.awaiting?.nodeId === node.id && session.awaiting?.inputType === 'button';
 
       if (!waitingForThisNode) {
@@ -152,7 +168,12 @@ const processSession = async ({ flow, session, incomingText, incomingReplyId }) 
         break;
       }
 
-      const options = Array.isArray(node.buttons) ? node.buttons : [];
+      const options =
+        Array.isArray(node.options) && node.options.length > 0
+          ? node.options.map((item) => ({ ...item, value: item.label, id: item.label }))
+          : Array.isArray(node.buttons)
+          ? node.buttons
+          : [];
       const selectedOption = options.find((item, index) => {
         const normalizedLabel = normalizeKeyword(item.label);
         const normalizedValue = normalizeKeyword(item.value);
@@ -228,7 +249,10 @@ const processIncomingMessageFlow = async ({ payload, sendText }) => {
   if (!user) return { handled: false, reason: 'missing_user' };
 
   const incomingText = normalizeText(payload?.message);
-  let session = await FlowSession.findOne({ user, isCompleted: false }).sort({ updatedAt: -1 });
+  let session = await FlowSession.findOne({
+    isCompleted: false,
+    $or: [{ user }, { phone: user }],
+  }).sort({ updatedAt: -1 });
   let flow = null;
 
   if (session) {
@@ -241,7 +265,7 @@ const processIncomingMessageFlow = async ({ payload, sendText }) => {
       return { handled: false, reason: 'inactive_flow_session' };
     }
   } else {
-    flow = await findTriggeredFlow(incomingText);
+    flow = typeof Flow.findMatchingFlow === 'function' ? await Flow.findMatchingFlow(incomingText) : await findTriggeredFlow(incomingText);
     if (!flow) return { handled: false, reason: 'no_trigger' };
 
     const startNode = findStartNode(flow);
@@ -249,6 +273,7 @@ const processIncomingMessageFlow = async ({ payload, sendText }) => {
 
     session = await FlowSession.create({
       user,
+      phone: user,
       flowId: flow._id,
       currentNodeId: startNode.id,
       variables: {},

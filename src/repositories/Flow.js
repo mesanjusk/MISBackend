@@ -5,12 +5,19 @@ const flowNodeSchema = new mongoose.Schema(
     id: { type: String, required: true, trim: true },
     type: {
       type: String,
-      enum: ['message', 'question', 'button', 'condition', 'api_call', 'end'],
+      enum: ['text', 'delay', 'condition', 'end', 'message', 'question', 'button', 'api_call'],
       required: true,
     },
     message: { type: String, default: '' },
+    delayMs: { type: Number, default: 0, min: 0 },
     nextNodeId: { type: String, default: null },
     variableKey: { type: String, default: null },
+    options: [
+      {
+        label: { type: String, required: true },
+        nextNodeId: { type: String, default: null },
+      },
+    ],
     buttons: [
       {
         id: { type: String, default: null },
@@ -68,5 +75,25 @@ const flowSchema = new mongoose.Schema(
 );
 
 flowSchema.index({ isActive: 1, triggerKeywords: 1 });
+
+flowSchema.statics.findActiveFlows = function findActiveFlows() {
+  return this.find({ isActive: true }).sort({ createdAt: 1 });
+};
+
+flowSchema.statics.findMatchingFlow = async function findMatchingFlow(messageText = '') {
+  const normalizedMessage = String(messageText || '').trim().toLowerCase();
+  if (!normalizedMessage) return null;
+
+  const activeFlows = await this.findActiveFlows().lean();
+  return (
+    activeFlows.find((flow) =>
+      Array.isArray(flow.triggerKeywords) &&
+      flow.triggerKeywords.some((keyword) => {
+        const normalizedKeyword = String(keyword || '').trim().toLowerCase();
+        return Boolean(normalizedKeyword) && normalizedMessage.includes(normalizedKeyword);
+      })
+    ) || null
+  );
+};
 
 module.exports = mongoose.model('Flow', flowSchema);
