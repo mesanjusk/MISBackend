@@ -11,6 +11,7 @@ const messageSchema = new mongoose.Schema(
     status: String,
     direction: String,
     messageId: String,
+    replyId: String,
     type: String,
     text: String,
     time: Date,

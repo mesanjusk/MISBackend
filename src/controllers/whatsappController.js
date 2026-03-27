@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const Message = require('../repositories/Message');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
+const { processIncomingMessageFlow } = require('../services/flowEngineService');
 
 const {
   WHATSAPP_ACCESS_TOKEN,
@@ -53,6 +54,7 @@ const extractIncomingMessageData = (message) => {
     return {
       type: isTemplateReply ? 'template_reply' : 'button',
       message: message?.button?.text || textBody,
+      replyId: message?.button?.payload || '',
       timestamp: parsedTimestamp,
       messageId: message?.id || '',
     };
@@ -64,6 +66,7 @@ const extractIncomingMessageData = (message) => {
     return {
       type: buttonReply ? 'button_reply' : 'template_reply',
       message: buttonReply || listReply || textBody,
+      replyId: message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id || '',
       timestamp: parsedTimestamp,
       messageId: message?.id || '',
     };
@@ -72,6 +75,7 @@ const extractIncomingMessageData = (message) => {
   return {
     type: messageType || 'text',
     message: textBody,
+    replyId: '',
     timestamp: parsedTimestamp,
     messageId: message?.id || '',
   };
@@ -403,6 +407,7 @@ const receiveWebhook = (req, res) => {
             time: parsed.timestamp,
             messageId: parsed.messageId,
             type: parsed.type,
+            replyId: parsed.replyId,
           };
 
           console.log(
@@ -423,7 +428,14 @@ const receiveWebhook = (req, res) => {
           );
           if (!isDuplicate) {
             try {
-              await sendAutoReplyForIncomingMessage(payload);
+              const flowResult = await processIncomingMessageFlow({
+                payload,
+                sendText: dispatchTextMessage,
+              });
+
+              if (!flowResult?.handled) {
+                await sendAutoReplyForIncomingMessage(payload);
+              }
             } catch (replyError) {
               console.error('[whatsapp] Failed to send auto reply:', replyError);
             }
