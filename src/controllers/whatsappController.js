@@ -524,11 +524,9 @@ const receiveWebhook = (req, res) => {
 
       for (const payload of incomingPayloads) {
         try {
-          try {
-            await upsertContactFromIncomingMessage(payload);
-          } catch (contactError) {
+          upsertContactFromIncomingMessage(payload).catch((contactError) => {
             console.error('[whatsapp] Failed to upsert contact:', contactError);
-          }
+          });
 
           const { isDuplicate } = await saveAndEmitMessage(payload);
           console.log(

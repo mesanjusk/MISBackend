@@ -16,13 +16,14 @@ router.get('/', async (req, res) => {
       page = '1',
       limit = '25',
       sort = 'lastSeen_desc',
+      tagMode = 'all',
     } = req.query;
 
     const query = {};
     const trimmedSearch = String(q || '').trim();
     const tagList = String(tags || '')
       .split(',')
-      .map((tag) => tag.trim())
+      .map((tag) => tag.trim().toLowerCase())
       .filter(Boolean);
 
     if (trimmedSearch) {
@@ -31,7 +32,7 @@ router.get('/', async (req, res) => {
     }
 
     if (tagList.length > 0) {
-      query.tags = { $all: tagList };
+      query.tags = String(tagMode).toLowerCase() === 'any' ? { $in: tagList } : { $all: tagList };
     }
 
     if (assignedAgent) {
@@ -40,8 +41,20 @@ router.get('/', async (req, res) => {
 
     if (lastSeenFrom || lastSeenTo) {
       query.lastSeen = {};
-      if (lastSeenFrom) query.lastSeen.$gte = new Date(lastSeenFrom);
-      if (lastSeenTo) query.lastSeen.$lte = new Date(lastSeenTo);
+      if (lastSeenFrom) {
+        const parsed = new Date(lastSeenFrom);
+        if (Number.isNaN(parsed.getTime())) {
+          return res.status(400).json({ success: false, error: 'Invalid lastSeenFrom date' });
+        }
+        query.lastSeen.$gte = parsed;
+      }
+      if (lastSeenTo) {
+        const parsed = new Date(lastSeenTo);
+        if (Number.isNaN(parsed.getTime())) {
+          return res.status(400).json({ success: false, error: 'Invalid lastSeenTo date' });
+        }
+        query.lastSeen.$lte = parsed;
+      }
     }
 
     const safePage = Math.max(1, Number(page) || 1);
@@ -92,19 +105,42 @@ router.get('/:phone', async (req, res) => {
 router.patch('/:phone', async (req, res) => {
   try {
     const phone = String(req.params.phone || '').replace(/\D/g, '');
-    const { name, tags, customFields, assignedAgent } = req.body || {};
+    const { name, tags, addTags, removeTags, customFields, assignedAgent } = req.body || {};
 
-    const update = {};
-    if (typeof name === 'string') update.name = name.trim();
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'Invalid phone' });
+    }
+
+    const setUpdate = {};
+    if (typeof name === 'string') setUpdate.name = name.trim();
     if (Array.isArray(tags)) {
-      update.tags = [...new Set(tags.map((tag) => String(tag || '').trim()).filter(Boolean))];
+      setUpdate.tags = [...new Set(tags.map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean))];
     }
     if (customFields && typeof customFields === 'object' && !Array.isArray(customFields)) {
-      update.customFields = customFields;
+      setUpdate.customFields = customFields;
     }
-    if (typeof assignedAgent === 'string') update.assignedAgent = assignedAgent.trim();
+    if (typeof assignedAgent === 'string') setUpdate.assignedAgent = assignedAgent.trim();
 
-    const contact = await Contact.findOneAndUpdate({ phone }, { $set: update }, { new: true }).lean();
+    const update = {};
+    if (Object.keys(setUpdate).length > 0) {
+      update.$set = setUpdate;
+    }
+    if (Array.isArray(addTags) && addTags.length > 0) {
+      update.$addToSet = {
+        tags: { $each: addTags.map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean) },
+      };
+    }
+    if (Array.isArray(removeTags) && removeTags.length > 0) {
+      update.$pull = {
+        tags: { $in: removeTags.map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean) },
+      };
+    }
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid fields to update' });
+    }
+
+    const contact = await Contact.findOneAndUpdate({ phone }, update, { new: true }).lean();
     if (!contact) {
       return res.status(404).json({ success: false, error: 'Contact not found' });
     }

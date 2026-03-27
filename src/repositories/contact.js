@@ -15,7 +15,13 @@ const contactSchema = new mongoose.Schema(
 
 contactSchema.pre('save', function normalizeContact(next) {
   this.phone = String(this.phone || '').replace(/\D/g, '');
-  this.tags = [...new Set((this.tags || []).map((tag) => String(tag || '').trim()).filter(Boolean))];
+  this.tags = [
+    ...new Set(
+      (this.tags || [])
+        .map((tag) => String(tag || '').trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
   if (!this.customFields || typeof this.customFields !== 'object' || Array.isArray(this.customFields)) {
     this.customFields = {};
   }
