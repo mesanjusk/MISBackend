@@ -38,17 +38,19 @@ const extractIncomingMessageData = (message) => {
 
   if (messageType === 'image') {
     const imageUrl = message?.image?.link || '';
+    const imageCaption = message?.image?.caption || '';
     return {
       type: 'image',
-      message: imageUrl || textBody || `image:${message?.image?.id || ''}`,
+      message: imageUrl || imageCaption || textBody || `image:${message?.image?.id || ''}`,
       timestamp: parsedTimestamp,
       messageId: message?.id || '',
     };
   }
 
   if (messageType === 'button') {
+    const isTemplateReply = Boolean(message?.button?.payload);
     return {
-      type: 'button',
+      type: isTemplateReply ? 'template_reply' : 'button',
       message: message?.button?.text || textBody,
       timestamp: parsedTimestamp,
       messageId: message?.id || '',
@@ -75,6 +77,14 @@ const extractIncomingMessageData = (message) => {
 };
 
 const saveAndEmitMessage = async (payload) => {
+  if (payload.messageId) {
+    const existing = await Message.findOne({ messageId: payload.messageId }).lean();
+    if (existing) {
+      console.log(`[whatsapp] Skipped duplicate message ${payload.messageId}`);
+      return existing;
+    }
+  }
+
   const savedMessage = await Message.create(payload);
   console.log(`[whatsapp] Saved ${savedMessage.direction || 'unknown'} message ${savedMessage._id}`);
   emitNewMessage(savedMessage.toObject());
@@ -305,8 +315,8 @@ const receiveWebhook = (req, res) => {
         }
 
         const destinationNumber =
-          value?.metadata?.phone_number_id ||
           value?.metadata?.display_phone_number ||
+          value?.metadata?.phone_number_id ||
           WHATSAPP_PHONE_NUMBER_ID ||
           '';
 
