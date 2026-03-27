@@ -93,8 +93,7 @@ app.use("/api/contacts", Contacts);
 
 // ---------- WhatsApp webhook aliases ----------
 app.use("/webhook", webhookRouter);
-app.get("/whatsapp/webhook", verifyWebhook);
-app.post("/whatsapp/webhook", receiveWebhook);
+
 app.get("/analytics", requireAuth, getAnalytics);
 
 // ---------- Legacy paths (optional) ----------
@@ -122,7 +121,7 @@ app.use("/paymentfollowup", paymentFollowupRouter);
 app.use("/dashboard", Dashboard);
 app.use("/contacts", Contacts);
 
-// ---------- Init DB ----------
+// ---------- Init DB ---------
 (async () => {
   await connectDB();
 })();

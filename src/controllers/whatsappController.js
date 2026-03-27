@@ -446,20 +446,35 @@ const verifyWebhook = (req, res) => {
 
 const receiveWebhook = (req, res) => {
   try {
+    console.log("🔥 WEBHOOK HIT");
+    console.log("👉 Headers:", req.headers);
+    console.log("👉 Body:", JSON.stringify(req.body, null, 2));
     console.log('[whatsapp] Incoming webhook received');
-    const enforceSignature = process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE !== 'false';
-    const hasAppSecret = Boolean(WHATSAPP_APP_SECRET);
+    const enforceSignature =
+  String(process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE).toLowerCase() !== 'false';
 
-    if (enforceSignature && hasAppSecret) {
-      const signature = req.headers['x-hub-signature-256'];
-      const rawBody = req.rawBody || '';
-      const expectedSignature = 'sha256=' + crypto.createHmac('sha256', WHATSAPP_APP_SECRET).update(rawBody).digest('hex');
+if (enforceSignature && WHATSAPP_APP_SECRET) {
+  const signature = req.headers['x-hub-signature-256'];
 
-      if (signature !== expectedSignature) {
-        console.warn('[whatsapp] Invalid webhook signature');
-        return res.status(200).json({ received: true });
-      }
-    }
+  if (!req.rawBody) {
+    console.error("❌ rawBody missing");
+  }
+
+  const expectedSignature =
+    'sha256=' +
+    crypto
+      .createHmac('sha256', WHATSAPP_APP_SECRET)
+      .update(req.rawBody)
+      .digest('hex');
+
+  if (signature !== expectedSignature) {
+    console.error("❌ Signature mismatch");
+    console.log("Expected:", expectedSignature);
+    console.log("Received:", signature);
+
+    return res.status(403).send("Invalid signature");
+  }
+}
 
     const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
     const incomingPayloads = [];
