@@ -382,14 +382,22 @@ const sendTemplate = asyncHandler(async (req, res) => {
 const getTemplates = asyncHandler(async (_req, res) => {
   try {
     const response = await axios.get(
-      `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/message_templates`,
+      `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/message_templates`,
       { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}` } }
     );
 
-    return res.status(200).json({ success: true, templates: response.data.data || [] });
+    return res.status(200).json({
+      success: true,
+      templates: response.data.data || []
+    });
+
   } catch (err) {
     console.error("❌ GET TEMPLATES ERROR:", err.response?.data || err.message);
-    return res.status(500).json({ success: false, error: err.response?.data || err.message });
+
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message
+    });
   }
 });
 
