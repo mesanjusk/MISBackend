@@ -5,6 +5,7 @@ const http = require("http");
 const connectDB = require("./config/mongo");
 const compression = require("compression");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
+const { requireAuth } = require("./middleware/auth");
 
 // Handle any unhandled promise rejections
 process.on("unhandledRejection", (reason) => {
@@ -92,7 +93,7 @@ app.use("/api/whatsapp", WhatsAppCloud);
 app.use("/webhook", webhookRouter);
 app.get("/whatsapp/webhook", verifyWebhook);
 app.post("/whatsapp/webhook", receiveWebhook);
-app.get("/analytics", getAnalytics);
+app.get("/analytics", requireAuth, getAnalytics);
 
 // ---------- Legacy paths (optional) ----------
 app.use("/user", Users);

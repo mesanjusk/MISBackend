@@ -183,6 +183,9 @@ const parseStatusTimestamp = (timestampInSeconds) => {
 };
 
 const persistStatusEvents = async (statusEvents = []) => {
+  const statusOps = [];
+  const messageOps = [];
+
   for (const statusEvent of statusEvents) {
     const messageId = String(statusEvent?.id || '').trim();
     const status = normalizeStatus(statusEvent?.status);
@@ -194,22 +197,34 @@ const persistStatusEvents = async (statusEvents = []) => {
     const timestamp = parseStatusTimestamp(statusEvent?.timestamp);
     const campaignId = String(statusEvent?.conversation?.id || '').trim();
 
-    await CampaignMessageStatus.findOneAndUpdate(
-      { messageId, status },
-      { $setOnInsert: { messageId, status, timestamp, campaignId } },
-      { upsert: true, new: false }
-    );
+    statusOps.push({
+      updateOne: {
+        filter: { messageId, status },
+        update: { $setOnInsert: { messageId, status, timestamp, campaignId } },
+        upsert: true,
+      },
+    });
 
-    await Message.updateOne(
-      { messageId },
-      {
-        $set: {
-          status,
-          timestamp,
-          time: timestamp,
+    messageOps.push({
+      updateOne: {
+        filter: { messageId },
+        update: {
+          $set: {
+            status,
+            timestamp,
+            time: timestamp,
+          },
         },
-      }
-    );
+      },
+    });
+  }
+
+  if (statusOps.length > 0) {
+    await CampaignMessageStatus.bulkWrite(statusOps, { ordered: false });
+  }
+
+  if (messageOps.length > 0) {
+    await Message.bulkWrite(messageOps, { ordered: false });
   }
 };
 
