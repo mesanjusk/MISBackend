@@ -82,14 +82,14 @@ const saveAndEmitMessage = async (payload) => {
     const existing = await Message.findOne({ messageId: payload.messageId }).lean();
     if (existing) {
       console.log(`[whatsapp] Skipped duplicate message ${payload.messageId}`);
-      return existing;
+      return { message: existing, isDuplicate: true };
     }
   }
 
   const savedMessage = await Message.create(payload);
   console.log(`[whatsapp] Saved ${savedMessage.direction || 'unknown'} message ${savedMessage._id}`);
   emitNewMessage(savedMessage.toObject());
-  return savedMessage;
+  return { message: savedMessage, isDuplicate: false };
 };
 
 
@@ -212,7 +212,6 @@ const sendText = asyncHandler(async (req, res) => {
 });
 
 // ================== SEND TEMPLATE ==================
-// ================== SEND TEMPLATE ==================
 const sendTemplate = asyncHandler(async (req, res) => {
   const {
     to,
@@ -249,7 +248,7 @@ const sendTemplate = asyncHandler(async (req, res) => {
   });
 
   // ✅ Debug log
-  const finalPayload = {
+  console.log("📤 FINAL TEMPLATE PAYLOAD:", JSON.stringify({
     messaging_product: 'whatsapp',
     to: normalizedTo,
     type: 'template',
@@ -258,9 +257,7 @@ const sendTemplate = asyncHandler(async (req, res) => {
       language: { code: language },
       components: finalComponents
     }
-  };
-
-  console.log("📤 FINAL TEMPLATE PAYLOAD:", JSON.stringify(finalPayload, null, 2));
+  }, null, 2));
 
   try {
     const data = await dispatchTemplateMessage({
@@ -420,11 +417,17 @@ const receiveWebhook = (req, res) => {
     setImmediate(async () => {
       for (const payload of incomingPayloads) {
         try {
-          await saveAndEmitMessage(payload);
+          const { isDuplicate } = await saveAndEmitMessage(payload);
           console.log(
             `[whatsapp] Message saved: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
           );
-          await sendAutoReplyForIncomingMessage(payload);
+          if (!isDuplicate) {
+            try {
+              await sendAutoReplyForIncomingMessage(payload);
+            } catch (replyError) {
+              console.error('[whatsapp] Failed to send auto reply:', replyError);
+            }
+          }
         } catch (saveError) {
           console.error('[whatsapp] Failed to save incoming message:', saveError);
         }
