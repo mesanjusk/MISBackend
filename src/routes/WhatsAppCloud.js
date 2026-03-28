@@ -11,6 +11,7 @@ const {
   sendText,
   sendTemplate,
   sendMedia,
+  sendMessage,
   getTemplates,
   verifyWebhook,
   receiveWebhook,
@@ -38,6 +39,7 @@ router.delete('/accounts/:id', deleteAccount);
 router.post('/send-text', requireAuth, messagingLimiter, sendText);
 router.post('/send-template', requireAuth, messagingLimiter, sendTemplate);
 router.post('/send-media', requireAuth, messagingLimiter, sendMedia);
+router.post('/send-message', requireAuth, messagingLimiter, sendMessage);
 
 // ---------- Templates ----------
 router.get('/templates', requireAuth, getTemplates);

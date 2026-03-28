@@ -9,6 +9,10 @@ const contactSchema = new mongoose.Schema(
     lastSeen: { type: Date, default: null },
     customFields: { type: mongoose.Schema.Types.Mixed, default: {} },
     assignedAgent: { type: String, default: '', trim: true },
+    conversation: {
+      lastCustomerMessageAt: { type: Date, default: null },
+      windowOpen: { type: Boolean, default: false },
+    },
   },
   { timestamps: true }
 );

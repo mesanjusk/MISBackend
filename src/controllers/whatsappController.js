@@ -8,6 +8,7 @@ const Contact = require('../repositories/contact');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
+const { uploadWhatsAppMediaToCloudinary } = require('../services/whatsappMediaService');
 
 const {
   WHATSAPP_ACCESS_TOKEN,
@@ -16,71 +17,52 @@ const {
   WHATSAPP_APP_SECRET,
 } = process.env;
 
+const SUPPORTED_INCOMING_TYPES = new Set(['text', 'image', 'video', 'document', 'audio', 'sticker']);
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
 const graphUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
-// ================== COMMON HELPERS ==================
 const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
   return Number.isNaN(parsedTimestamp) ? new Date() : new Date(parsedTimestamp * 1000);
 };
 
-const extractMessageBody = (message) => {
-  if (!message) return '';
-  if (message.text?.body) return message.text.body;
-  if (message.image?.link) return message.image.link;
-  if (message.button?.text) return message.button.text;
-  if (message.interactive?.button_reply?.title) return message.interactive.button_reply.title;
-  if (message.interactive?.list_reply?.title) return message.interactive.list_reply.title;
-  return '';
-};
-
-const extractIncomingMessageData = (message) => {
-  const messageType = message?.type || 'text';
-  const parsedTimestamp = parseWebhookTimestamp(message?.timestamp);
-  const textBody = extractMessageBody(message);
-
-  if (messageType === 'image') {
-    const imageUrl = message?.image?.link || '';
-    const imageCaption = message?.image?.caption || '';
-    return {
-      type: 'image',
-      message: imageUrl || imageCaption || textBody || `image:${message?.image?.id || ''}`,
-      timestamp: parsedTimestamp,
-      messageId: message?.id || '',
-    };
-  }
-
-  if (messageType === 'button') {
-    const isTemplateReply = Boolean(message?.button?.payload);
-    return {
-      type: isTemplateReply ? 'template_reply' : 'button',
-      message: message?.button?.text || textBody,
-      replyId: message?.button?.payload || '',
-      timestamp: parsedTimestamp,
-      messageId: message?.id || '',
-    };
-  }
-
-  if (messageType === 'interactive') {
-    const buttonReply = message?.interactive?.button_reply?.title;
-    const listReply = message?.interactive?.list_reply?.title;
-    return {
-      type: buttonReply ? 'button_reply' : 'template_reply',
-      message: buttonReply || listReply || textBody,
-      replyId: message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id || '',
-      timestamp: parsedTimestamp,
-      messageId: message?.id || '',
-    };
-  }
-
-  return {
-    type: messageType || 'text',
-    message: textBody,
-    replyId: '',
-    timestamp: parsedTimestamp,
-    messageId: message?.id || '',
+const extractIncomingMessageData = (message = {}) => {
+  const messageType = String(message?.type || 'text').toLowerCase();
+  const normalized = {
+    type: messageType,
+    from: String(message?.from || ''),
+    timestamp: message?.timestamp || '',
+    messageId: String(message?.id || ''),
+    content: '',
+    mediaId: '',
+    caption: '',
+    filename: '',
+    mimeType: '',
   };
+
+  if (messageType === 'text') {
+    normalized.content = String(message?.text?.body || '');
+    return normalized;
+  }
+
+  if (messageType === 'image' || messageType === 'video' || messageType === 'audio' || messageType === 'sticker') {
+    const mediaNode = message?.[messageType] || {};
+    normalized.mediaId = String(mediaNode?.id || '');
+    normalized.caption = String(mediaNode?.caption || '');
+    normalized.mimeType = String(mediaNode?.mime_type || '');
+    return normalized;
+  }
+
+  if (messageType === 'document') {
+    const mediaNode = message?.document || {};
+    normalized.mediaId = String(mediaNode?.id || '');
+    normalized.caption = String(mediaNode?.caption || '');
+    normalized.filename = String(mediaNode?.filename || '');
+    normalized.mimeType = String(mediaNode?.mime_type || '');
+    return normalized;
+  }
+
+  return null;
 };
 
 const saveAndEmitMessage = async (payload) => {
@@ -98,9 +80,18 @@ const saveAndEmitMessage = async (payload) => {
   return { message: savedMessage, isDuplicate: false };
 };
 
+const computeConversationWindow = (lastCustomerMessageAt) => {
+  if (!lastCustomerMessageAt) return { lastCustomerMessageAt: null, windowOpen: false };
+  const last = new Date(lastCustomerMessageAt);
+  const windowOpen = Date.now() - last.getTime() < 24 * 60 * 60 * 1000;
+  return { lastCustomerMessageAt: last, windowOpen };
+};
+
 const upsertContactFromIncomingMessage = async (payload) => {
   const phone = normalizePhone(payload?.from);
   if (!phone) return;
+
+  const conversation = computeConversationWindow(payload?.timestamp || new Date());
 
   await Contact.findOneAndUpdate(
     { phone },
@@ -115,12 +106,12 @@ const upsertContactFromIncomingMessage = async (payload) => {
       $set: {
         lastMessage: String(payload?.message || payload?.body || payload?.text || ''),
         lastSeen: payload?.timestamp || new Date(),
+        conversation,
       },
     },
     { upsert: true, new: false }
   );
 };
-
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -130,7 +121,12 @@ const dispatchTextMessage = async ({ to, body }) => {
 
   const response = await axios.post(
     graphUrl,
-    { messaging_product: 'whatsapp', to: normalizedTo, type: 'text', text: { body } },
+    {
+      messaging_product: 'whatsapp',
+      to: normalizedTo,
+      type: 'text',
+      text: { body },
+    },
     { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
   );
 
@@ -147,6 +143,57 @@ const dispatchTextMessage = async ({ to, body }) => {
     direction: 'outgoing',
     type: 'text',
     text: body,
+    time: new Date(),
+    messageId: metaMessageId,
+  });
+
+  return response.data;
+};
+
+const dispatchMediaMessage = async ({ to, type, link, caption = '', filename = '' }) => {
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
+
+  const allowedTypes = new Set(['image', 'video', 'audio', 'document']);
+  if (!allowedTypes.has(type)) {
+    throw new AppError('Unsupported media type for sending', 400);
+  }
+
+  const mediaNode = { link };
+  if (caption && (type === 'image' || type === 'video' || type === 'document')) {
+    mediaNode.caption = caption;
+  }
+  if (filename && type === 'document') {
+    mediaNode.filename = filename;
+  }
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: normalizedTo,
+    type,
+    [type]: mediaNode,
+  };
+
+  const response = await axios.post(graphUrl, payload, {
+    headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+  });
+
+  const metaMessageId = response?.data?.messages?.[0]?.id || '';
+
+  await saveAndEmitMessage({
+    fromMe: true,
+    from: WHATSAPP_PHONE_NUMBER_ID || '',
+    to: normalizedTo,
+    message: caption || link,
+    body: caption || link,
+    timestamp: new Date(),
+    status: 'sent',
+    direction: 'outgoing',
+    type,
+    text: caption || '',
+    mediaUrl: link,
+    caption,
+    filename,
     time: new Date(),
     messageId: metaMessageId,
   });
@@ -252,6 +299,38 @@ const persistStatusEvents = async (statusEvents = []) => {
   }
 };
 
+const processIncomingMediaMessage = async ({ messageRecordId, mediaId }) => {
+  if (!messageRecordId || !mediaId) return;
+
+  try {
+    const uploaded = await uploadWhatsAppMediaToCloudinary({
+      mediaId,
+      accessToken: WHATSAPP_ACCESS_TOKEN,
+      graphVersion: WHATSAPP_API_VERSION || 'v19.0',
+    });
+
+    const updated = await Message.findByIdAndUpdate(
+      messageRecordId,
+      {
+        $set: {
+          mediaUrl: uploaded.mediaUrl,
+          mimeType: uploaded.mimeType,
+          message: uploaded.mediaUrl,
+          body: uploaded.mediaUrl,
+        },
+      },
+      { new: true }
+    ).lean();
+
+    if (updated) {
+      emitNewMessage(updated);
+      console.log(`[whatsapp] Media processed for message=${messageRecordId} mediaId=${mediaId}`);
+    }
+  } catch (error) {
+    console.error(`[whatsapp] Media processing failed for mediaId=${mediaId}:`, error.message);
+  }
+};
+
 const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
   if (!incomingPayload || incomingPayload.type !== 'text') return;
 
@@ -291,123 +370,104 @@ const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
   });
 };
 
-// ================== SEND TEXT ==================
 const sendText = asyncHandler(async (req, res) => {
   const { to, body } = req.body;
   if (!to || !body) throw new AppError('to and body are required', 400);
 
-  try {
-    const data = await dispatchTextMessage({ to, body });
-    return res.status(200).json({ success: true, data });
-  } catch (err) {
-    console.error("❌ TEXT ERROR:", err.response?.data || err.message);
-    return res.status(500).json({ success: false, error: err.response?.data || err.message });
-  }
+  const data = await dispatchTextMessage({ to, body });
+  return res.status(200).json({ success: true, data });
 });
 
-// ================== SEND TEMPLATE ==================
 const sendTemplate = asyncHandler(async (req, res) => {
   const {
     to,
     template_name,
-    language = "en_US",
-    components = []
+    language = 'en_US',
+    components = [],
   } = req.body;
 
   if (!to || !template_name) {
     throw new AppError('to and template_name are required', 400);
   }
 
-  const normalizedTo = normalizePhone(to);
-  if (!normalizedTo) {
-    throw new AppError('Invalid recipient number', 400);
-  }
-
-  // ✅ Ensure body component exists
-  let finalComponents = components;
-
   if (!components.length) {
     throw new AppError('Template parameters missing', 400);
   }
 
-  // ✅ Clean empty parameters (VERY IMPORTANT)
-  finalComponents = components.map((comp) => {
-    if (comp.type === "body") {
+  const finalComponents = components.map((comp) => {
+    if (comp.type === 'body') {
       return {
         ...comp,
-        parameters: comp.parameters.filter(p => p.text && p.text.trim() !== "")
+        parameters: (comp.parameters || []).filter((p) => p.text && p.text.trim() !== ''),
       };
     }
     return comp;
   });
 
-  // ✅ Debug log
-  console.log("📤 FINAL TEMPLATE PAYLOAD:", JSON.stringify({
-    messaging_product: 'whatsapp',
-    to: normalizedTo,
-    type: 'template',
-    template: {
-      name: template_name,
-      language: { code: language },
-      components: finalComponents
-    }
-  }, null, 2));
+  const data = await dispatchTemplateMessage({
+    to,
+    templateName: template_name,
+    language,
+    components: finalComponents,
+  });
 
-  try {
-    const data = await dispatchTemplateMessage({
-      to: normalizedTo,
-      templateName: template_name,
-      language,
-      components: finalComponents,
-    });
-
-    console.log("✅ TEMPLATE SENT SUCCESS:", data);
-
-    return res.status(200).json({
-      success: true,
-      data
-    });
-
-  } catch (err) {
-    console.error("❌ META REAL ERROR:", JSON.stringify(err.response?.data, null, 2));
-
-    return res.status(500).json({
-      success: false,
-      error: err.response?.data || err.message
-    });
-  }
+  return res.status(200).json({ success: true, data });
 });
 
-// ================== GET TEMPLATES ==================
+const sendMedia = asyncHandler(async (req, res) => {
+  const { to, type, link, caption, filename } = req.body;
+  if (!to || !type || !link) {
+    throw new AppError('to, type and link are required', 400);
+  }
+
+  const data = await dispatchMediaMessage({ to, type, link, caption, filename });
+  return res.status(200).json({ success: true, data });
+});
+
+const sendMessage = asyncHandler(async (req, res) => {
+  const { to, type } = req.body;
+  if (!to || !type) throw new AppError('to and type are required', 400);
+
+  let data;
+  if (type === 'text') {
+    if (!req.body.text) throw new AppError('text is required for text type', 400);
+    data = await dispatchTextMessage({ to, body: req.body.text });
+  } else if (type === 'image') {
+    if (!req.body.imageUrl) throw new AppError('imageUrl is required for image type', 400);
+    data = await dispatchMediaMessage({ to, type: 'image', link: req.body.imageUrl, caption: req.body.caption || '' });
+  } else if (type === 'document') {
+    if (!req.body.documentUrl) throw new AppError('documentUrl is required for document type', 400);
+    data = await dispatchMediaMessage({
+      to,
+      type: 'document',
+      link: req.body.documentUrl,
+      filename: req.body.filename || 'document',
+      caption: req.body.caption || '',
+    });
+  } else {
+    throw new AppError('Unsupported type. Use text, image or document', 400);
+  }
+
+  return res.status(200).json({ success: true, data });
+});
+
 const getTemplates = asyncHandler(async (_req, res) => {
-  try {
-    const response = await axios.get(
-      `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/message_templates`,
-      { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}` } }
-    );
+  const response = await axios.get(
+    `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/message_templates`,
+    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}` } }
+  );
 
-    return res.status(200).json({
-      success: true,
-      templates: response.data.data || []
-    });
-
-  } catch (err) {
-    console.error("❌ GET TEMPLATES ERROR:", err.response?.data || err.message);
-
-    return res.status(500).json({
-      success: false,
-      error: err.response?.data || err.message
-    });
-  }
+  return res.status(200).json({
+    success: true,
+    templates: response.data.data || [],
+  });
 });
 
-// ================== GET MESSAGES ==================
 const getMessages = asyncHandler(async (req, res) => {
   const sortOrder = String(req.query.sort || '').toLowerCase();
   const includeUiFields = String(req.query.includeUiFields || '').toLowerCase() === 'true';
   const includeUnreadCount = String(req.query.includeUnreadCount || '').toLowerCase() === 'true';
 
-  // Keep legacy/default behavior exactly the same unless optional query param is explicitly used.
   const isLatestFirst = sortOrder === 'latest' || sortOrder === 'desc';
   const sort = isLatestFirst ? { timestamp: -1, time: -1, createdAt: -1 } : { timestamp: 1, time: 1, createdAt: 1 };
 
@@ -438,10 +498,10 @@ const getMessages = asyncHandler(async (req, res) => {
 
     return res.json({ data: messages, unreadCount });
   }
+
   return res.json({ data: messages });
 });
 
-// ================== WEBHOOK ==================
 const verifyWebhook = (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -454,35 +514,23 @@ const verifyWebhook = (req, res) => {
 
 const receiveWebhook = (req, res) => {
   try {
-    console.log("🔥 WEBHOOK HIT");
-    console.log("👉 Headers:", req.headers);
-    console.log("👉 Body:", JSON.stringify(req.body, null, 2));
-    console.log('[whatsapp] Incoming webhook received');
     const enforceSignature =
-  String(process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE).toLowerCase() !== 'false';
+      String(process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE).toLowerCase() !== 'false';
 
-if (enforceSignature && WHATSAPP_APP_SECRET) {
-  const signature = req.headers['x-hub-signature-256'];
+    if (enforceSignature && WHATSAPP_APP_SECRET) {
+      const signature = req.headers['x-hub-signature-256'];
+      const expectedSignature =
+        'sha256=' +
+        crypto
+          .createHmac('sha256', WHATSAPP_APP_SECRET)
+          .update(req.rawBody)
+          .digest('hex');
 
-  if (!req.rawBody) {
-    console.error("❌ rawBody missing");
-  }
-
-  const expectedSignature =
-    'sha256=' +
-    crypto
-      .createHmac('sha256', WHATSAPP_APP_SECRET)
-      .update(req.rawBody)
-      .digest('hex');
-
-  if (signature !== expectedSignature) {
-    console.error("❌ Signature mismatch");
-    console.log("Expected:", expectedSignature);
-    console.log("Received:", signature);
-
-    return res.status(403).send("Invalid signature");
-  }
-}
+      if (signature !== expectedSignature) {
+        console.error('[whatsapp] Signature mismatch');
+        return res.status(403).send('Invalid signature');
+      }
+    }
 
     const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
     const incomingPayloads = [];
@@ -500,10 +548,7 @@ if (enforceSignature && WHATSAPP_APP_SECRET) {
           statusPayloads.push(...statusEvents);
         }
 
-        if (!Array.isArray(messageEvents)) {
-          console.log('[whatsapp] No messages array in webhook payload');
-          continue;
-        }
+        if (!Array.isArray(messageEvents)) continue;
 
         const destinationNumber =
           value?.metadata?.display_phone_number ||
@@ -512,32 +557,45 @@ if (enforceSignature && WHATSAPP_APP_SECRET) {
           '';
 
         for (const msg of messageEvents) {
-          const parsed = extractIncomingMessageData(msg);
+          if (!SUPPORTED_INCOMING_TYPES.has(String(msg?.type || 'text').toLowerCase())) {
+            console.warn(`[whatsapp] Unsupported message payload type=${msg?.type || 'unknown'} id=${msg?.id || 'n/a'}`);
+            continue;
+          }
+
+          const normalized = extractIncomingMessageData(msg);
+          if (!normalized) {
+            console.warn(`[whatsapp] Failed to normalize payload id=${msg?.id || 'n/a'}`);
+            continue;
+          }
+
+          const parsedTimestamp = parseWebhookTimestamp(normalized.timestamp);
           const payload = {
             fromMe: false,
-            from: msg?.from || '',
+            from: normalized.from || msg?.from || '',
             to: destinationNumber,
-            message: parsed.message,
-            body: parsed.message,
-            timestamp: parsed.timestamp,
+            message: normalized.type === 'text' ? normalized.content : normalized.caption || normalized.mediaId,
+            body: normalized.type === 'text' ? normalized.content : normalized.caption || normalized.mediaId,
+            timestamp: parsedTimestamp,
             status: 'received',
             direction: 'incoming',
-            text: parsed.message,
-            time: parsed.timestamp,
-            messageId: parsed.messageId,
-            type: parsed.type,
-            replyId: parsed.replyId,
+            text: normalized.type === 'text' ? normalized.content : '',
+            time: parsedTimestamp,
+            messageId: normalized.messageId,
+            type: normalized.type,
+            mediaId: normalized.mediaId,
+            caption: normalized.caption,
+            filename: normalized.filename,
+            mimeType: normalized.mimeType,
+            mediaUrl: '',
           };
 
-          console.log(
-            `[whatsapp] Message parsed: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
-          );
           incomingPayloads.push(payload);
         }
       }
     }
 
     res.status(200).json({ received: true });
+
     setImmediate(async () => {
       try {
         await persistStatusEvents(statusPayloads);
@@ -551,11 +609,18 @@ if (enforceSignature && WHATSAPP_APP_SECRET) {
             console.error('[whatsapp] Failed to upsert contact:', contactError);
           });
 
-          const { isDuplicate } = await saveAndEmitMessage(payload);
-          console.log(
-            `[whatsapp] Message saved: type=${payload.type} from=${payload.from} messageId=${payload.messageId || 'n/a'}`
-          );
-          if (!isDuplicate) {
+          const { message: savedMessage, isDuplicate } = await saveAndEmitMessage(payload);
+
+          if (!isDuplicate && payload.mediaId) {
+            setImmediate(() => {
+              processIncomingMediaMessage({
+                messageRecordId: savedMessage._id,
+                mediaId: payload.mediaId,
+              });
+            });
+          }
+
+          if (!isDuplicate && payload.type === 'text') {
             try {
               const flowResult = await processIncomingMessageFlow({
                 payload,
@@ -663,7 +728,8 @@ module.exports = {
   deleteAccount: asyncHandler(async (_req, _res) => { /* stub */ }),
   sendText,
   sendTemplate,
-  sendMedia: asyncHandler(async (_req, _res) => { /* stub */ }),
+  sendMedia,
+  sendMessage,
   getTemplates,
   getMessages,
   getAnalytics,

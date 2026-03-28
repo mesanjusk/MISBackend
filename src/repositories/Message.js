@@ -13,6 +13,11 @@ const messageSchema = new mongoose.Schema(
     messageId: String,
     type: String,
     text: String,
+    mediaUrl: String,
+    mediaId: String,
+    caption: String,
+    filename: String,
+    mimeType: String,
     time: Date,
   },
   { timestamps: true }
@@ -31,6 +36,10 @@ messageSchema.pre('save', function syncLegacyFields(next) {
     this.message = this.text;
   }
 
+  if (!this.message && this.mediaUrl) {
+    this.message = this.mediaUrl;
+  }
+
   if (!this.body && this.message) {
     this.body = this.message;
   }
@@ -43,7 +52,7 @@ messageSchema.pre('save', function syncLegacyFields(next) {
     this.text = this.body;
   }
 
-  if (!this.text && this.message) {
+  if (!this.text && this.message && this.type === 'text') {
     this.text = this.message;
   }
 
@@ -62,5 +71,6 @@ messageSchema.index({ from: 1 });
 messageSchema.index({ to: 1 });
 messageSchema.index({ timestamp: 1 });
 messageSchema.index({ time: -1 });
+messageSchema.index({ messageId: 1 }, { sparse: true });
 
 module.exports = mongoose.model('Message', messageSchema);
