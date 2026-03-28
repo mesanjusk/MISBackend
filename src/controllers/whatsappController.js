@@ -18,8 +18,9 @@ const {
 } = process.env;
 
 const SUPPORTED_INCOMING_TYPES = new Set(['text', 'image', 'video', 'document', 'audio', 'sticker']);
+const RESOLVED_API_VERSION = WHATSAPP_API_VERSION || 'v19.0';
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
-const graphUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+const graphUrl = `https://graph.facebook.com/${RESOLVED_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
 const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
@@ -306,7 +307,7 @@ const processIncomingMediaMessage = async ({ messageRecordId, mediaId }) => {
     const uploaded = await uploadWhatsAppMediaToCloudinary({
       mediaId,
       accessToken: WHATSAPP_ACCESS_TOKEN,
-      graphVersion: WHATSAPP_API_VERSION || 'v19.0',
+      graphVersion: RESOLVED_API_VERSION,
     });
 
     const updated = await Message.findByIdAndUpdate(
@@ -453,7 +454,7 @@ const sendMessage = asyncHandler(async (req, res) => {
 
 const getTemplates = asyncHandler(async (_req, res) => {
   const response = await axios.get(
-    `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/message_templates`,
+    `https://graph.facebook.com/${RESOLVED_API_VERSION}/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/message_templates`,
     { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}` } }
   );
 
@@ -518,7 +519,13 @@ const receiveWebhook = (req, res) => {
       String(process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE).toLowerCase() !== 'false';
 
     if (enforceSignature && WHATSAPP_APP_SECRET) {
-      const signature = req.headers['x-hub-signature-256'];
+      const signature = String(req.headers['x-hub-signature-256'] || '');
+
+      if (!req.rawBody || !signature.startsWith('sha256=')) {
+        console.error('[whatsapp] Missing rawBody or signature header');
+        return res.status(403).send('Invalid signature');
+      }
+
       const expectedSignature =
         'sha256=' +
         crypto
@@ -526,7 +533,15 @@ const receiveWebhook = (req, res) => {
           .update(req.rawBody)
           .digest('hex');
 
-      if (signature !== expectedSignature) {
+      const isValidSignature = (() => {
+        try {
+          return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+        } catch (_error) {
+          return false;
+        }
+      })();
+
+      if (!isValidSignature) {
         console.error('[whatsapp] Signature mismatch');
         return res.status(403).send('Invalid signature');
       }
