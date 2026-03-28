@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const Attendance = require("../repositories/attendance");
-const { v4: uuid } = require("uuid");
 const User = require("../repositories/users");
+const { markAttendance } = require("../services/attendanceService");
 
 // Add attendance entry (keeps the existing functionality)
 router.post('/addAttendance', async (req, res) => {
@@ -12,8 +12,6 @@ router.post('/addAttendance', async (req, res) => {
     return res.status(400).json({ success: false, message: 'All fields are required' });
   }
 
-  const currentDate = new Date().toISOString().split('T')[0];
-
   try {
     const user = await User.findOne({ User_name });
 
@@ -21,31 +19,19 @@ router.post('/addAttendance', async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found." });
     }
 
-    let todayAttendance = await Attendance.findOne({
-      Employee_uuid: user.User_uuid,
-      Date: currentDate
+    const result = await markAttendance({
+      employeeId: user.User_uuid,
+      source: "dashboard",
+      type: Type,
+      status: Status,
+      time: Time,
     });
 
-    if (todayAttendance) {
-      todayAttendance.User.push({ Type, Time, CreatedAt: new Date().toISOString() });
-      await todayAttendance.save();
-      return res.json({ success: true, message: "New entry added to today's attendance." });
+    if (result.created) {
+      return res.json({ success: true, message: "New attendance recorded successfully." });
     }
 
-    const lastAttendanceRecord = await Attendance.findOne().sort({ Attendance_Record_ID: -1 });
-    const newAttendanceRecordId = lastAttendanceRecord ? lastAttendanceRecord.Attendance_Record_ID + 1 : 1;
-
-    const newAttendance = new Attendance({
-      Attendance_uuid: uuid(),
-      Attendance_Record_ID: newAttendanceRecordId,
-      Employee_uuid: user.User_uuid,
-      Date: currentDate,
-      Status,
-      User: [{ Type, Time, CreatedAt: new Date().toISOString() }]
-    });
-
-    await newAttendance.save();
-    res.json({ success: true, message: "New attendance recorded successfully." });
+    res.json({ success: true, message: "New entry added to today's attendance." });
 
   } catch (error) {
     console.error("Error saving attendance:", error);

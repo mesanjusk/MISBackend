@@ -12,6 +12,7 @@ const AttendanceSchema = new mongoose.Schema({
     Employee_uuid: { type: String, required: true },
     Date: { type: Date, required: true },
     Status: { type: String, required: true },
+    source: { type: String, enum: ['dashboard', 'whatsapp'], default: 'dashboard' },
     User: [userSchema]
 });
 
