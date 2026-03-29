@@ -178,6 +178,7 @@ const findEmployeeByWhatsAppNumber = async (rawPhone) => {
       { phone: normalizedPhone },
       { phone: `+${normalizedPhone}` },
       { phone: last10 },
+      { Mobile_number: normalizedPhone },
 
       { Mobile_number: last10Number },
 
@@ -192,7 +193,8 @@ const findEmployeeByWhatsAppNumber = async (rawPhone) => {
 };
 
 const markWhatsAppStartAttendance = async (payload) => {
-  const incomingText = String(payload?.message || '').trim().toLowerCase();
+  console.log('Incoming:', payload?.from);
+  const incomingText = String(payload?.message || payload?.text || '').trim().toLowerCase();
   const isAttendanceTrigger = payload?.type === 'text' && (incomingText === 'start' || incomingText === 'hi');
   if (!isAttendanceTrigger) return { handled: false };
 
