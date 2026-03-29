@@ -35,10 +35,12 @@ const getCustomerTimeline = async (req, res) => {
         .sort({ Transaction_date: -1 })
         .lean(),
       Enquiry.find({ Customer_name: customerName }).sort({ createdAt: -1 }).lean(),
-      phone
-        ? Message.find({
-            $or: [{ from: phone }, { to: phone }],
-          })
+      customerUuid || phone
+        ? Message.find(
+            customerUuid
+              ? { $or: [{ customerUuid }, ...(phone ? [{ from: phone }, { to: phone }] : [])] }
+              : { $or: [{ from: phone }, { to: phone }] }
+          )
             .sort({ timestamp: -1, createdAt: -1 })
             .lean()
         : [],

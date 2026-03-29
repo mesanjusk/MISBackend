@@ -2,6 +2,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const axios = require('axios');
 const crypto = require('crypto');
+const { v4: uuid } = require('uuid');
 const Message = require('../repositories/Message');
 const CampaignMessageStatus = require('../repositories/CampaignMessageStatus');
 const Contact = require('../repositories/contact');
@@ -136,6 +137,7 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 
   const customerName = `WhatsApp ${phone.slice(-4)}`;
   const customerDoc = await Customers.create({
+    Customer_uuid: uuid(),
     Customer_name: customerName,
     Mobile_number: phone,
     Customer_group: 'Customer',
@@ -670,9 +672,14 @@ const receiveWebhook = (req, res) => {
           upsertContactFromIncomingMessage(payload).catch((contactError) => {
             console.error('[whatsapp] Failed to upsert contact:', contactError);
           });
-          upsertCustomerAndEnquiryFromIncomingMessage(payload).catch((customerError) => {
+          const customerSync = await upsertCustomerAndEnquiryFromIncomingMessage(payload).catch((customerError) => {
             console.error('[whatsapp] Failed to sync customer/enquiry:', customerError);
+            return null;
           });
+          if (customerSync?.customer) {
+            payload.customerUuid = String(customerSync.customer.Customer_uuid || '');
+            payload.customerId = String(customerSync.customer._id || '');
+          }
 
           const { message: savedMessage, isDuplicate } = await saveAndEmitMessage(payload);
 

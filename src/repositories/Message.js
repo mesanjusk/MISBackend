@@ -19,6 +19,8 @@ const messageSchema = new mongoose.Schema(
     filename: String,
     mimeType: String,
     time: Date,
+    customerUuid: String,
+    customerId: String,
   },
   { timestamps: true }
 );
@@ -72,5 +74,6 @@ messageSchema.index({ to: 1 });
 messageSchema.index({ timestamp: 1 });
 messageSchema.index({ time: -1 });
 messageSchema.index({ messageId: 1 }, { sparse: true });
+messageSchema.index({ customerUuid: 1 });
 
 module.exports = mongoose.model('Message', messageSchema);
