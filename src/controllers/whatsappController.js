@@ -199,7 +199,12 @@ const markWhatsAppStartAttendance = async (payload) => {
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
     console.log('Employee found:', employee?._id);
-    const eventTime = new Date();
+    const getISTDate = () => {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+};
+
+const eventTime = getISTDate();
+    
     const employeeUuid = String(employee?.User_uuid || employee?._id || '');
 
     if (!employee || !employeeUuid) {
