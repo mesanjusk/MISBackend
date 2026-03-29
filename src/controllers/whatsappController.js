@@ -161,18 +161,19 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 };
 
 const findEmployeeByWhatsAppNumber = async (rawPhone) => {
-  const normalizedPhone = normalizePhone(rawPhone);
+  const normalizedPhone = normalizePhone(rawPhone); // 919876543210
   if (!normalizedPhone) return null;
-  const rawPhoneString = String(rawPhone || '').trim();
+
+  const last10 = normalizedPhone.slice(-10); // 9876543210
 
   return User.findOne({
     $or: [
-      { phone: rawPhoneString },
       { phone: normalizedPhone },
       { phone: `+${normalizedPhone}` },
-      { Mobile_number: rawPhoneString },
+      { phone: last10 },
       { Mobile_number: normalizedPhone },
       { Mobile_number: `+${normalizedPhone}` },
+      { Mobile_number: last10 },
     ],
   });
 };
@@ -871,4 +872,4 @@ module.exports = {
   getAnalytics,
   verifyWebhook,
   receiveWebhook,
-};
+}; 
