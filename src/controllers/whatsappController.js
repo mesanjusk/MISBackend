@@ -163,11 +163,14 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 const findEmployeeByWhatsAppNumber = async (rawPhone) => {
   const normalizedPhone = normalizePhone(rawPhone);
   if (!normalizedPhone) return null;
+  const rawPhoneString = String(rawPhone || '').trim();
 
   return User.findOne({
     $or: [
+      { phone: rawPhoneString },
       { phone: normalizedPhone },
       { phone: `+${normalizedPhone}` },
+      { Mobile_number: rawPhoneString },
       { Mobile_number: normalizedPhone },
       { Mobile_number: `+${normalizedPhone}` },
     ],
@@ -181,8 +184,10 @@ const markWhatsAppStartAttendance = async (payload) => {
 
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
+    const eventTime = new Date();
+    const employeeUuid = String(employee?.User_uuid || employee?._id || '');
 
-    if (!employee) {
+    if (!employee || !employeeUuid) {
       await dispatchTextMessage({
         to: payload.from,
         body: 'Your number is not registered. Contact admin.',
@@ -191,16 +196,16 @@ const markWhatsAppStartAttendance = async (payload) => {
     }
 
     const attendanceResult = await markAttendance({
-      employeeUuid: employee.User_uuid,
+      employeeUuid,
       type: 'In',
       status: 'Active',
       source: 'whatsapp',
-      createdAt: new Date(),
+      createdAt: eventTime,
     });
 
     await User.updateOne(
       { _id: employee._id },
-      { $set: { lastCustomerMessageAt: new Date() } }
+      { $set: { lastCustomerMessageAt: eventTime } }
     );
 
     await dispatchTextMessage({
@@ -213,7 +218,7 @@ const markWhatsAppStartAttendance = async (payload) => {
     return { handled: true };
   } catch (error) {
     console.error('[whatsapp] Failed to process START/HI attendance:', error);
-    return { handled: true };
+    return { handled: false };
   }
 };
 
