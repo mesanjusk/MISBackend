@@ -217,7 +217,7 @@ const markWhatsAppStartAttendance = async (payload) => {
     }
 
     const attendanceResult = await markAttendance({
-      employeeUuid: employee.User_uuid, // ✅ NOT _id
+      employeeUuid,
       type: 'In',
       status: 'Active',
       source: 'whatsapp',
