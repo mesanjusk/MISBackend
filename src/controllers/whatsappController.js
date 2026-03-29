@@ -220,7 +220,7 @@ const markWhatsAppStartAttendance = async (payload) => {
     const attendanceResult = await markAttendance({
       employeeUuid,
       type: 'In',
-      status: 'Active',
+      status: 'Present',
       source: 'whatsapp',
       createdAt: eventTime,
     });
