@@ -2,12 +2,16 @@ const mongoose = require('mongoose');
 
 const UsersSchema = new mongoose.Schema({
   User_uuid: { type: String },
+  employeeId: { type: String },
+  name: { type: String },
+  phone: { type: String, unique: true, sparse: true },
   User_name: { type: String, required: true },
   Password: { type: String, required: true },
   Mobile_number: { type: String, required: true, unique: true },  // ✅ String and unique
   User_group: { type: String, required: true },
   Amount: { type: Number, required: true },
   AccountID: { type: String },
+  lastCustomerMessageAt: { type: Date },
 
   Allowed_Task_Groups: {
     type: [String],

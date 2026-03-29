@@ -8,6 +8,8 @@ const CampaignMessageStatus = require('../repositories/CampaignMessageStatus');
 const Contact = require('../repositories/contact');
 const Customers = require('../repositories/customer');
 const Enquiry = require('../repositories/enquiry');
+const User = require('../repositories/users');
+const { markAttendance } = require('../services/attendanceService');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
@@ -29,11 +31,6 @@ const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
   return Number.isNaN(parsedTimestamp) ? new Date() : new Date(parsedTimestamp * 1000);
 };
-
-const START_MENU_TEXT = String(
-  process.env.WHATSAPP_START_MENU ||
-    'Welcome! Reply with: 1) New Order 2) Track Order 3) Talk to Sales'
-).trim();
 
 const extractIncomingMessageData = (message = {}) => {
   const messageType = String(message?.type || 'text').toLowerCase();
@@ -161,6 +158,63 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
   });
 
   return { customer: customerDoc.toObject ? customerDoc.toObject() : customerDoc, createdEnquiry: true };
+};
+
+const findEmployeeByWhatsAppNumber = async (rawPhone) => {
+  const normalizedPhone = normalizePhone(rawPhone);
+  if (!normalizedPhone) return null;
+
+  return User.findOne({
+    $or: [
+      { phone: normalizedPhone },
+      { phone: `+${normalizedPhone}` },
+      { Mobile_number: normalizedPhone },
+      { Mobile_number: `+${normalizedPhone}` },
+    ],
+  });
+};
+
+const markWhatsAppStartAttendance = async (payload) => {
+  const incomingText = String(payload?.message || '').trim().toLowerCase();
+  const isAttendanceTrigger = payload?.type === 'text' && (incomingText === 'start' || incomingText === 'hi');
+  if (!isAttendanceTrigger) return { handled: false };
+
+  try {
+    const employee = await findEmployeeByWhatsAppNumber(payload?.from);
+
+    if (!employee) {
+      await dispatchTextMessage({
+        to: payload.from,
+        body: 'Your number is not registered. Contact admin.',
+      });
+      return { handled: true };
+    }
+
+    const attendanceResult = await markAttendance({
+      employeeUuid: employee.User_uuid,
+      type: 'In',
+      status: 'Active',
+      source: 'whatsapp',
+      createdAt: new Date(),
+    });
+
+    await User.updateOne(
+      { _id: employee._id },
+      { $set: { lastCustomerMessageAt: new Date() } }
+    );
+
+    await dispatchTextMessage({
+      to: payload.from,
+      body: attendanceResult.created
+        ? '✅ Attendance marked. Work started.'
+        : 'ℹ️ You already marked attendance today.',
+    });
+
+    return { handled: true };
+  } catch (error) {
+    console.error('[whatsapp] Failed to process START/HI attendance:', error);
+    return { handled: true };
+  }
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -694,11 +748,8 @@ const receiveWebhook = (req, res) => {
 
           if (!isDuplicate && payload.type === 'text') {
             try {
-              if (String(payload.message || '').trim().toLowerCase() === 'start') {
-                await dispatchTextMessage({
-                  to: payload.from,
-                  body: START_MENU_TEXT,
-                });
+              const attendanceTriggerResult = await markWhatsAppStartAttendance(payload);
+              if (attendanceTriggerResult.handled) {
                 continue;
               }
 
