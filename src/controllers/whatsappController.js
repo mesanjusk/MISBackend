@@ -161,19 +161,24 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 };
 
 const findEmployeeByWhatsAppNumber = async (rawPhone) => {
-  const normalizedPhone = normalizePhone(rawPhone); // 919876543210
+  const normalizedPhone = normalizePhone(rawPhone); // 919372333633
   if (!normalizedPhone) return null;
 
-  const last10 = normalizedPhone.slice(-10); // 9876543210
+  const last10 = normalizedPhone.slice(-10); // 9372333633
+  const last10Number = Number(last10); // 🔥 convert to number
 
   return User.findOne({
     $or: [
       { phone: normalizedPhone },
       { phone: `+${normalizedPhone}` },
       { phone: last10 },
-      { Mobile_number: normalizedPhone },
-      { Mobile_number: `+${normalizedPhone}` },
+
+      // 🔥 FIX: match number type
+      { Mobile_number: last10Number },
+
+      // fallback (string match if exists somewhere)
       { Mobile_number: last10 },
+      { Mobile_number: normalizedPhone }
     ],
   });
 };
