@@ -161,21 +161,41 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 };
 
 const findEmployeeByWhatsAppNumber = async (rawPhone) => {
-  const normalizedPhone = normalizePhone(rawPhone); // 919876543210
-  if (!normalizedPhone) return null;
+  if (!rawPhone) return null;
 
-  const last10 = normalizedPhone.slice(-10); // 9876543210
+  const digitsOnly = String(rawPhone).replace(/\D/g, ""); // 919876543210
+  const last10 = digitsOnly.slice(-10); // 9876543210
 
-  return User.findOne({
+  console.log("📞 Incoming:", rawPhone);
+  console.log("🔍 digitsOnly:", digitsOnly, "last10:", last10);
+
+  const employee = await User.findOne({
     $or: [
-      { phone: normalizedPhone },
-      { phone: `+${normalizedPhone}` },
-      { phone: last10 },
-      { Mobile_number: normalizedPhone },
-      { Mobile_number: `+${normalizedPhone}` },
+      { Mobile_number: digitsOnly },
       { Mobile_number: last10 },
+      { phone: digitsOnly },
+      { phone: last10 },
     ],
   });
+
+  // 🔥 EXTRA SAFE FALLBACK (THIS FIXES YOUR ISSUE)
+  if (!employee) {
+    const allUsers = await User.find({}).select("Mobile_number phone name");
+
+    const found = allUsers.find((u) => {
+      const dbNumber = String(u.Mobile_number || u.phone || "").replace(/\D/g, "");
+      return dbNumber.endsWith(last10);
+    });
+
+    if (found) {
+      console.log("✅ Found via fallback:", found.name);
+      return found;
+    }
+  }
+
+  console.log("👤 Employee Found:", employee ? employee.name : "NOT FOUND");
+
+  return employee;
 };
 
 const markWhatsAppStartAttendance = async (payload) => {
