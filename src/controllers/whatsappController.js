@@ -161,11 +161,17 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 };
 
 const findEmployeeByWhatsAppNumber = async (rawPhone) => {
-  const normalizedPhone = normalizePhone(rawPhone); // 919372333633
+  const normalizePhoneForLookup = (phone) => String(phone || '').replace(/\D/g, '');
+  const normalizedPhone = normalizePhoneForLookup(rawPhone); // 919372333633
   if (!normalizedPhone) return null;
 
   const last10 = normalizedPhone.slice(-10); // 9372333633
-  const last10Number = Number(last10); // 🔥 convert to number
+  const last10Number = Number(last10);
+
+  console.log('Incoming:', rawPhone);
+  console.log('Normalized:', normalizedPhone);
+  console.log('Last10:', last10);
+  console.log('Last10Number:', last10Number);
 
   return User.findOne({
     $or: [
@@ -173,12 +179,14 @@ const findEmployeeByWhatsAppNumber = async (rawPhone) => {
       { phone: `+${normalizedPhone}` },
       { phone: last10 },
 
-      // 🔥 FIX: match number type
       { Mobile_number: last10Number },
 
-      // fallback (string match if exists somewhere)
       { Mobile_number: last10 },
-      { Mobile_number: normalizedPhone }
+      {
+        $expr: {
+          $eq: [{ $toString: '$Mobile_number' }, last10],
+        },
+      },
     ],
   });
 };
@@ -190,6 +198,7 @@ const markWhatsAppStartAttendance = async (payload) => {
 
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
+    console.log('Employee found:', employee?._id);
     const eventTime = new Date();
     const employeeUuid = String(employee?.User_uuid || employee?._id || '');
 
@@ -214,12 +223,37 @@ const markWhatsAppStartAttendance = async (payload) => {
       { $set: { lastCustomerMessageAt: eventTime } }
     );
 
-    await dispatchTextMessage({
-      to: payload.from,
-      body: attendanceResult.created
-        ? '✅ Attendance marked. Work started.'
-        : 'ℹ️ You already marked attendance today.',
-    });
+    if (attendanceResult.created) {
+      const today = new Date();
+      const formattedDate = `${String(today.getDate()).padStart(2, '0')}:${String(today.getMonth() + 1).padStart(2, '0')}:${today.getFullYear()}`;
+
+      try {
+        await dispatchTemplateMessage({
+          to: payload.from,
+          templateName: 'attendance_confirmation',
+          language: 'en_US',
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: employee.name || employee.User_name || 'User' },
+                { type: 'text', text: formattedDate },
+              ],
+            },
+          ],
+        });
+      } catch (err) {
+        await dispatchTextMessage({
+          to: payload.from,
+          body: '✅ Attendance marked successfully.',
+        });
+      }
+    } else {
+      await dispatchTextMessage({
+        to: payload.from,
+        body: 'ℹ️ You already marked attendance today.',
+      });
+    }
 
     return { handled: true };
   } catch (error) {
