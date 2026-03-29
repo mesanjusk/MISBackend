@@ -206,7 +206,7 @@ const markWhatsAppStartAttendance = async (payload) => {
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
     const eventTime = new Date();
-    const employeeUuid = String(employee?.User_uuid || employee?._id || '');
+    const employeeUuid = String(employee?.User_uuid || employee?.User_uuid || '');
 
     if (!employee || !employeeUuid) {
       await dispatchTextMessage({
@@ -219,7 +219,7 @@ const markWhatsAppStartAttendance = async (payload) => {
     const attendanceResult = await markAttendance({
       employeeUuid,
       type: 'In',
-      status: 'Active',
+      status: 'Present',
       source: 'whatsapp',
       createdAt: eventTime,
     });
