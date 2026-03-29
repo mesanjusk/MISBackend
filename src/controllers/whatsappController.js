@@ -200,7 +200,7 @@ const markWhatsAppStartAttendance = async (payload) => {
 
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
-    console.log('Employee found:', employee?._id);
+    console.log('Employee:', employee?._id || null);
     const getISTDate = () => {
       return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     };
@@ -288,6 +288,9 @@ const getFlowReply = async (message) => {
     ) || null;
 
   if (!matchedFlow) return null;
+
+  const replyText = String(matchedFlow.replyText || '').trim();
+  if (replyText) return replyText;
 
   const startNode =
     (matchedFlow.nodes || []).find((node) => node?.isStart && (node?.type === 'message' || node?.type === 'text')) ||
@@ -827,9 +830,7 @@ const receiveWebhook = (req, res) => {
           if (!isDuplicate && payload.type === 'text') {
             try {
               const userMessage = String(payload?.text || payload?.message || '').trim().toLowerCase();
-              const employee = await findEmployeeByWhatsAppNumber(payload?.from);
               console.log('Incoming message:', userMessage);
-              console.log('Employee:', employee?._id || null);
 
               const attendanceTriggerResult = await markWhatsAppStartAttendance(payload);
               if (attendanceTriggerResult.handled) {
