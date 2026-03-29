@@ -3,6 +3,7 @@ const router = express.Router();
 const Attendance = require("../repositories/attendance");
 const User = require("../repositories/users");
 const { markAttendance } = require("../services/attendanceService");
+const { formatIST } = require("../utils/dateTime");
 
 // Add attendance entry (keeps the existing functionality)
 router.post('/addAttendance', async (req, res) => {
@@ -53,7 +54,21 @@ router.get("/GetAttendanceList", async (req, res) => {
   try {
     const data = await Attendance.find({});
     if (data.length > 0) {
-      res.json({ success: true, result: data });
+      const result = data.map((record) => {
+        const recordObj = record.toObject ? record.toObject() : record;
+        return {
+          ...recordObj,
+          User: Array.isArray(recordObj.User)
+            ? recordObj.User.map((entry) => ({
+                ...entry,
+                ist: formatIST(entry?.CreatedAt),
+              }))
+            : [],
+          createdAtIST: formatIST(recordObj.createdAt),
+          updatedAtIST: formatIST(recordObj.updatedAt),
+        };
+      });
+      res.json({ success: true, result });
     } else {
       res.json({ success: false, message: "Details not found" });
     }
@@ -86,7 +101,13 @@ router.get('/getLastIn/:userName', async (req, res) => {
 
     const lastIn = lastInRecord.User.filter(entry => entry.Type === "In").pop();
 
-    res.json({ success: true, lastIn });
+    res.json({
+      success: true,
+      lastIn: {
+        ...lastIn,
+        ist: formatIST(lastIn?.CreatedAt),
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

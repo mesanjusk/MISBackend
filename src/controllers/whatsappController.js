@@ -14,6 +14,8 @@ const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
 const { uploadWhatsAppMediaToCloudinary } = require('../services/whatsappMediaService');
+const Flow = require('../repositories/Flow');
+const { formatIST } = require('../utils/dateTime');
 
 const {
   WHATSAPP_ACCESS_TOKEN,
@@ -200,10 +202,10 @@ const markWhatsAppStartAttendance = async (payload) => {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
     console.log('Employee found:', employee?._id);
     const getISTDate = () => {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-};
+      return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    };
 
-const eventTime = getISTDate();
+    const eventTime = getISTDate();
     
     const employeeUuid = String(employee?.User_uuid || employee?._id || '');
 
@@ -265,6 +267,33 @@ const eventTime = getISTDate();
     console.error('[whatsapp] Failed to process START/HI attendance:', error);
     return { handled: false };
   }
+};
+
+const getFlowReply = async (message) => {
+  const normalizedMessage = String(message || '').trim().toLowerCase();
+  if (!normalizedMessage) return null;
+
+  const flows =
+    typeof Flow.findActiveFlows === 'function'
+      ? await Flow.findActiveFlows().lean()
+      : await Flow.find({ isActive: true }).sort({ createdAt: 1 }).lean();
+
+  const matchedFlow =
+    flows.find((flow) =>
+      Array.isArray(flow.triggerKeywords) &&
+      flow.triggerKeywords.some((keyword) => {
+        const normalizedKeyword = String(keyword || '').trim().toLowerCase();
+        return normalizedKeyword && normalizedMessage.includes(normalizedKeyword);
+      })
+    ) || null;
+
+  if (!matchedFlow) return null;
+
+  const startNode =
+    (matchedFlow.nodes || []).find((node) => node?.isStart && (node?.type === 'message' || node?.type === 'text')) ||
+    (matchedFlow.nodes || []).find((node) => node?.type === 'message' || node?.type === 'text');
+
+  return String(startNode?.message || '').trim() || null;
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -632,13 +661,12 @@ const getMessages = asyncHandler(async (req, res) => {
         const baseTime = message.timestamp || message.time || message.createdAt;
         const messageDate = baseTime ? new Date(baseTime) : null;
         const isValidDate = messageDate && !Number.isNaN(messageDate.getTime());
+        const ist = isValidDate ? formatIST(messageDate) : { date: '', time: '' };
 
         return {
           ...message,
-          formattedTime: isValidDate
-            ? messageDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-            : '',
-          groupedDate: isValidDate ? messageDate.toISOString().split('T')[0] : '',
+          formattedTime: ist.time,
+          groupedDate: ist.date,
         };
       })
     : rawMessages;
@@ -798,8 +826,24 @@ const receiveWebhook = (req, res) => {
 
           if (!isDuplicate && payload.type === 'text') {
             try {
+              const userMessage = String(payload?.text || payload?.message || '').trim().toLowerCase();
+              const employee = await findEmployeeByWhatsAppNumber(payload?.from);
+              console.log('Incoming message:', userMessage);
+              console.log('Employee:', employee?._id || null);
+
               const attendanceTriggerResult = await markWhatsAppStartAttendance(payload);
               if (attendanceTriggerResult.handled) {
+                continue;
+              }
+
+              const simpleFlowReply = await getFlowReply(userMessage);
+              console.log('Flow matched:', simpleFlowReply);
+
+              if (simpleFlowReply) {
+                await dispatchTextMessage({
+                  to: payload.from,
+                  body: simpleFlowReply,
+                });
                 continue;
               }
 
@@ -808,9 +852,15 @@ const receiveWebhook = (req, res) => {
                 sendText: dispatchTextMessage,
               });
 
-              if (!flowResult?.handled) {
-                await sendAutoReplyForIncomingMessage(payload);
+              if (flowResult?.handled) {
+                continue;
               }
+
+              await dispatchTextMessage({
+                to: payload.from,
+                body: 'Thanks for your message. We will get back to you shortly.',
+              });
+              continue;
             } catch (replyError) {
               console.error('[whatsapp] Failed to send auto reply:', replyError);
             }
