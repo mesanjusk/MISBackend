@@ -206,15 +206,16 @@ const markWhatsAppStartAttendance = async (payload) => {
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
     const eventTime = new Date();
-    const employeeUuid = String(employee?.User_uuid || employee?.User_uuid || '');
+    
+    if (!employee || !employee.User_uuid) {
+  await dispatchTextMessage({
+    to: payload.from,
+    body: '❌ Your number is not properly configured. Contact admin.',
+  });
+  return { handled: true };
+}
 
-    if (!employee || !employeeUuid) {
-      await dispatchTextMessage({
-        to: payload.from,
-        body: 'Your number is not registered. Contact admin.',
-      });
-      return { handled: true };
-    }
+const employeeUuid = String(employee.User_uuid); // ✅ ONLY THIS
 
     const attendanceResult = await markAttendance({
       employeeUuid,
@@ -231,9 +232,9 @@ const markWhatsAppStartAttendance = async (payload) => {
 
     await dispatchTextMessage({
       to: payload.from,
-      body: attendanceResult.created
-        ? '✅ Attendance marked. Work started.'
-        : 'ℹ️ You already marked attendance today.',
+     body: attendanceResult?.attendance
+  ? '✅ Attendance marked as Present.'
+  : 'ℹ️ Attendance already marked today.',
     });
 
     return { handled: true };
