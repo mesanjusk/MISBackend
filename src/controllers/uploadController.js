@@ -9,6 +9,10 @@ exports.uploadImage = async (req, res) => {
       return res.status(400).json({ message: 'No file provided' });
     }
 
+    if (!String(req.file.mimetype || '').startsWith('image/')) {
+      return res.status(400).json({ message: 'Only image files are supported' });
+    }
+
     localPath = req.file.path;
     console.log('Uploading file:', req.file);
 
