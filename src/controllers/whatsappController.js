@@ -161,41 +161,20 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
 };
 
 const findEmployeeByWhatsAppNumber = async (rawPhone) => {
-  if (!rawPhone) return null;
+  const normalizedPhone = normalizePhone(rawPhone);
+  if (!normalizedPhone) return null;
+  const rawPhoneString = String(rawPhone || '').trim();
 
-  const digitsOnly = String(rawPhone).replace(/\D/g, ""); // 919876543210
-  const last10 = digitsOnly.slice(-10); // 9876543210
-
-  console.log("📞 Incoming:", rawPhone);
-  console.log("🔍 digitsOnly:", digitsOnly, "last10:", last10);
-
-  const employee = await User.findOne({
+  return User.findOne({
     $or: [
-      { Mobile_number: digitsOnly },
-      { Mobile_number: last10 },
-      { phone: digitsOnly },
-      { phone: last10 },
+      { phone: rawPhoneString },
+      { phone: normalizedPhone },
+      { phone: `+${normalizedPhone}` },
+      { Mobile_number: rawPhoneString },
+      { Mobile_number: normalizedPhone },
+      { Mobile_number: `+${normalizedPhone}` },
     ],
   });
-
-  // 🔥 EXTRA SAFE FALLBACK (THIS FIXES YOUR ISSUE)
-  if (!employee) {
-    const allUsers = await User.find({}).select("Mobile_number phone name");
-
-    const found = allUsers.find((u) => {
-      const dbNumber = String(u.Mobile_number || u.phone || "").replace(/\D/g, "");
-      return dbNumber.endsWith(last10);
-    });
-
-    if (found) {
-      console.log("✅ Found via fallback:", found.name);
-      return found;
-    }
-  }
-
-  console.log("👤 Employee Found:", employee ? employee.name : "NOT FOUND");
-
-  return employee;
 };
 
 const markWhatsAppStartAttendance = async (payload) => {
@@ -206,21 +185,20 @@ const markWhatsAppStartAttendance = async (payload) => {
   try {
     const employee = await findEmployeeByWhatsAppNumber(payload?.from);
     const eventTime = new Date();
-    
-    if (!employee || !employee.User_uuid) {
-  await dispatchTextMessage({
-    to: payload.from,
-    body: '❌ Your number is not properly configured. Contact admin.',
-  });
-  return { handled: true };
-}
+    const employeeUuid = String(employee?.User_uuid || employee?._id || '');
 
-const employeeUuid = String(employee.User_uuid); // ✅ NO fallback now
+    if (!employee || !employeeUuid) {
+      await dispatchTextMessage({
+        to: payload.from,
+        body: 'Your number is not registered. Contact admin.',
+      });
+      return { handled: true };
+    }
 
     const attendanceResult = await markAttendance({
       employeeUuid,
       type: 'In',
-      status: 'Present',
+      status: 'Active',
       source: 'whatsapp',
       createdAt: eventTime,
     });
@@ -232,9 +210,9 @@ const employeeUuid = String(employee.User_uuid); // ✅ NO fallback now
 
     await dispatchTextMessage({
       to: payload.from,
-     body: attendanceResult?.attendance
-  ? '✅ Attendance marked as Present.'
-  : 'ℹ️ Attendance already marked today.',
+      body: attendanceResult.created
+        ? '✅ Attendance marked. Work started.'
+        : 'ℹ️ You already marked attendance today.',
     });
 
     return { handled: true };
