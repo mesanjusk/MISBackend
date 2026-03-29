@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const Orders = require('../repositories/order');
 const Transaction = require('../repositories/transaction');
+const { getDashboardSummary } = require('../controllers/dashboardSummaryController');
 
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
 const endOfDay   = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
@@ -29,6 +30,8 @@ function getRange(period) {
   // default: today
   return { from: startOfDay(now), to: endOfDay(now) };
 }
+
+router.get('/summary', getDashboardSummary);
 
 router.get('/:period', async (req, res) => {
   try {

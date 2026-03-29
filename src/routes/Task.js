@@ -2,9 +2,10 @@ const express = require("express");
 const router = express.Router();
 const Tasks = require("../repositories/tasks");
 const { v4: uuid } = require("uuid");
+const { createTask } = require("../services/taskService");
 
 router.post("/addTask", async (req, res) => {
-    const{Task_name, Task_group}=req.body
+    const{Task_name, Task_group, orderId, deadline, status}=req.body
 
     try{
         const check=await Tasks.findOne({ Task_name: Task_name })
@@ -16,7 +17,12 @@ router.post("/addTask", async (req, res) => {
           const newTask = new Tasks({
             Task_name,
             Task_group,
-            Task_uuid: uuid()
+            Task_uuid: uuid(),
+            orderId: orderId || null,
+            deadline: deadline || null,
+            status: ["pending", "in_progress", "done"].includes(String(status || "").toLowerCase())
+              ? String(status).toLowerCase()
+              : "pending"
         });
         await newTask.save(); 
         res.json("notexist");
@@ -28,6 +34,18 @@ router.post("/addTask", async (req, res) => {
       res.status(500).json("fail");
     }
   });
+
+router.post("/", async (req, res) => {
+  try {
+    const task = await createTask(req.body);
+    return res.status(201).json({ success: true, result: task });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to create task",
+    });
+  }
+});
 
 
 

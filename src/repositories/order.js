@@ -97,6 +97,33 @@ const OrdersSchema = new mongoose.Schema(
     // optional link to a transaction later
     billPaidTxnUuid: { type: String, default: null },
     billPaidTxnId: { type: Number, default: null },
+
+    // process lifecycle fields
+    stage: {
+      type: String,
+      enum: ["enquiry", "quoted", "approved", "design", "printing", "finishing", "ready", "delivered", "paid"],
+      default: "enquiry",
+      index: true,
+    },
+    stageHistory: {
+      type: [
+        new mongoose.Schema(
+          {
+            stage: {
+              type: String,
+              enum: ["enquiry", "quoted", "approved", "design", "printing", "finishing", "ready", "delivered", "paid"],
+              required: true,
+            },
+            timestamp: { type: Date, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: () => [{ stage: "enquiry", timestamp: new Date() }],
+    },
+    priority: { type: String, enum: ["low", "medium", "high"], default: "medium", index: true },
+    dueDate: { type: Date, default: null, index: true },
+    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "Users", default: null, index: true },
   },
   { timestamps: true }
 );
@@ -122,6 +149,11 @@ function recalcTotals(doc) {
 // Ensure UUID exists
 OrdersSchema.pre("validate", function (next) {
   if (!this.Order_uuid) this.Order_uuid = uuidv4();
+  if (!this.stage) this.stage = "enquiry";
+  if (!Array.isArray(this.stageHistory)) this.stageHistory = [];
+  if (this.stageHistory.length === 0) {
+    this.stageHistory.push({ stage: this.stage || "enquiry", timestamp: new Date() });
+  }
   next();
 });
 

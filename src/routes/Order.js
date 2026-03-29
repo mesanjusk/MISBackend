@@ -7,6 +7,7 @@ const Transaction = require("../repositories/transaction");
 const { v4: uuid } = require("uuid");
 // keep this import if you still use it elsewhere
 const { updateOrderStatus } = require("../controllers/orderController");
+const { patchOrderStage, listOrderTasks } = require("../controllers/orderLifecycleController");
 
 /* ----------------------- helpers ----------------------- */
 const isProd = process.env.NODE_ENV === "production";
@@ -152,6 +153,10 @@ router.post("/addOrder", async (req, res) => {
       Items = [],
       Type,
       isEnquiry,
+      stage = "enquiry",
+      priority = "medium",
+      dueDate = null,
+      assignedTo = null,
     } = req.body;
 
     // 🔎 Decide if this request is only an enquiry
@@ -224,6 +229,13 @@ router.post("/addOrder", async (req, res) => {
       Status: updatedStatus,
       Steps: flatSteps,
       Items: lineItems,
+      stage: String(stage || "enquiry").toLowerCase(),
+      stageHistory: [{ stage: String(stage || "enquiry").toLowerCase(), timestamp: new Date() }],
+      priority: ["low", "medium", "high"].includes(String(priority || "").toLowerCase())
+        ? String(priority).toLowerCase()
+        : "medium",
+      dueDate: dueDate || null,
+      assignedTo: assignedTo || null,
     });
 
     await newOrder.save();
@@ -239,6 +251,9 @@ router.post("/addOrder", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to add order" });
   }
 });
+
+router.patch("/:id/stage", patchOrderStage);
+router.get("/:id/tasks", listOrderTasks);
 
 /* ----------------------- UNIFIED VIEW ----------------------- */
 router.get("/all-data", async (req, res) => {

@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const Message = require('../repositories/Message');
 const CampaignMessageStatus = require('../repositories/CampaignMessageStatus');
 const Contact = require('../repositories/contact');
+const Customers = require('../repositories/customer');
+const Enquiry = require('../repositories/enquiry');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
@@ -26,6 +28,11 @@ const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
   return Number.isNaN(parsedTimestamp) ? new Date() : new Date(parsedTimestamp * 1000);
 };
+
+const START_MENU_TEXT = String(
+  process.env.WHATSAPP_START_MENU ||
+    'Welcome! Reply with: 1) New Order 2) Track Order 3) Talk to Sales'
+).trim();
 
 const extractIncomingMessageData = (message = {}) => {
   const messageType = String(message?.type || 'text').toLowerCase();
@@ -112,6 +119,46 @@ const upsertContactFromIncomingMessage = async (payload) => {
     },
     { upsert: true, new: false }
   );
+};
+
+const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
+  const phone = normalizePhone(payload?.from);
+  if (!phone) return { customer: null, createdEnquiry: false };
+
+  const existingCustomer = await Customers.findOne({ Mobile_number: phone }).lean();
+  if (existingCustomer) {
+    await Customers.updateOne(
+      { _id: existingCustomer._id },
+      { $set: { LastInteraction: payload?.timestamp || new Date() } }
+    );
+    return { customer: existingCustomer, createdEnquiry: false };
+  }
+
+  const customerName = `WhatsApp ${phone.slice(-4)}`;
+  const customerDoc = await Customers.create({
+    Customer_name: customerName,
+    Mobile_number: phone,
+    Customer_group: 'Customer',
+    Status: 'active',
+    Tags: ['whatsapp'],
+    LastInteraction: payload?.timestamp || new Date(),
+  });
+
+  const lastEnquiry = await Enquiry.findOne().sort({ Enquiry_Number: -1 }).lean();
+  const newEnquiryNumber = lastEnquiry ? lastEnquiry.Enquiry_Number + 1 : 1;
+  await Enquiry.create({
+    Enquiry_uuid: `WA-${Date.now()}-${phone}`,
+    Enquiry_Number: newEnquiryNumber,
+    Customer_name: customerDoc.Customer_name,
+    Priority: 'Normal',
+    Item: 'WhatsApp Enquiry',
+    Task: 'Enquiry',
+    Assigned: 'System',
+    Delivery_Date: new Date(),
+    Remark: String(payload?.message || payload?.body || 'Auto created from WhatsApp').slice(0, 2000),
+  });
+
+  return { customer: customerDoc.toObject ? customerDoc.toObject() : customerDoc, createdEnquiry: true };
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -623,6 +670,9 @@ const receiveWebhook = (req, res) => {
           upsertContactFromIncomingMessage(payload).catch((contactError) => {
             console.error('[whatsapp] Failed to upsert contact:', contactError);
           });
+          upsertCustomerAndEnquiryFromIncomingMessage(payload).catch((customerError) => {
+            console.error('[whatsapp] Failed to sync customer/enquiry:', customerError);
+          });
 
           const { message: savedMessage, isDuplicate } = await saveAndEmitMessage(payload);
 
@@ -637,6 +687,14 @@ const receiveWebhook = (req, res) => {
 
           if (!isDuplicate && payload.type === 'text') {
             try {
+              if (String(payload.message || '').trim().toLowerCase() === 'start') {
+                await dispatchTextMessage({
+                  to: payload.from,
+                  body: START_MENU_TEXT,
+                });
+                continue;
+              }
+
               const flowResult = await processIncomingMessageFlow({
                 payload,
                 sendText: dispatchTextMessage,

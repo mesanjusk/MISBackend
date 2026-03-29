@@ -4,6 +4,7 @@ const Customers = require("../repositories/customer");
 const { v4: uuid } = require("uuid");
 const Transaction = require("../repositories/transaction");
 const Order = require("../repositories/order");
+const { getCustomerTimeline } = require("../controllers/customerTimelineController");
 
 /* ----------------------- helpers ----------------------- */
 const S = (v) => String(v ?? "").trim();
@@ -214,6 +215,8 @@ router.get("/GetLinkedCustomerIds", async (req, res) => {
       .json({ success: false, message: "Server Error" });
   }
 });
+
+router.get("/:id/timeline", getCustomerTimeline);
 
 /* ----------------------------------------------------------------
    Get a specific customer by Mongo _id
