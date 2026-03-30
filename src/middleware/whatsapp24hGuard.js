@@ -29,9 +29,7 @@ const resolveConversationKeys = (req) => {
 };
 
 const buildIncomingFilter = ({ phone, contactId, conversationId }) => {
-  const incomingDirectionFilter = {
-    $or: [{ direction: 'incoming' }, { fromMe: false }],
-  };
+  const incomingDirectionFilters = [{ direction: 'incoming' }, { fromMe: false }];
 
   const identityFilters = [];
 
@@ -60,8 +58,7 @@ const buildIncomingFilter = ({ phone, contactId, conversationId }) => {
   if (!identityFilters.length) return null;
 
   return {
-    ...incomingDirectionFilter,
-    $or: identityFilters,
+    $and: [{ $or: incomingDirectionFilters }, { $or: identityFilters }],
   };
 };
 
