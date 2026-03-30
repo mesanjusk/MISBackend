@@ -15,6 +15,7 @@ const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/aut
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
 const { uploadWhatsAppMediaToCloudinary } = require('../services/whatsappMediaService');
 const Flow = require('../repositories/Flow');
+const AutoReply = require('../repositories/AutoReply');
 const { formatIST } = require('../utils/dateTime');
 
 const {
@@ -278,25 +279,41 @@ const getFlowReply = async (message) => {
       ? await Flow.findActiveFlows().lean()
       : await Flow.find({ isActive: true }).sort({ createdAt: 1 }).lean();
 
+  let matchedKeyword = '';
   const matchedFlow =
     flows.find((flow) =>
       Array.isArray(flow.triggerKeywords) &&
       flow.triggerKeywords.some((keyword) => {
         const normalizedKeyword = String(keyword || '').trim().toLowerCase();
-        return normalizedKeyword && normalizedMessage.includes(normalizedKeyword);
+        const isMatched = normalizedKeyword && normalizedMessage.toLowerCase().includes(normalizedKeyword.toLowerCase());
+        if (isMatched && !matchedKeyword) matchedKeyword = normalizedKeyword;
+        return isMatched;
       })
     ) || null;
 
   if (!matchedFlow) return null;
 
   const replyText = String(matchedFlow.replyText || '').trim();
-  if (replyText) return replyText;
+  if (replyText) {
+    return {
+      flowId: String(matchedFlow._id || ''),
+      matchedKeyword,
+      replyText,
+    };
+  }
 
   const startNode =
     (matchedFlow.nodes || []).find((node) => node?.isStart && (node?.type === 'message' || node?.type === 'text')) ||
     (matchedFlow.nodes || []).find((node) => node?.type === 'message' || node?.type === 'text');
 
-  return String(startNode?.message || '').trim() || null;
+  const fallbackReplyText = String(startNode?.message || '').trim();
+  if (!fallbackReplyText) return null;
+
+  return {
+    flowId: String(matchedFlow._id || ''),
+    matchedKeyword,
+    replyText: fallbackReplyText,
+  };
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -523,7 +540,10 @@ const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
   const incomingText = String(incomingPayload.message || '').trim();
   if (!incomingText) return;
 
+  console.log('[whatsapp] Auto reply resolver input:', incomingText);
   const matchedRule = await resolveAutoReplyRule(incomingText);
+  console.log('[whatsapp] Auto reply matched keyword:', matchedRule?.keyword || null);
+  console.log('[whatsapp] Auto reply DB result:', matchedRule || null);
   const fallbackReply = String(
     process.env.WHATSAPP_FALLBACK_REPLY || 'Thanks for your message. We will get back to you shortly.'
   ).trim();
@@ -555,6 +575,37 @@ const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
     body: reply,
   });
 };
+
+const createAutoReplyRule = asyncHandler(async (req, res) => {
+  console.log('Incoming Auto Reply:', req.body);
+  const {
+    keyword,
+    reply,
+    matchType = 'contains',
+    replyType = 'text',
+    isActive = true,
+    delaySeconds = null,
+  } = req.body || {};
+
+  if (!keyword || !String(keyword).trim() || !reply || !String(reply).trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'keyword and reply are required',
+    });
+  }
+
+  const savedRule = await AutoReply.create({
+    keyword: String(keyword).trim(),
+    reply: String(reply).trim(),
+    matchType,
+    replyType,
+    isActive: typeof isActive === 'boolean' ? isActive : true,
+    delaySeconds,
+  });
+
+  console.log('[whatsapp] Auto reply save DB result:', savedRule);
+  return res.status(201).json({ success: true, data: savedRule });
+});
 
 const sendText = asyncHandler(async (req, res) => {
   const { to, body } = req.body;
@@ -647,15 +698,35 @@ const sendMessage = asyncHandler(async (req, res) => {
 });
 
 const getTemplates = asyncHandler(async (_req, res) => {
-  const response = await axios.get(
-    `https://graph.facebook.com/${RESOLVED_API_VERSION}/${process.env.WHATSAPP_BUSINESS_ACCOUNT_ID}/message_templates`,
-    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}` } }
-  );
+  const wabaId = String(process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '').trim();
+  const accessToken = String(WHATSAPP_ACCESS_TOKEN || '').trim();
 
-  return res.status(200).json({
-    success: true,
-    templates: response.data.data || [],
-  });
+  if (!accessToken) {
+    return res.status(400).json({ success: false, error: 'Missing WhatsApp access token' });
+  }
+  if (!wabaId) {
+    return res.status(400).json({ success: false, error: 'Missing WhatsApp Business Account ID' });
+  }
+
+  try {
+    const response = await axios.get(
+      `https://graph.facebook.com/${RESOLVED_API_VERSION}/${wabaId}/message_templates`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    console.log('Templates API response:', response.data);
+    return res.status(200).json({
+      success: true,
+      templates: Array.isArray(response?.data?.data) ? response.data.data : [],
+    });
+  } catch (error) {
+    const apiError = error?.response?.data?.error;
+    console.error('[whatsapp] Template API failed:', error?.response?.data || error?.message || error);
+    return res.status(502).json({
+      success: false,
+      error: apiError?.message || 'Failed to load WhatsApp templates',
+    });
+  }
 });
 
 const getMessages = asyncHandler(async (req, res) => {
@@ -708,6 +779,7 @@ const verifyWebhook = (req, res) => {
 
 const receiveWebhook = (req, res) => {
   try {
+    console.log('Webhook event:', req.body);
     const enforceSignature =
       String(process.env.WHATSAPP_ENFORCE_WEBHOOK_SIGNATURE).toLowerCase() !== 'false';
 
@@ -838,22 +910,11 @@ const receiveWebhook = (req, res) => {
 
           if (!isDuplicate && payload.type === 'text') {
             try {
-              const userMessage = String(payload?.text || payload?.message || '').trim().toLowerCase();
+              const userMessage = String(payload?.text || payload?.message || '').trim();
               console.log('Incoming message:', userMessage);
 
               const attendanceTriggerResult = await markWhatsAppStartAttendance(payload);
               if (attendanceTriggerResult.handled) {
-                continue;
-              }
-
-              const simpleFlowReply = await getFlowReply(userMessage);
-              console.log('Flow matched:', simpleFlowReply);
-
-              if (simpleFlowReply) {
-                await dispatchTextMessage({
-                  to: payload.from,
-                  body: simpleFlowReply,
-                });
                 continue;
               }
 
@@ -863,13 +924,24 @@ const receiveWebhook = (req, res) => {
               });
 
               if (flowResult?.handled) {
+                console.log('[whatsapp] Triggered flow ID:', flowResult?.flowId || flowResult?.session?.flowId || null);
+                console.log('[whatsapp] Matched keyword:', flowResult?.matchedKeyword || null);
                 continue;
               }
 
-              await dispatchTextMessage({
-                to: payload.from,
-                body: 'Thanks for your message. We will get back to you shortly.',
-              });
+              const simpleFlowReply = await getFlowReply(userMessage);
+              console.log('Flow matched:', simpleFlowReply);
+              if (simpleFlowReply?.replyText) {
+                console.log('[whatsapp] Matched keyword:', simpleFlowReply.matchedKeyword || null);
+                console.log('[whatsapp] Triggered flow ID:', simpleFlowReply.flowId || null);
+                await dispatchTextMessage({
+                  to: payload.from,
+                  body: simpleFlowReply.replyText,
+                });
+                continue;
+              }
+
+              await sendAutoReplyForIncomingMessage(payload);
               continue;
             } catch (replyError) {
               console.error('[whatsapp] Failed to send auto reply:', replyError);
@@ -971,6 +1043,7 @@ module.exports = {
   sendTemplate,
   sendMedia,
   sendMessage,
+  createAutoReplyRule,
   getTemplates,
   getMessages,
   getAnalytics,

@@ -13,6 +13,7 @@ const {
   sendTemplate,
   sendMedia,
   sendMessage,
+  createAutoReplyRule,
   getTemplates,
   verifyWebhook,
   receiveWebhook,
@@ -41,6 +42,7 @@ router.post('/send-text', requireAuth, messagingLimiter, enforceWhatsApp24hWindo
 router.post('/send-template', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendTemplate);
 router.post('/send-media', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendMedia);
 router.post('/send-message', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendMessage);
+router.post('/auto-reply', requireAuth, createAutoReplyRule);
 
 // ---------- Templates ----------
 router.get('/templates', requireAuth, getTemplates);

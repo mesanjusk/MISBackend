@@ -10,6 +10,7 @@ const {
   sendText,
   sendTemplate,
   sendMedia,
+  createAutoReplyRule,
   getTemplates,
   verifyWebhook,
   receiveWebhook,
@@ -29,6 +30,7 @@ router.delete('/accounts/:id', deleteAccount);
 router.post('/send-text', enforceWhatsApp24hWindow, sendText);
 router.post('/send-template', enforceWhatsApp24hWindow, sendTemplate);
 router.post('/send-media', enforceWhatsApp24hWindow, sendMedia);
+router.post('/auto-reply', createAutoReplyRule);
 
 // Templates
 router.get('/templates', getTemplates);
