@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { enforceWhatsApp24hWindow } = require('../middleware/whatsapp24hGuard');
 
 const {
   exchangeMetaToken,
@@ -25,9 +26,9 @@ router.get('/accounts', listAccounts);
 router.delete('/accounts/:id', deleteAccount);
 
 // Messaging routes
-router.post('/send-text', sendText);
-router.post('/send-template', sendTemplate);
-router.post('/send-media', sendMedia);
+router.post('/send-text', enforceWhatsApp24hWindow, sendText);
+router.post('/send-template', enforceWhatsApp24hWindow, sendTemplate);
+router.post('/send-media', enforceWhatsApp24hWindow, sendMedia);
 
 // Templates
 router.get('/templates', getTemplates);

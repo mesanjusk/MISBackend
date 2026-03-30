@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
+const { enforceWhatsApp24hWindow } = require('../middleware/whatsapp24hGuard');
 
 const {
   exchangeMetaToken,
@@ -36,10 +37,10 @@ router.get('/accounts', listAccounts);
 router.delete('/accounts/:id', deleteAccount);
 
 // ---------- Messaging routes ----------
-router.post('/send-text', requireAuth, messagingLimiter, sendText);
-router.post('/send-template', requireAuth, messagingLimiter, sendTemplate);
-router.post('/send-media', requireAuth, messagingLimiter, sendMedia);
-router.post('/send-message', requireAuth, messagingLimiter, sendMessage);
+router.post('/send-text', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendText);
+router.post('/send-template', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendTemplate);
+router.post('/send-media', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendMedia);
+router.post('/send-message', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendMessage);
 
 // ---------- Templates ----------
 router.get('/templates', requireAuth, getTemplates);

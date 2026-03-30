@@ -630,8 +630,17 @@ const sendMessage = asyncHandler(async (req, res) => {
       filename: req.body.filename || 'document',
       caption: req.body.caption || '',
     });
+  } else if (type === 'template') {
+    const templateName = String(req.body.template_name || req.body.templateName || '').trim();
+    if (!templateName) throw new AppError('template_name is required for template type', 400);
+    data = await dispatchTemplateMessage({
+      to,
+      templateName,
+      language: req.body.language || 'en_US',
+      components: Array.isArray(req.body.components) ? req.body.components : [],
+    });
   } else {
-    throw new AppError('Unsupported type. Use text, image or document', 400);
+    throw new AppError('Unsupported type. Use text, image, document or template', 400);
   }
 
   return res.status(200).json({ success: true, data });
