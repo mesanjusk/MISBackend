@@ -1031,7 +1031,21 @@ const getAnalytics = asyncHandler(async (req, res) => {
 module.exports = {
   exchangeMetaToken: asyncHandler(async (_req, _res) => { /* stub */ }),
   manualConnect: asyncHandler(async (_req, _res) => { /* stub */ }),
-  listAccounts: asyncHandler(async (_req, _res) => { /* stub */ }),
+  listAccounts: asyncHandler(async (_req, res) => {
+  if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    return res.status(200).json({ success: true, data: [] });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: [
+      {
+        id: process.env.WHATSAPP_PHONE_NUMBER_ID,
+        status: 'connected',
+      },
+    ],
+  });
+}),
   deleteAccount: asyncHandler(async (_req, _res) => { /* stub */ }),
   sendText,
   sendTemplate,
