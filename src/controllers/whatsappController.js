@@ -588,10 +588,7 @@ const createAutoReplyRule = asyncHandler(async (req, res) => {
   } = req.body || {};
 
   if (!keyword || !String(keyword).trim() || !reply || !String(reply).trim()) {
-    return res.status(400).json({
-      success: false,
-      error: 'keyword and reply are required',
-    });
+    throw new AppError('keyword and reply are required', 400);
   }
 
   const savedRule = await AutoReply.create({
@@ -702,10 +699,10 @@ const getTemplates = asyncHandler(async (_req, res) => {
   const accessToken = String(WHATSAPP_ACCESS_TOKEN || '').trim();
 
   if (!accessToken) {
-    return res.status(400).json({ success: false, error: 'Missing WhatsApp access token' });
+    throw new AppError('Missing WhatsApp access token', 400);
   }
   if (!wabaId) {
-    return res.status(400).json({ success: false, error: 'Missing WhatsApp Business Account ID' });
+    throw new AppError('Missing WhatsApp Business Account ID', 400);
   }
 
   try {
@@ -722,10 +719,7 @@ const getTemplates = asyncHandler(async (_req, res) => {
   } catch (error) {
     const apiError = error?.response?.data?.error;
     console.error('[whatsapp] Template API failed:', error?.response?.data || error?.message || error);
-    return res.status(502).json({
-      success: false,
-      error: apiError?.message || 'Failed to load WhatsApp templates',
-    });
+    throw new AppError(apiError?.message || 'Failed to load WhatsApp templates', 502);
   }
 });
 
