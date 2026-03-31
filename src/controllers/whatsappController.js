@@ -14,6 +14,11 @@ const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
 const { uploadWhatsAppMediaToCloudinary } = require('../services/whatsappMediaService');
+const {
+  checkWhatsAppHealth,
+  classifyWhatsAppApiError,
+  validateWhatsAppConfig,
+} = require('../services/whatsappHealthService');
 const Flow = require('../repositories/Flow');
 const AutoReply = require('../repositories/AutoReply');
 const { formatIST } = require('../utils/dateTime');
@@ -28,7 +33,52 @@ const {
 const SUPPORTED_INCOMING_TYPES = new Set(['text', 'image', 'video', 'document', 'audio', 'sticker']);
 const RESOLVED_API_VERSION = WHATSAPP_API_VERSION || 'v19.0';
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
-const graphUrl = `https://graph.facebook.com/${RESOLVED_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'audio', 'document', 'template']);
+
+const ensureWhatsAppMessagingConfig = () => {
+  const config = validateWhatsAppConfig();
+  if (!config.ok) {
+    throw new AppError('Missing WhatsApp configuration', 400);
+  }
+
+  return config;
+};
+
+const normalizeWhatsAppApiError = (error, fallbackMessage = 'WhatsApp API request failed') => {
+  const normalized = classifyWhatsAppApiError(error);
+  const statusCode = normalized.code === 'INVALID_CONFIG' ? 400 : normalized.code === 'TOKEN_EXPIRED' ? 401 : 502;
+
+  if (normalized.code === 'TOKEN_EXPIRED') {
+    console.error('[whatsapp] token issue detected:', error?.response?.status || error?.message);
+  } else if (normalized.code === 'NETWORK_ERROR') {
+    console.error('[whatsapp] network/API failure:', error?.response?.status || error?.message);
+  }
+
+  const sanitizedMessage =
+    normalized.code === 'TOKEN_EXPIRED'
+      ? 'WhatsApp authorization failed'
+      : normalized.code === 'INVALID_CONFIG'
+      ? 'Missing WhatsApp configuration'
+      : fallbackMessage;
+
+  return new AppError(sanitizedMessage, statusCode);
+};
+
+const callWhatsAppMessagesApi = async (payload, { fallbackMessage } = {}) => {
+  const { accessToken, graphVersion, phoneNumberId } = ensureWhatsAppMessagingConfig();
+
+  try {
+    const response = await axios.post(
+      `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`,
+      payload,
+      { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+
+    return response.data;
+  } catch (error) {
+    throw normalizeWhatsAppApiError(error, fallbackMessage || 'Failed to send WhatsApp message');
+  }
+};
 
 const parseWebhookTimestamp = (timestampInSeconds) => {
   const parsedTimestamp = Number(timestampInSeconds);
@@ -322,18 +372,17 @@ const dispatchTextMessage = async ({ to, body }) => {
   const normalizedTo = normalizePhone(to);
   if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
 
-  const response = await axios.post(
-    graphUrl,
+  const data = await callWhatsAppMessagesApi(
     {
       messaging_product: 'whatsapp',
       to: normalizedTo,
       type: 'text',
       text: { body },
     },
-    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+    { fallbackMessage: 'Failed to send WhatsApp text message' }
   );
 
-  const metaMessageId = response?.data?.messages?.[0]?.id || '';
+  const metaMessageId = data?.messages?.[0]?.id || '';
 
   await saveAndEmitMessage({
     fromMe: true,
@@ -350,7 +399,7 @@ const dispatchTextMessage = async ({ to, body }) => {
     messageId: metaMessageId,
   });
 
-  return response.data;
+  return data;
 };
 
 const dispatchMediaMessage = async ({ to, type, link, caption = '', filename = '' }) => {
@@ -377,11 +426,8 @@ const dispatchMediaMessage = async ({ to, type, link, caption = '', filename = '
     [type]: mediaNode,
   };
 
-  const response = await axios.post(graphUrl, payload, {
-    headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-  });
-
-  const metaMessageId = response?.data?.messages?.[0]?.id || '';
+  const data = await callWhatsAppMessagesApi(payload, { fallbackMessage: 'Failed to send WhatsApp media message' });
+  const metaMessageId = data?.messages?.[0]?.id || '';
 
   await saveAndEmitMessage({
     fromMe: true,
@@ -401,15 +447,14 @@ const dispatchMediaMessage = async ({ to, type, link, caption = '', filename = '
     messageId: metaMessageId,
   });
 
-  return response.data;
+  return data;
 };
 
 const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', components = [] }) => {
   const normalizedTo = normalizePhone(to);
   if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
 
-  const response = await axios.post(
-    graphUrl,
+  const data = await callWhatsAppMessagesApi(
     {
       messaging_product: 'whatsapp',
       to: normalizedTo,
@@ -420,10 +465,10 @@ const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', c
         components,
       },
     },
-    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+    { fallbackMessage: 'Failed to send WhatsApp template message' }
   );
 
-  const metaMessageId = response?.data?.messages?.[0]?.id || '';
+  const metaMessageId = data?.messages?.[0]?.id || '';
 
   await saveAndEmitMessage({
     fromMe: true,
@@ -440,7 +485,7 @@ const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', c
     messageId: metaMessageId,
   });
 
-  return response.data;
+  return data;
 };
 
 const normalizeStatus = (rawStatus) => {
@@ -590,6 +635,18 @@ const createAutoReplyRule = asyncHandler(async (req, res) => {
   if (!keyword || !String(keyword).trim() || !reply || !String(reply).trim()) {
     throw new AppError('keyword and reply are required', 400);
   }
+  if (!['exact', 'contains'].includes(String(matchType))) {
+    throw new AppError('Invalid matchType', 400);
+  }
+  if (!['text', 'template'].includes(String(replyType))) {
+    throw new AppError('Invalid replyType', 400);
+  }
+  if (delaySeconds !== null && delaySeconds !== undefined) {
+    const parsedDelay = Number(delaySeconds);
+    if (!Number.isFinite(parsedDelay) || parsedDelay < 0 || parsedDelay > 30) {
+      throw new AppError('delaySeconds must be between 0 and 30', 400);
+    }
+  }
 
   const savedRule = await AutoReply.create({
     keyword: String(keyword).trim(),
@@ -663,6 +720,10 @@ const sendMessage = asyncHandler(async (req, res) => {
   if (!to || !type) throw new AppError('to and type are required', 400);
 
   let data;
+  if (!MESSAGE_TYPES.has(String(type))) {
+    throw new AppError('Unsupported type. Use text, image, document or template', 400);
+  }
+
   if (type === 'text') {
     if (!req.body.text) throw new AppError('text is required for text type', 400);
     data = await dispatchTextMessage({ to, body: req.body.text });
@@ -705,21 +766,28 @@ const getTemplates = asyncHandler(async (_req, res) => {
     throw new AppError('Missing WhatsApp Business Account ID', 400);
   }
 
-  try {
-    const response = await axios.get(
+  const fetchTemplatesFromApi = async () =>
+    axios.get(
       `https://graph.facebook.com/${RESOLVED_API_VERSION}/${wabaId}/message_templates`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 15000 }
     );
 
-    console.log('Templates API response:', response.data);
+  try {
+    let response;
+    try {
+      response = await fetchTemplatesFromApi();
+    } catch (firstError) {
+      console.error('[whatsapp] Template API first attempt failed:', firstError?.response?.status || firstError?.message);
+      response = await fetchTemplatesFromApi();
+    }
+
     return res.status(200).json({
       success: true,
       templates: Array.isArray(response?.data?.data) ? response.data.data : [],
     });
   } catch (error) {
-    const apiError = error?.response?.data?.error;
-    console.error('[whatsapp] Template API failed:', error?.response?.data || error?.message || error);
-    throw new AppError(apiError?.message || 'Failed to load WhatsApp templates', 502);
+    console.error('[whatsapp] Template API failed:', error?.response?.status || error?.message);
+    throw normalizeWhatsAppApiError(error, 'Failed to load WhatsApp templates');
   }
 });
 
@@ -1032,20 +1100,24 @@ module.exports = {
   exchangeMetaToken: asyncHandler(async (_req, _res) => { /* stub */ }),
   manualConnect: asyncHandler(async (_req, _res) => { /* stub */ }),
   listAccounts: asyncHandler(async (_req, res) => {
-  if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
-    return res.status(200).json({ success: true, data: [] });
-  }
+    const config = validateWhatsAppConfig();
+    if (!config.ok) {
+      return res.status(200).json({ success: true, data: [] });
+    }
 
-  return res.status(200).json({
-    success: true,
-    data: [
-      {
-        id: process.env.WHATSAPP_PHONE_NUMBER_ID,
-        status: 'connected',
-      },
-    ],
-  });
-}),
+    const health = await checkWhatsAppHealth();
+
+    return res.status(200).json({
+      success: true,
+      data: [
+        {
+          id: process.env.WHATSAPP_PHONE_NUMBER_ID,
+          status: health.isConnected ? 'connected' : 'disconnected',
+          ...(health.reason ? { reason: health.reason } : {}),
+        },
+      ],
+    });
+  }),
   deleteAccount: asyncHandler(async (_req, _res) => { /* stub */ }),
   sendText,
   sendTemplate,
