@@ -33,7 +33,7 @@ const {
 const SUPPORTED_INCOMING_TYPES = new Set(['text', 'image', 'video', 'document', 'audio', 'sticker']);
 const RESOLVED_API_VERSION = WHATSAPP_API_VERSION || 'v19.0';
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
-const MESSAGE_TYPES = new Set(['text', 'image', 'video', 'audio', 'document', 'template']);
+const MESSAGE_TYPES = new Set(['text', 'image', 'document', 'template']);
 
 const ensureWhatsAppMessagingConfig = () => {
   const config = validateWhatsAppConfig();
@@ -1113,7 +1113,6 @@ module.exports = {
         {
           id: process.env.WHATSAPP_PHONE_NUMBER_ID,
           status: health.isConnected ? 'connected' : 'disconnected',
-          ...(health.reason ? { reason: health.reason } : {}),
         },
       ],
     });
