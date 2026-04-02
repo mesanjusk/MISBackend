@@ -11,9 +11,9 @@ const { updateOrderStatus } = require("../controllers/orderController");
 const { patchOrderStage, listOrderTasks } = require("../controllers/orderLifecycleController");
 const Customers = require("../repositories/customer");
 const {
-  copyOrderTemplateFile,
+  copyOrderTemplateFileOAuth,
   isDriveAutomationEnabled,
-} = require("../services/googleDriveService");
+} = require("../services/googleDriveOAuthService");
 
 /* ----------------------- helpers ----------------------- */
 const isProd = process.env.NODE_ENV === "production";
@@ -289,7 +289,7 @@ router.post("/addOrder", async (req, res) => {
           throw new Error("Customer not found for drive file copy");
         }
 
-        const copiedFile = await copyOrderTemplateFile({
+        const copiedFile = await copyOrderTemplateFileOAuth({
           templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID,
           targetFolderId: process.env.DRIVE_TARGET_FOLDER_ID,
           orderNumber: newOrderNumber,

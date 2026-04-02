@@ -37,6 +37,7 @@ const Dashboard = require("./routes/Dashboard");
 const WhatsAppCloud = require("./routes/WhatsAppCloud");
 const Contacts = require("./routes/Contact");
 const webhookRouter = require("./routes/webhook");
+const googleDriveOAuthRoutes = require("./routes/googleDriveOAuth");
 const FlowRouter = require("./routes/Flow");
 const {
   verifyWebhook,
@@ -122,6 +123,7 @@ app.use("/usertask", Usertasks);
 app.use("/paymentfollowup", paymentFollowupRouter);
 app.use("/dashboard", Dashboard);
 app.use("/contacts", Contacts);
+app.use("/api/google-drive", googleDriveOAuthRoutes);
 app.use("/", FlowRouter);
 
 // ---------- Init DB ---------
