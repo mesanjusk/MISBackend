@@ -295,6 +295,7 @@ router.post("/addOrder", async (req, res) => {
           orderNumber: newOrderNumber,
           customerName: customer.Customer_name,
           description: String(topRemark || "").trim(),
+          mobileNumber: customer.Mobile_number || "",
         });
 
         driveFile = {
@@ -334,8 +335,8 @@ router.post("/addOrder", async (req, res) => {
       message: isEnquiryOnly
         ? "Enquiry added successfully"
         : driveFile.status === "created"
-        ? "Order added successfully and Drive file created"
-        : "Order added successfully",
+          ? "Order added successfully and Drive file created"
+          : "Order added successfully",
       orderId: newOrder._id,
       orderNumber: newOrderNumber,
       result: savedOrder,
@@ -665,16 +666,16 @@ router.get("/GetBillListPaged", async (req, res) => {
 
       ...(rx
         ? [
-            {
-              $match: {
-                $or: [
-                  { Customer_uuid: rx },
-                  { "Items.Remark": rx },
-                  ...(Number.isFinite(Number(search)) ? [{ Order_Number: Number(search) }] : []),
-                ],
-              },
+          {
+            $match: {
+              $or: [
+                { Customer_uuid: rx },
+                { "Items.Remark": rx },
+                ...(Number.isFinite(Number(search)) ? [{ Order_Number: Number(search) }] : []),
+              ],
             },
-          ]
+          },
+        ]
         : []),
 
       { $sort: { Order_Number: -1 } },
