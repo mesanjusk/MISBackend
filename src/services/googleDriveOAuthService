@@ -37,6 +37,11 @@ async function saveGoogleTokensFromCode(code) {
   const oauth2Client = getOAuthClient();
 
   const { tokens } = await oauth2Client.getToken(code);
+
+  if (!tokens.refresh_token) {
+    throw new Error("Refresh token not received. Please reconnect.");
+  }
+
   oauth2Client.setCredentials(tokens);
 
   const oauth2 = google.oauth2({
@@ -46,32 +51,16 @@ async function saveGoogleTokensFromCode(code) {
 
   const userInfo = await oauth2.userinfo.get();
 
-  if (!tokens.refresh_token) {
-    const existing = await GoogleDriveToken.findOne({
-      provider: "google_drive",
-    }).lean();
-
-    if (!existing?.refreshToken) {
-      throw new Error("No refresh token received. Reconnect with prompt=consent.");
-    }
-  }
-
-  const existingToken = await GoogleDriveToken.findOne({
-    provider: "google_drive",
-  }).lean();
-
-  const refreshToken = tokens.refresh_token || existingToken?.refreshToken;
-
   await GoogleDriveToken.findOneAndUpdate(
     { provider: "google_drive" },
     {
       provider: "google_drive",
       email: userInfo?.data?.email || null,
-      refreshToken,
+      refreshToken: tokens.refresh_token,
       accessToken: tokens.access_token || null,
       expiryDate: tokens.expiry_date || null,
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, new: true }
   );
 
   return {
@@ -90,22 +79,10 @@ async function getAuthorizedDriveClient() {
   }
 
   const oauth2Client = getOAuthClient();
+
   oauth2Client.setCredentials({
     refresh_token: saved.refreshToken,
   });
-
-  const refreshed = await oauth2Client.refreshAccessToken();
-  const credentials = refreshed?.credentials || oauth2Client.credentials || {};
-
-  await GoogleDriveToken.updateOne(
-    { provider: "google_drive" },
-    {
-      $set: {
-        accessToken: credentials.access_token || null,
-        expiryDate: credentials.expiry_date || null,
-      },
-    }
-  );
 
   return google.drive({
     version: "v3",
