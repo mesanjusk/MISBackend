@@ -42,20 +42,11 @@ async function saveGoogleTokensFromCode(code) {
     throw new Error("Refresh token not received. Please reconnect.");
   }
 
-  oauth2Client.setCredentials(tokens);
-
-  const oauth2 = google.oauth2({
-    auth: oauth2Client,
-    version: "v2",
-  });
-
-  const userInfo = await oauth2.userinfo.get();
-
   await GoogleDriveToken.findOneAndUpdate(
     { provider: "google_drive" },
     {
       provider: "google_drive",
-      email: userInfo?.data?.email || null,
+      email: null,
       refreshToken: tokens.refresh_token,
       accessToken: tokens.access_token || null,
       expiryDate: tokens.expiry_date || null,
@@ -64,7 +55,7 @@ async function saveGoogleTokensFromCode(code) {
   );
 
   return {
-    email: userInfo?.data?.email || null,
+    email: null,
     connected: true,
   };
 }
@@ -79,7 +70,6 @@ async function getAuthorizedDriveClient() {
   }
 
   const oauth2Client = getOAuthClient();
-
   oauth2Client.setCredentials({
     refresh_token: saved.refreshToken,
   });
