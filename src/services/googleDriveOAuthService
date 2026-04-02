@@ -99,7 +99,7 @@ async function copyOrderTemplateFileOAuth({
 
   const safeOrderNo = sanitizeFileName(orderNumber);
   const safeCustomerName = sanitizeFileName(customerName || "Customer");
-  const fileName = `${safeOrderNo} - ${safeCustomerName}`;
+  const fileName = `${safeOrderNo} - ${safeCustomerName}.cdr`;
 
   const requestBody = {
     name: fileName,
