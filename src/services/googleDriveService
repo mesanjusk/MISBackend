@@ -1,0 +1,101 @@
+const fs = require("fs");
+const path = require("path");
+const { google } = require("googleapis");
+
+function getServiceAccountCredentials() {
+  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+  if (rawJson && rawJson.trim().startsWith("{")) {
+    try {
+      return JSON.parse(rawJson);
+    } catch (error) {
+      throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_JSON");
+    }
+  }
+
+  const keyPathValue = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
+  if (!keyPathValue) {
+    throw new Error(
+      "Missing Google service account credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_KEY_PATH"
+    );
+  }
+
+  const resolvedPath = path.resolve(process.cwd(), keyPathValue);
+
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Service account key file not found at: ${resolvedPath}`);
+  }
+
+  try {
+    const fileContent = fs.readFileSync(resolvedPath, "utf8");
+    return JSON.parse(fileContent);
+  } catch (error) {
+    throw new Error("Invalid service account key file JSON");
+  }
+}
+
+async function getDriveClient() {
+  const credentials = getServiceAccountCredentials();
+
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
+
+  return google.drive({
+    version: "v3",
+    auth,
+  });
+}
+
+function sanitizeFileName(value = "") {
+  return String(value)
+    .replace(/[\\/:*?"<>|#%{}~&]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDriveAutomationEnabled() {
+  return String(process.env.DRIVE_AUTO_COPY_ON_ORDER || "false").toLowerCase() === "true";
+}
+
+async function copyOrderTemplateFile({
+  templateFileId,
+  targetFolderId,
+  orderNumber,
+  customerName,
+  description,
+}) {
+  if (!templateFileId) {
+    throw new Error("Missing DRIVE_TEMPLATE_FILE_ID");
+  }
+
+  const drive = await getDriveClient();
+
+  const safeOrderNo = sanitizeFileName(orderNumber);
+  const safeCustomerName = sanitizeFileName(customerName || "Customer");
+  const fileName = `${safeOrderNo} - ${safeCustomerName}`;
+
+  const requestBody = {
+    name: fileName,
+    description: String(description || "").trim(),
+  };
+
+  if (targetFolderId) {
+    requestBody.parents = [targetFolderId];
+  }
+
+  const response = await drive.files.copy({
+    fileId: templateFileId,
+    supportsAllDrives: true,
+    requestBody,
+    fields: "id,name,description,parents,webViewLink,webContentLink",
+  });
+
+  return response.data;
+}
+
+module.exports = {
+  isDriveAutomationEnabled,
+  copyOrderTemplateFile,
+};
