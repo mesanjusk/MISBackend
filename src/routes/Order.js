@@ -289,14 +289,23 @@ router.post("/addOrder", async (req, res) => {
           throw new Error("Customer not found for drive file copy");
         }
 
-        const copiedFile = await copyOrderTemplateFileOAuth({
-          templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID,
-          targetFolderId: process.env.DRIVE_TARGET_FOLDER_ID,
-          orderNumber: newOrderNumber,
-          customerName: customer.Customer_name,
-          description: String(topRemark || "").trim(),
-          mobileNumber: customer.Mobile_number || "",
-        });
+        const finalDescription =
+  String(topRemark || "").trim() ||
+  (lineItems?.[0]?.Remark || "").trim() ||
+  "Work";
+
+const shortDescription = finalDescription.slice(0, 40);
+
+  
+const copiedFile = await copyOrderTemplateFileOAuth({
+  templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID,
+  targetFolderId: process.env.DRIVE_TARGET_FOLDER_ID,
+  orderNumber: newOrderNumber,
+  customerName: customer.Customer_name,
+  description: finalDescription,
+  mobileNumber: customer.Mobile_number || "",
+});
+
 
         driveFile = {
           status: "created",
