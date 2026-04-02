@@ -1,37 +1,26 @@
-const fs = require("fs");
-const path = require("path");
 const { google } = require("googleapis");
 
 function getServiceAccountCredentials() {
   const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 
-  if (rawJson && rawJson.trim().startsWith("{")) {
-    try {
-      return JSON.parse(rawJson);
-    } catch (error) {
-      throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_JSON");
-    }
+  if (!rawJson) {
+    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON");
   }
 
-  const keyPathValue = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
-  if (!keyPathValue) {
-    throw new Error(
-      "Missing Google service account credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_KEY_PATH"
-    );
-  }
-
-  const resolvedPath = path.resolve(process.cwd(), keyPathValue);
-
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(`Service account key file not found at: ${resolvedPath}`);
-  }
-
+  let credentials;
   try {
-    const fileContent = fs.readFileSync(resolvedPath, "utf8");
-    return JSON.parse(fileContent);
+    credentials = JSON.parse(rawJson);
   } catch (error) {
-    throw new Error("Invalid service account key file JSON");
+    throw new Error("Invalid GOOGLE_SERVICE_ACCOUNT_JSON");
   }
+
+  if (!credentials.private_key) {
+    throw new Error("Missing private_key in GOOGLE_SERVICE_ACCOUNT_JSON");
+  }
+
+  credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+
+  return credentials;
 }
 
 async function getDriveClient() {
