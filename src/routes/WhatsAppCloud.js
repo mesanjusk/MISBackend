@@ -22,6 +22,7 @@ const {
   getAutoReplyRules,
   receiveWebhook,
   getMessages,
+  markConversationRead,
   getAnalytics,
 } = require('../controllers/whatsappController');
 
@@ -79,6 +80,7 @@ router.get('/templates', requireAuth, getTemplates);
 
 // ---------- Messages API ----------
 router.get('/messages', requireAuth, getMessages);
+router.patch('/messages/read', requireAuth, markConversationRead);
 router.get('/analytics', requireAuth, getAnalytics);
 
 // ---------- Webhook (no auth) ----------

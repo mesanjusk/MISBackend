@@ -47,6 +47,37 @@ const RESOLVED_API_VERSION = WHATSAPP_API_VERSION || 'v19.0';
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
 const MESSAGE_TYPES = new Set(['text', 'image', 'document', 'template']);
 
+const resolveConversationIdentifiers = (rawPhone) => {
+  const raw = String(rawPhone || '').trim();
+  const digits = normalizePhone(raw);
+  if (!raw && !digits) return [];
+  return [...new Set([raw, digits].filter(Boolean))];
+};
+
+const buildConversationFilter = (rawPhone) => {
+  const identifiers = resolveConversationIdentifiers(rawPhone);
+  if (identifiers.length === 0) return {};
+
+  return {
+    $or: [
+      { from: { $in: identifiers } },
+      { to: { $in: identifiers } },
+    ],
+  };
+};
+
+const buildUnreadIncomingFilter = (baseFilter = {}) => ({
+  $and: [
+    baseFilter,
+    {
+      $or: [{ direction: 'incoming' }, { fromMe: false }],
+    },
+    {
+      $or: [{ isRead: false }, { isRead: { $exists: false }, status: { $ne: 'read' } }],
+    },
+  ],
+});
+
 const ensureWhatsAppMessagingConfig = () => {
   const config = validateWhatsAppConfig();
   if (!config.ok) {
@@ -563,6 +594,16 @@ const persistStatusEvents = async (statusEvents = []) => {
 
     const timestamp = parseStatusTimestamp(statusEvent?.timestamp);
     const campaignId = String(statusEvent?.conversation?.id || '').trim();
+    const messageUpdateSet = {
+      status,
+      timestamp,
+      time: timestamp,
+    };
+
+    if (status === 'read') {
+      messageUpdateSet.isRead = true;
+      messageUpdateSet.readAt = timestamp;
+    }
 
     statusOps.push({
       updateOne: {
@@ -576,11 +617,7 @@ const persistStatusEvents = async (statusEvents = []) => {
       updateOne: {
         filter: { messageId },
         update: {
-          $set: {
-            status,
-            timestamp,
-            time: timestamp,
-          },
+          $set: messageUpdateSet,
         },
       },
     });
@@ -970,6 +1007,7 @@ const getMessages = asyncHandler(async (req, res) => {
   const sortOrder = String(req.query.sort || '').toLowerCase();
   const includeUiFields = String(req.query.includeUiFields || '').toLowerCase() === 'true';
   const includeUnreadCount = String(req.query.includeUnreadCount || '').toLowerCase() === 'true';
+  const conversationPhone = String(req.query.conversationPhone || req.query.chatWith || '').trim();
   const hasPaging = req.query.page !== undefined || req.query.limit !== undefined;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = hasPaging ? Math.min(200, Math.max(1, Number(req.query.limit) || 50)) : null;
@@ -980,21 +1018,17 @@ const getMessages = asyncHandler(async (req, res) => {
     ? { timestamp: -1, time: -1, createdAt: -1 }
     : { timestamp: 1, time: 1, createdAt: 1 };
 
-  const messageQuery = Message.find({}).sort(sort);
+  const baseFilter = buildConversationFilter(conversationPhone);
+  const messageQuery = Message.find(baseFilter).sort(sort);
   if (hasPaging && limit) {
     messageQuery.skip(skip).limit(limit);
   }
 
   const [rawMessages, total, unreadCount] = await Promise.all([
     messageQuery.lean(),
-    Message.countDocuments({}),
+    Message.countDocuments(baseFilter),
     includeUnreadCount
-      ? Message.countDocuments({
-          $and: [
-            { $or: [{ direction: 'incoming' }, { fromMe: false }] },
-            { status: { $ne: 'read' } },
-          ],
-        })
+      ? Message.countDocuments(buildUnreadIncomingFilter(baseFilter))
       : Promise.resolve(null),
   ]);
 
@@ -1028,6 +1062,36 @@ const getMessages = asyncHandler(async (req, res) => {
   }
 
   return res.json(payload);
+});
+
+const markConversationRead = asyncHandler(async (req, res) => {
+  const conversationPhone = String(
+    req.body?.conversationPhone || req.body?.chatWith || req.query?.conversationPhone || ''
+  ).trim();
+
+  if (!conversationPhone) {
+    throw new AppError('conversationPhone is required', 400);
+  }
+
+  const baseFilter = buildConversationFilter(conversationPhone);
+  const now = new Date();
+
+  const result = await Message.updateMany(buildUnreadIncomingFilter(baseFilter), {
+    $set: {
+      isRead: true,
+      readAt: now,
+      status: 'read',
+    },
+  });
+
+  const unreadCount = await Message.countDocuments(buildUnreadIncomingFilter(baseFilter));
+
+  return res.status(200).json({
+    success: true,
+    conversationPhone: normalizePhone(conversationPhone) || conversationPhone,
+    updatedCount: result.modifiedCount || result.nModified || 0,
+    unreadCount,
+  });
 });
 
 const verifyWebhook = (req, res) => {
@@ -1357,6 +1421,7 @@ module.exports = {
   getAutoReplyRules,
   getTemplates,
   getMessages,
+  markConversationRead,
   getAnalytics,
   verifyWebhook,
   receiveWebhook,

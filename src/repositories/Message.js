@@ -21,6 +21,14 @@ const messageSchema = new mongoose.Schema(
     time: Date,
     customerUuid: String,
     customerId: String,
+    isRead: {
+      type: Boolean,
+      default: null,
+    },
+    readAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );
@@ -66,6 +74,17 @@ messageSchema.pre('save', function syncLegacyFields(next) {
     this.time = this.timestamp;
   }
 
+  if (this.fromMe === true || this.direction === 'outgoing') {
+    this.isRead = true;
+    if (!this.readAt) {
+      this.readAt = this.timestamp || this.time || new Date();
+    }
+  } else if (this.fromMe === false || this.direction === 'incoming') {
+    if (typeof this.isRead === 'undefined' || this.isRead === null) {
+      this.isRead = false;
+    }
+  }
+
   next();
 });
 
@@ -75,5 +94,6 @@ messageSchema.index({ timestamp: 1 });
 messageSchema.index({ time: -1 });
 messageSchema.index({ messageId: 1 }, { sparse: true });
 messageSchema.index({ customerUuid: 1 });
+messageSchema.index({ from: 1, to: 1, isRead: 1, timestamp: -1 });
 
 module.exports = mongoose.model('Message', messageSchema);
