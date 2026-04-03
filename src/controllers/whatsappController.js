@@ -1064,6 +1064,97 @@ const getMessages = asyncHandler(async (req, res) => {
   return res.json(payload);
 });
 
+const listConversations = asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+  const skip = (page - 1) * limit;
+
+  const conversationPipeline = [
+    {
+      $addFields: {
+        conversationPhone: {
+          $cond: [
+            { $or: [{ $eq: ['$direction', 'incoming'] }, { $eq: ['$fromMe', false] }] },
+            '$from',
+            '$to',
+          ],
+        },
+        eventTime: { $ifNull: ['$timestamp', { $ifNull: ['$time', '$createdAt'] }] },
+        readState: {
+          $ifNull: ['$isRead', { $eq: ['$status', 'read'] }],
+        },
+      },
+    },
+    {
+      $match: {
+        conversationPhone: { $nin: [null, ''] },
+      },
+    },
+    {
+      $addFields: {
+        unreadFlag: {
+          $cond: [
+            {
+              $and: [
+                { $or: [{ $eq: ['$direction', 'incoming'] }, { $eq: ['$fromMe', false] }] },
+                { $ne: ['$readState', true] },
+              ],
+            },
+            1,
+            0,
+          ],
+        },
+      },
+    },
+    { $sort: { eventTime: -1, createdAt: -1 } },
+    {
+      $group: {
+        _id: '$conversationPhone',
+        lastMessageAt: { $first: '$eventTime' },
+        lastMessage: { $first: '$message' },
+        lastMessageType: { $first: '$type' },
+        unreadCount: { $sum: '$unreadFlag' },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        conversationPhone: '$_id',
+        normalizedPhone: {
+          $regexReplace: {
+            input: '$_id',
+            regex: '[^0-9]',
+            replacement: '',
+          },
+        },
+        lastMessageAt: 1,
+        lastMessage: 1,
+        lastMessageType: 1,
+        unreadCount: 1,
+      },
+    },
+    { $sort: { lastMessageAt: -1, normalizedPhone: 1 } },
+  ];
+
+  const [totalAgg, conversations] = await Promise.all([
+    Message.aggregate([...conversationPipeline, { $count: 'total' }]),
+    Message.aggregate([...conversationPipeline, { $skip: skip }, { $limit: limit }]),
+  ]);
+
+  const total = totalAgg?.[0]?.total || 0;
+
+  return res.status(200).json({
+    success: true,
+    data: conversations,
+    pagination: {
+      page,
+      limit,
+      total,
+      hasMore: skip + conversations.length < total,
+    },
+  });
+});
+
 const markConversationRead = asyncHandler(async (req, res) => {
   const conversationPhone = String(
     req.body?.conversationPhone || req.body?.chatWith || req.query?.conversationPhone || ''
@@ -1421,6 +1512,7 @@ module.exports = {
   getAutoReplyRules,
   getTemplates,
   getMessages,
+  listConversations,
   markConversationRead,
   getAnalytics,
   verifyWebhook,
