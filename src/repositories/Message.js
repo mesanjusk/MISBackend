@@ -21,6 +21,14 @@ const messageSchema = new mongoose.Schema(
     time: Date,
     customerUuid: String,
     customerId: String,
+
+    // NEW: interactive / flow support
+    interactiveType: String,
+    replyId: String,
+    replyTitle: String,
+    flowId: String,
+    flowToken: String,
+    flowResponseData: mongoose.Schema.Types.Mixed,
   },
   { timestamps: true }
 );
@@ -75,5 +83,7 @@ messageSchema.index({ timestamp: 1 });
 messageSchema.index({ time: -1 });
 messageSchema.index({ messageId: 1 }, { sparse: true });
 messageSchema.index({ customerUuid: 1 });
+messageSchema.index({ flowId: 1 });
+messageSchema.index({ flowToken: 1 });
 
 module.exports = mongoose.model('Message', messageSchema);

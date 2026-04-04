@@ -45,7 +45,7 @@ const SUPPORTED_INCOMING_TYPES = new Set([
 ]);
 const RESOLVED_API_VERSION = WHATSAPP_API_VERSION || 'v19.0';
 const normalizePhone = (to) => String(to || '').replace(/\D/g, '');
-const MESSAGE_TYPES = new Set(['text', 'image', 'document', 'template']);
+const MESSAGE_TYPES = new Set(['text', 'image', 'document', 'template', 'flow']);
 
 const ensureWhatsAppMessagingConfig = () => {
   const config = validateWhatsAppConfig();
@@ -108,6 +108,17 @@ const parseWebhookTimestamp = (timestampInSeconds) => {
   return Number.isNaN(parsedTimestamp) ? new Date() : new Date(parsedTimestamp * 1000);
 };
 
+const safeJsonParse = (value, fallback = null) => {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'object') return value;
+
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return fallback;
+  }
+};
+
 const extractIncomingMessageData = (message = {}) => {
   const messageType = String(message?.type || 'text').toLowerCase();
   const normalized = {
@@ -120,6 +131,12 @@ const extractIncomingMessageData = (message = {}) => {
     caption: '',
     filename: '',
     mimeType: '',
+    replyId: '',
+    replyTitle: '',
+    interactiveType: '',
+    flowId: '',
+    flowToken: '',
+    flowResponseData: null,
   };
 
   if (messageType === 'text') {
@@ -146,6 +163,47 @@ const extractIncomingMessageData = (message = {}) => {
     normalized.caption = String(mediaNode?.caption || '');
     normalized.filename = String(mediaNode?.filename || '');
     normalized.mimeType = String(mediaNode?.mime_type || '');
+    return normalized;
+  }
+
+  if (messageType === 'button') {
+    normalized.replyId = String(message?.button?.payload || '');
+    normalized.replyTitle = String(message?.button?.text || '');
+    normalized.content = normalized.replyTitle || normalized.replyId;
+    return normalized;
+  }
+
+  if (messageType === 'interactive') {
+    const interactive = message?.interactive || {};
+    const interactiveType = String(interactive?.type || '').toLowerCase();
+
+    normalized.interactiveType = interactiveType;
+
+    if (interactiveType === 'button_reply') {
+      normalized.replyId = String(interactive?.button_reply?.id || '');
+      normalized.replyTitle = String(interactive?.button_reply?.title || '');
+      normalized.content = normalized.replyTitle || normalized.replyId;
+      return normalized;
+    }
+
+    if (interactiveType === 'list_reply') {
+      normalized.replyId = String(interactive?.list_reply?.id || '');
+      normalized.replyTitle = String(interactive?.list_reply?.title || '');
+      normalized.content = normalized.replyTitle || normalized.replyId;
+      return normalized;
+    }
+
+    if (interactiveType === 'nfm_reply') {
+      const responseJson = safeJsonParse(interactive?.nfm_reply?.response_json, {});
+      normalized.flowResponseData = responseJson || {};
+      normalized.flowToken = String(responseJson?.flow_token || '');
+      normalized.flowId = String(responseJson?.flow_id || '');
+      normalized.content =
+        String(responseJson?.flow_cta || interactive?.nfm_reply?.name || 'Flow submitted');
+      return normalized;
+    }
+
+    normalized.content = 'Interactive message received';
     return normalized;
   }
 
@@ -536,6 +594,82 @@ const dispatchTemplateMessage = async ({ to, templateName, language = 'en_US', c
   return data;
 };
 
+const dispatchFlowMessage = async ({
+  to,
+  flowId,
+  flowToken = '',
+  flowCta = 'Open Form',
+  screen = '',
+  data = {},
+  mode = 'published',
+}) => {
+  const normalizedTo = normalizePhone(to);
+  if (!normalizedTo) throw new AppError('Invalid recipient number', 400);
+  if (!flowId) throw new AppError('flowId is required', 400);
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedTo,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      header: {
+        type: 'text',
+        text: 'Form',
+      },
+      body: {
+        text: 'Please fill this form.',
+      },
+      action: {
+        name: 'flow',
+        parameters: {
+          mode,
+          flow_message_version: '3',
+          flow_id: String(flowId),
+          flow_cta: String(flowCta || 'Open Form').slice(0, 20),
+          ...(flowToken ? { flow_token: String(flowToken) } : {}),
+          ...(screen
+            ? {
+                flow_action: 'navigate',
+                flow_action_payload: {
+                  screen,
+                  ...(data && Object.keys(data).length ? { data } : {}),
+                },
+              }
+            : {}),
+        },
+      },
+    },
+  };
+
+  const response = await callWhatsAppMessagesApi(payload, {
+    fallbackMessage: 'Failed to send WhatsApp flow message',
+  });
+
+  const metaMessageId = response?.messages?.[0]?.id || '';
+
+  await saveAndEmitMessage({
+    fromMe: true,
+    from: WHATSAPP_PHONE_NUMBER_ID || '',
+    to: normalizedTo,
+    message: `Flow: ${flowCta}`,
+    body: `Flow: ${flowCta}`,
+    timestamp: new Date(),
+    status: 'sent',
+    direction: 'outgoing',
+    type: 'flow',
+    text: `Flow: ${flowCta}`,
+    time: new Date(),
+    messageId: metaMessageId,
+    flowId: String(flowId),
+    flowToken: flowToken || '',
+    interactiveType: 'flow',
+  });
+
+  return response;
+};
+
 const normalizeStatus = (rawStatus) => {
   const normalized = String(rawStatus || '').toLowerCase();
   if (['sent', 'delivered', 'read', 'failed'].includes(normalized)) {
@@ -826,6 +960,37 @@ const sendTemplate = asyncHandler(async (req, res) => {
   return res.status(200).json({ success: true, data });
 });
 
+const sendFlow = asyncHandler(async (req, res) => {
+  const {
+    to,
+    flowId,
+    flowToken = '',
+    flowCta = 'Open Form',
+    screen = '',
+    data = {},
+    mode = 'published',
+  } = req.body || {};
+
+  if (!to || !flowId) {
+    throw new AppError('to and flowId are required', 400);
+  }
+
+  const result = await dispatchFlowMessage({
+    to,
+    flowId,
+    flowToken,
+    flowCta,
+    screen,
+    data,
+    mode,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 const sendMedia = asyncHandler(async (req, res) => {
   const { to, type, caption } = req.body;
 
@@ -886,7 +1051,7 @@ const sendMessage = asyncHandler(async (req, res) => {
   let data;
 
   if (!MESSAGE_TYPES.has(String(type))) {
-    throw new AppError('Unsupported type. Use text, image, document or template', 400);
+    throw new AppError('Unsupported type. Use text, image, document, template or flow', 400);
   }
 
   if (type === 'text') {
@@ -919,8 +1084,24 @@ const sendMessage = asyncHandler(async (req, res) => {
       language: req.body.language || 'en_US',
       components: Array.isArray(req.body.components) ? req.body.components : [],
     });
+  } else if (type === 'flow') {
+    const flowId = String(req.body.flowId || '').trim();
+    if (!flowId) throw new AppError('flowId is required for flow type', 400);
+
+    data = await dispatchFlowMessage({
+      to,
+      flowId,
+      flowToken: req.body.flowToken || '',
+      flowCta: req.body.flowCta || 'Open Form',
+      screen: req.body.screen || '',
+      data:
+        req.body.data && typeof req.body.data === 'object'
+          ? req.body.data
+          : {},
+      mode: req.body.mode || 'published',
+    });
   } else {
-    throw new AppError('Unsupported type. Use text, image, document or template', 400);
+    throw new AppError('Unsupported type. Use text, image, document, template or flow', 400);
   }
 
   return res.status(200).json({ success: true, data });
@@ -1115,22 +1296,28 @@ const receiveWebhook = (req, res) => {
           }
 
           const parsedTimestamp = parseWebhookTimestamp(normalized.timestamp);
+          const normalizedMessageText =
+            normalized.type === 'text' ||
+            normalized.type === 'button' ||
+            normalized.type === 'interactive'
+              ? normalized.content
+              : normalized.caption || normalized.mediaId;
+
           const payload = {
             fromMe: false,
             from: normalized.from || msg?.from || '',
             to: destinationNumber,
-            message:
-              normalized.type === 'text'
-                ? normalized.content
-                : normalized.caption || normalized.mediaId,
-            body:
-              normalized.type === 'text'
-                ? normalized.content
-                : normalized.caption || normalized.mediaId,
+            message: normalizedMessageText,
+            body: normalizedMessageText,
             timestamp: parsedTimestamp,
             status: 'received',
             direction: 'incoming',
-            text: normalized.type === 'text' ? normalized.content : '',
+            text:
+              normalized.type === 'text' ||
+              normalized.type === 'button' ||
+              normalized.type === 'interactive'
+                ? normalized.content
+                : '',
             time: parsedTimestamp,
             messageId: normalized.messageId,
             type: normalized.type,
@@ -1139,6 +1326,12 @@ const receiveWebhook = (req, res) => {
             filename: normalized.filename,
             mimeType: normalized.mimeType,
             mediaUrl: '',
+            interactiveType: normalized.interactiveType,
+            replyId: normalized.replyId,
+            replyTitle: normalized.replyTitle,
+            flowId: normalized.flowId,
+            flowToken: normalized.flowToken,
+            flowResponseData: normalized.flowResponseData,
           };
 
           incomingPayloads.push(payload);
@@ -1348,6 +1541,7 @@ module.exports = {
   deleteAccount: asyncHandler(async (_req, _res) => { /* stub */ }),
   sendText,
   sendTemplate,
+  sendFlow,
   sendMedia,
   sendMessage,
   createAutoReplyRule,
