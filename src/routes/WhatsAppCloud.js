@@ -11,6 +11,7 @@ const {
   deleteAccount,
   sendText,
   sendTemplate,
+  sendAdminAlert,
   sendFlow,
   sendMedia,
   sendMessage,
@@ -52,6 +53,7 @@ router.delete('/accounts/:id', deleteAccount);
 // ---------- Messaging routes ----------
 router.post('/send-text', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendText);
 router.post('/send-template', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendTemplate);
+router.post('/send-admin-alert', requireAuth, messagingLimiter, sendAdminAlert);
 router.post('/send-flow', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendFlow);
 
 router.post(

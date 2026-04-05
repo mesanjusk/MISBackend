@@ -915,6 +915,19 @@ const sendText = asyncHandler(async (req, res) => {
   return res.status(200).json({ success: true, data });
 });
 
+
+const sendAdminAlert = asyncHandler(async (req, res) => {
+  const target = String(req.body?.to || ADMIN_ALERT_PHONE || '').replace(/\D/g, '');
+  const body = String(req.body?.body || '').trim();
+
+  if (!target || !body) {
+    throw new AppError('to and body are required', 400);
+  }
+
+  const data = await dispatchTextMessage({ to: target, body });
+  return res.status(200).json({ success: true, data });
+});
+
 const getAutoReplyRules = asyncHandler(async (_req, res) => {
   const rules = await AutoReply.find().sort({ createdAt: -1 }).lean();
 
@@ -1541,6 +1554,7 @@ module.exports = {
   deleteAccount: asyncHandler(async (_req, _res) => { /* stub */ }),
   sendText,
   sendTemplate,
+  sendAdminAlert,
   sendFlow,
   sendMedia,
   sendMessage,
