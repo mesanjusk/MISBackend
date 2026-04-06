@@ -1,7 +1,15 @@
 module.exports = {
-  PAYMENT_RECEIVED_TEMPLATE: 'payment_received_sk',
+  AMOUNT_RECEIVED_TEMPLATE: 'amount_received_sk',
+  AMOUNT_PAID_TEMPLATE: 'amount_payment_sk',
   ORDER_CONFIRMATION_TEMPLATE: 'order_new_sk',
-  FOLLOWUP_TEMPLATE: 'payment_received_sk',
+  ORDER_COMPLETED_TEMPLATE: 'order_completed_sk',
+  FOLLOWUP_FRIENDLY_TEMPLATE: 'followup_friendly_sk',
+  FOLLOWUP_DUE_TODAY_TEMPLATE: 'followup_due_today_sk',
+  PURCHASE_ORDER_TEMPLATE: 'purchase_order_sk',
+  ATTENDANCE_MARKED_TEMPLATE: 'attendance_marked_sk',
+  TASK_ASSIGNED_TEMPLATE: 'task_assigned_sk',
+  OPENING_BALANCE_PAYABLE_TEMPLATE: 'opening_balance_payable_sk',
+  OPENING_BALANCE_RECEIVABLE_TEMPLATE: 'opening_balance_receivable_sk',
   DEFAULT_LANGUAGE: 'en_US',
   ADMIN_ALERT_PHONE: '919372333633',
 };
