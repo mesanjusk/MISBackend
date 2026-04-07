@@ -12,4 +12,17 @@ module.exports = {
   OPENING_BALANCE_RECEIVABLE_TEMPLATE: 'opening_balance_receivable_sk',
   DEFAULT_LANGUAGE: 'en_US',
   ADMIN_ALERT_PHONE: '919372333633',
+  TEMPLATE_VARIABLE_COUNTS: {
+    followup_friendly_sk: 4,
+    followup_due_today_sk: 4,
+    purchase_order_sk: 4,
+    attendance_marked_sk: 4,
+    task_assigned_sk: 5,
+    amount_payment_sk: 5,
+    amount_received_sk: 5,
+    opening_balance_payable_sk: 4,
+    opening_balance_receivable_sk: 4,
+    order_completed_sk: 2,
+    order_new_sk: 5,
+  },
 };
