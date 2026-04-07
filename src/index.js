@@ -38,6 +38,7 @@ const Contacts = require("./routes/Contact");
 const webhookRouter = require("./routes/webhook");
 const googleDriveOAuthRoutes = require("./routes/googleDriveOAuth");
 const FlowRouter = require("./routes/Flow");
+const UpiPayments = require("./routes/UpiPayments");
 const {
   verifyWebhook,
   receiveWebhook,
@@ -90,6 +91,7 @@ app.use("/api/paymentfollowup", paymentFollowupRouter);
 app.use("/api/dashboard", Dashboard);
 app.use("/api/whatsapp", WhatsAppCloud);
 app.use("/api/contacts", Contacts);
+app.use("/api/upi", UpiPayments);
 app.use("/api", FlowRouter);
 
 // ---------- WhatsApp webhook aliases ----------
