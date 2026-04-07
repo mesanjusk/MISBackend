@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const { v4: uuid } = require('uuid');
 const { requireAuth } = require('../middleware/auth');
 const AppError = require('../utils/AppError');
@@ -16,6 +17,10 @@ const parsePositiveAmount = (value) => {
   }
   return Number(amount.toFixed(2));
 };
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const normalizeStatus = (value) => toTrimmedString(value).toLowerCase();
 
 const buildUpiLink = ({ payeeUpiId, payeeName, amount, note, transactionRef, currency = 'INR' }) => {
   const params = new URLSearchParams({
@@ -48,11 +53,8 @@ router.post(
     if (!payeeName) throw new AppError('payeeName is required', 400);
     if (!transactionRef) throw new AppError('transactionRef is required', 400);
 
-    const existing = await UpiPaymentAttempt.findOne({ transactionRef }).lean();
-    if (existing) throw new AppError('transactionRef already exists', 409);
-
     const note = toTrimmedString(req.body.note);
-    const currency = toTrimmedString(req.body.currency).toUpperCase() || 'INR';
+    const currency = 'INR';
 
     const upiLink = buildUpiLink({
       payeeUpiId,
@@ -63,27 +65,35 @@ router.post(
       currency,
     });
 
-    const attempt = await UpiPaymentAttempt.create({
-      payment_uuid: uuid(),
-      customerId: toTrimmedString(req.body.customerId) || null,
-      customerName: toTrimmedString(req.body.customerName),
-      mobileNumber: toTrimmedString(req.body.mobileNumber),
-      relatedAccountId: toTrimmedString(req.body.relatedAccountId) || null,
-      relatedOrderId: toTrimmedString(req.body.relatedOrderId) || null,
-      amount,
-      currency,
-      note,
-      transactionRef,
-      payeeUpiId,
-      payeeName,
-      upiLink,
-      status: 'created',
-      initiationSource: 'dashboard',
-      initiatedBy: toTrimmedString(req.user?.id) || null,
-      appReturnPayload: req.body.appReturnPayload || null,
-      rawResponse: req.body.rawResponse || null,
-      metadata: req.body.metadata || null,
-    });
+    let attempt;
+    try {
+      attempt = await UpiPaymentAttempt.create({
+        payment_uuid: uuid(),
+        customerId: toTrimmedString(req.body.customerId) || null,
+        customerName: toTrimmedString(req.body.customerName),
+        mobileNumber: toTrimmedString(req.body.mobileNumber),
+        relatedAccountId: toTrimmedString(req.body.relatedAccountId) || null,
+        relatedOrderId: toTrimmedString(req.body.relatedOrderId) || null,
+        amount,
+        currency,
+        note,
+        transactionRef,
+        payeeUpiId,
+        payeeName,
+        upiLink,
+        status: 'created',
+        initiationSource: 'dashboard',
+        initiatedBy: toTrimmedString(req.user?.id) || null,
+        appReturnPayload: req.body.appReturnPayload || null,
+        rawResponse: req.body.rawResponse || null,
+        metadata: req.body.metadata || null,
+      });
+    } catch (error) {
+      if (error?.code === 11000 && error?.keyPattern?.transactionRef) {
+        throw new AppError('transactionRef already exists', 409);
+      }
+      throw error;
+    }
 
     return res.status(201).json({
       success: true,
@@ -96,7 +106,7 @@ router.post(
 router.get(
   '/payments',
   asyncHandler(async (req, res) => {
-    const status = toTrimmedString(req.query.status);
+    const status = normalizeStatus(req.query.status);
     const customerId = toTrimmedString(req.query.customerId);
 
     const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
@@ -152,7 +162,10 @@ router.get(
 router.get(
   '/payments/:id',
   asyncHandler(async (req, res) => {
-    const result = await UpiPaymentAttempt.findById(req.params.id).lean();
+    const { id } = req.params;
+    if (!isValidObjectId(id)) throw new AppError('Invalid payment attempt id', 400);
+
+    const result = await UpiPaymentAttempt.findById(id).lean();
 
     if (!result) throw new AppError('UPI payment attempt not found', 404);
 
@@ -163,7 +176,10 @@ router.get(
 router.patch(
   '/payments/:id/status',
   asyncHandler(async (req, res) => {
-    const status = toTrimmedString(req.body.status).toLowerCase();
+    const { id } = req.params;
+    if (!isValidObjectId(id)) throw new AppError('Invalid payment attempt id', 400);
+
+    const status = normalizeStatus(req.body.status);
 
     if (!ALLOWED_STATUSES.includes(status)) {
       throw new AppError('Invalid status', 400);
@@ -189,7 +205,7 @@ router.patch(
       update.metadata = req.body.metadata;
     }
 
-    const result = await UpiPaymentAttempt.findByIdAndUpdate(req.params.id, update, {
+    const result = await UpiPaymentAttempt.findByIdAndUpdate(id, update, {
       new: true,
       runValidators: true,
     }).lean();
