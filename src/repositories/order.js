@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 const { v4: uuidv4 } = require("uuid");
-
 /* ----------------------- Sub-schemas ----------------------- */
 
 // Status subdoc
@@ -50,6 +49,7 @@ stepSchema.pre("validate", function (next) {
 // Item subdoc
 const itemSchema = new mongoose.Schema(
   {
+    lineId: { type: String, default: uuidv4 },
     Item: { type: String, required: true },
     Quantity: { type: Number, required: true },
     Rate: { type: Number, required: true },
@@ -57,7 +57,7 @@ const itemSchema = new mongoose.Schema(
     Priority: { type: String, default: "Normal" },
     Remark: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: true }
 );
 
 /* ----------------------- Order schema ----------------------- */

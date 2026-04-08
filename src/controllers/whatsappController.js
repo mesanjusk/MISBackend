@@ -9,7 +9,6 @@ const Contact = require('../repositories/contact');
 const Customers = require('../repositories/customer');
 const Enquiry = require('../repositories/enquiry');
 const User = require('../repositories/users');
-const { markAttendance } = require('../services/attendanceService');
 const { emitNewMessage } = require('../socket');
 const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
@@ -23,6 +22,7 @@ const {
   validateWhatsAppConfig,
 } = require('../services/whatsappHealthService');
 const Flow = require('../repositories/Flow');
+const { processWhatsAppAttendanceCommand } = require('../services/whatsappAttendanceService');
 const AutoReply = require('../repositories/AutoReply');
 const { formatIST } = require('../utils/dateTime');
 
@@ -303,111 +303,14 @@ const upsertCustomerAndEnquiryFromIncomingMessage = async (payload) => {
   };
 };
 
-const findEmployeeByWhatsAppNumber = async (rawPhone) => {
-  const normalizePhoneForLookup = (phone) => String(phone || '').replace(/\D/g, '');
-  const normalizedPhone = normalizePhoneForLookup(rawPhone);
-  if (!normalizedPhone) return null;
-
-  const last10 = normalizedPhone.slice(-10);
-  const last10Number = Number(last10);
-
-  console.log('Incoming:', rawPhone);
-  console.log('Normalized:', normalizedPhone);
-  console.log('Last10:', last10);
-  console.log('Last10Number:', last10Number);
-
-  return User.findOne({
-    $or: [
-      { phone: normalizedPhone },
-      { phone: `+${normalizedPhone}` },
-      { phone: last10 },
-      { Mobile_number: last10Number },
-      { Mobile_number: last10 },
-      {
-        $expr: {
-          $eq: [{ $toString: '$Mobile_number' }, last10],
-        },
-      },
-    ],
-  });
-};
-
 const markWhatsAppStartAttendance = async (payload) => {
-  const incomingText = String(payload?.message || '').trim().toLowerCase();
-  const isAttendanceTrigger =
-    payload?.type === 'text' && (incomingText === 'start' || incomingText === 'hi');
-
-  if (!isAttendanceTrigger) return { handled: false };
-
   try {
-    const employee = await findEmployeeByWhatsAppNumber(payload?.from);
-    console.log('Employee:', employee?._id || null);
-
-    const getISTDate = () => {
-      return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    };
-
-    const eventTime = getISTDate();
-    const employeeUuid = String(employee?.User_uuid || employee?._id || '');
-
-    if (!employee || !employeeUuid) {
-      await dispatchTextMessage({
-        to: payload.from,
-        body: 'Your number is not registered. Contact admin.',
-      });
-      return { handled: true };
-    }
-
-    const attendanceResult = await markAttendance({
-      employeeUuid,
-      type: 'In',
-      status: 'Present',
-      source: 'whatsapp',
-      createdAt: eventTime,
+    return await processWhatsAppAttendanceCommand({
+      payload,
+      sendText: dispatchTextMessage,
     });
-
-    await User.updateOne(
-      { _id: employee._id },
-      { $set: { lastCustomerMessageAt: eventTime } }
-    );
-
-    if (attendanceResult.created) {
-      const today = new Date();
-      const formattedDate = `${String(today.getDate()).padStart(2, '0')}:${String(
-        today.getMonth() + 1
-      ).padStart(2, '0')}:${today.getFullYear()}`;
-
-      try {
-        await dispatchTemplateMessage({
-          to: payload.from,
-          templateName: 'attendance_confirmation',
-          language: 'en_US',
-          components: [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: employee.name || employee.User_name || 'User' },
-                { type: 'text', text: formattedDate },
-              ],
-            },
-          ],
-        });
-      } catch (_err) {
-        await dispatchTextMessage({
-          to: payload.from,
-          body: '✅ Attendance marked successfully.',
-        });
-      }
-    } else {
-      await dispatchTextMessage({
-        to: payload.from,
-        body: 'ℹ️ You already marked attendance today.',
-      });
-    }
-
-    return { handled: true };
   } catch (error) {
-    console.error('[whatsapp] Failed to process START/HI attendance:', error);
+    console.error('[whatsapp] Failed to process attendance command:', error);
     return { handled: false };
   }
 };

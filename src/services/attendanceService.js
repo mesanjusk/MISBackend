@@ -2,6 +2,7 @@ const { v4: uuid } = require('uuid');
 const Attendance = require('../repositories/attendance');
 
 const getTodayDateString = (date = new Date()) => date.toISOString().split('T')[0];
+const getDateOnly = (date = new Date()) => { const value = new Date(date); value.setHours(0,0,0,0); return value; };
 
 const getNextAttendanceRecordId = async () => {
   const lastAttendanceRecord = await Attendance.findOne().sort({ Attendance_Record_ID: -1 }).lean();
@@ -21,7 +22,7 @@ const markAttendance = async ({
     throw new Error('employeeUuid is required');
   }
 
-  const attendanceDate = getTodayDateString(createdAt);
+  const attendanceDate = getDateOnly(createdAt);
   const entryTime = time || new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const existingAttendance = await Attendance.findOne({
@@ -51,4 +52,5 @@ const markAttendance = async ({
 module.exports = {
   markAttendance,
   getTodayDateString,
+  getDateOnly,
 };

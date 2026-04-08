@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
     Time: { type: String, required: true },
     Type: { type: String, required: true },
+    SourceCommand: { type: String, default: '' },
     CreatedAt: { type: Date, required: true} 
 });
 
