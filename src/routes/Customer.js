@@ -8,6 +8,16 @@ const { getCustomerTimeline } = require("../controllers/customerTimelineControll
 
 /* ----------------------- helpers ----------------------- */
 const S = (v) => String(v ?? "").trim();
+const normalizePartyRoles = (roles = []) => {
+  const allowed = new Set(["customer", "vendor"]);
+  const normalized = Array.isArray(roles)
+    ? roles
+        .map((role) => String(role || "").trim().toLowerCase())
+        .filter((role) => allowed.has(role))
+    : [];
+
+  return normalized.length ? [...new Set(normalized)] : ["customer"];
+};
 
 /* ----------------------------------------------------------------
    ADD: ALIAS for frontends expecting /customer/GetCustomerList
@@ -22,6 +32,8 @@ router.get("/GetCustomerList", async (req, res) => {
         Customer_group: 1,
         Status: 1,
         Customer_uuid: 1,
+        Tags: 1,
+        PartyRoles: 1,
       })
       .sort({ Customer_name: 1 })
       .lean();
@@ -54,6 +66,7 @@ router.post("/addCustomer", async (req, res) => {
     Customer_group,
     Status,
     Tags,
+    PartyRoles,
     LastInteraction,
   } = req.body;
 
@@ -82,6 +95,7 @@ router.post("/addCustomer", async (req, res) => {
       Customer_group,
       Status,
       Tags,
+      PartyRoles: normalizePartyRoles(PartyRoles),
       LastInteraction,
       Customer_uuid: uuid(),
     });
@@ -254,6 +268,7 @@ router.put("/update/:id", async (req, res) => {
     Customer_group,
     Status,
     Tags,
+    PartyRoles,
     LastInteraction,
   } = req.body;
 
@@ -266,6 +281,7 @@ router.put("/update/:id", async (req, res) => {
         Customer_group,
         Status,
         Tags,
+        PartyRoles: normalizePartyRoles(PartyRoles),
         LastInteraction,
       },
       { new: true }

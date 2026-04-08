@@ -60,6 +60,30 @@ const itemSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const vendorAssignmentSchema = new mongoose.Schema(
+  {
+    assignmentId: { type: String, default: uuidv4 },
+    vendorCustomerUuid: { type: String, required: true },
+    vendorName: { type: String, required: true },
+    workType: { type: String, default: "General" },
+    note: { type: String, default: "" },
+    qty: { type: Number, default: 0, min: 0 },
+    amount: { type: Number, default: 0, min: 0 },
+    dueDate: { type: Date, default: null },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "partial", "paid"],
+      default: "pending",
+    },
+    status: {
+      type: String,
+      enum: ["pending", "in_progress", "completed"],
+      default: "pending",
+    },
+  },
+  { _id: true }
+);
+
 /* ----------------------- Order schema ----------------------- */
 
 const OrdersSchema = new mongoose.Schema(
@@ -71,6 +95,15 @@ const OrdersSchema = new mongoose.Schema(
     // DEPRECATED (kept for backward compatibility; prefer per-item fields)
     Priority: { type: String, default: undefined, select: false },
     Remark: { type: String, default: undefined, select: false },
+
+    orderMode: {
+      type: String,
+      enum: ["note", "items"],
+      default: "note",
+      index: true,
+    },
+    orderNote: { type: String, default: "" },
+    vendorAssignments: { type: [vendorAssignmentSchema], default: [] },
 
     Items: { type: [itemSchema], default: [] },
     Status: { type: [statusSchema], default: [] },
@@ -84,6 +117,7 @@ const OrdersSchema = new mongoose.Schema(
     // convenience totals
     saleSubtotal: { type: Number, default: 0 },
     stepsCostTotal: { type: Number, default: 0 },
+    vendorAssignmentsTotal: { type: Number, default: 0 },
 
     // BILL / PAYMENT STATUS
     billStatus: {
@@ -149,27 +183,27 @@ const OrdersSchema = new mongoose.Schema(
     },
     dueDate: { type: Date, default: null, index: true },
     assignedTo: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Users",
-  default: null,
-  index: true,
-},
-driveFile: {
-  status: {
-    type: String,
-    enum: ["pending", "created", "failed", "skipped"],
-    default: "pending",
-  },
-  templateFileId: { type: String, default: null },
-  fileId: { type: String, default: null },
-  folderId: { type: String, default: null },
-  name: { type: String, default: null },
-  description: { type: String, default: null },
-  webViewLink: { type: String, default: null },
-  webContentLink: { type: String, default: null },
-  error: { type: String, default: null },
-  createdAt: { type: Date, default: null },
-},
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Users",
+      default: null,
+      index: true,
+    },
+    driveFile: {
+      status: {
+        type: String,
+        enum: ["pending", "created", "failed", "skipped"],
+        default: "pending",
+      },
+      templateFileId: { type: String, default: null },
+      fileId: { type: String, default: null },
+      folderId: { type: String, default: null },
+      name: { type: String, default: null },
+      description: { type: String, default: null },
+      webViewLink: { type: String, default: null },
+      webContentLink: { type: String, default: null },
+      error: { type: String, default: null },
+      createdAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );
@@ -180,18 +214,24 @@ OrdersSchema.index({ Amount: 1 });
 OrdersSchema.index({ "Items.Item": 1 });
 OrdersSchema.index({ "Steps.vendorId": 1 });
 OrdersSchema.index({ "Steps.posting.isPosted": 1 });
+OrdersSchema.index({ "vendorAssignments.vendorCustomerUuid": 1 });
 OrdersSchema.index({ createdAt: -1 });
 
 /* ----------------------- Helpers ----------------------- */
 function recalcTotals(doc) {
   doc.saleSubtotal = (doc.Items || []).reduce((s, it) => s + (+it.Amount || 0), 0);
   doc.stepsCostTotal = (doc.Steps || []).reduce((s, st) => s + (+st.costAmount || 0), 0);
+  doc.vendorAssignmentsTotal = (doc.vendorAssignments || []).reduce(
+    (s, row) => s + (+row.amount || 0),
+    0
+  );
 }
 
 /* ----------------------- Hooks ----------------------- */
 OrdersSchema.pre("validate", function (next) {
   if (!this.Order_uuid) this.Order_uuid = uuidv4();
   if (!this.stage) this.stage = "enquiry";
+  if (!this.orderMode) this.orderMode = Array.isArray(this.Items) && this.Items.length ? "items" : "note";
   if (!Array.isArray(this.stageHistory)) this.stageHistory = [];
   if (this.stageHistory.length === 0) {
     this.stageHistory.push({ stage: this.stage || "enquiry", timestamp: new Date() });
@@ -211,6 +251,7 @@ OrdersSchema.post("findOneAndUpdate", async function (doc) {
     $set: {
       saleSubtotal: doc.saleSubtotal,
       stepsCostTotal: doc.stepsCostTotal,
+      vendorAssignmentsTotal: doc.vendorAssignmentsTotal,
     },
   });
 });

@@ -149,6 +149,37 @@ function normalizeSteps(steps) {
   }, []);
 }
 
+function normalizeVendorAssignments(assignments) {
+  if (!Array.isArray(assignments)) return [];
+  return assignments.reduce((acc, row) => {
+    const vendorCustomerUuid = norm(row?.vendorCustomerUuid || row?.vendorId || row?.Customer_uuid);
+    const vendorName = norm(row?.vendorName || row?.Customer_name || row?.name);
+    if (!vendorCustomerUuid || !vendorName) return acc;
+
+    const amount = Number(row?.amount ?? 0);
+    const qty = Number(row?.qty ?? 0);
+
+    acc.push({
+      assignmentId: norm(row?.assignmentId) || undefined,
+      vendorCustomerUuid,
+      vendorName,
+      workType: norm(row?.workType || row?.work || row?.label) || "General",
+      note: norm(row?.note || row?.remark || row?.description),
+      qty: Number.isFinite(qty) && qty >= 0 ? qty : 0,
+      amount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+      dueDate: row?.dueDate ? new Date(row.dueDate) : null,
+      paymentStatus: ["pending", "partial", "paid"].includes(String(row?.paymentStatus || "").toLowerCase())
+        ? String(row.paymentStatus).toLowerCase()
+        : "pending",
+      status: ["pending", "in_progress", "completed"].includes(String(row?.status || "").toLowerCase())
+        ? String(row.status).toLowerCase()
+        : "pending",
+    });
+
+    return acc;
+  }, []);
+}
+
 /* ----------------------- CREATE NEW ORDER ----------------------- */
 
 router.post("/addOrder", async (req, res) => {
@@ -158,6 +189,9 @@ router.post("/addOrder", async (req, res) => {
       Status = [{}],
       Steps = [],
       Items = [],
+      orderMode,
+      orderNote,
+      vendorAssignments = [],
       Type,
       isEnquiry,
       stage = "enquiry",
@@ -204,18 +238,17 @@ router.post("/addOrder", async (req, res) => {
     }
 
     const flatSteps = normalizeSteps(Steps);
+    const normalizedVendorAssignments = normalizeVendorAssignments(vendorAssignments);
+    const requestedOrderMode = String(orderMode || "").trim().toLowerCase();
+    const finalOrderMode = requestedOrderMode === "items" ? "items" : "note";
+    const normalizedOrderNote = norm(
+      orderNote || req.body?.Remark || req.body?.remark || req.body?.note || req.body?.comments || req.body?.description
+    );
     const lineItems = normalizeItems(Items);
 
-    const topRemark =
-      (req.body &&
-        (req.body.Remark ||
-          req.body.remark ||
-          req.body.note ||
-          req.body.comments ||
-          req.body.description)) ||
-      "";
+    const topRemark = normalizedOrderNote;
 
-    if (lineItems.length === 0 && String(topRemark).trim()) {
+    if (finalOrderMode === "note" && lineItems.length === 0 && String(topRemark).trim()) {
       lineItems.push({
         Item: "Order Note",
         Quantity: 0,
@@ -254,6 +287,9 @@ router.post("/addOrder", async (req, res) => {
       Order_Number: newOrderNumber,
       Customer_uuid,
       Status: updatedStatus,
+      orderMode: finalOrderMode,
+      orderNote: normalizedOrderNote,
+      vendorAssignments: normalizedVendorAssignments,
       Steps: flatSteps,
       Items: lineItems,
       stage: String(stage || "enquiry").toLowerCase(),
