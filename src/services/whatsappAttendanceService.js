@@ -2,6 +2,7 @@ const User = require('../repositories/users');
 const Attendance = require('../repositories/attendance');
 const { AppSetting } = require('../repositories/appSetting');
 const { markAttendance } = require('./attendanceService');
+const { getPendingOrdersForUser, buildTaskSummaryMessage, rolloverPendingOrders } = require('./orderTaskService');
 
 const SETTING_KEY = 'whatsapp_attendance_config';
 
@@ -241,6 +242,15 @@ async function processWhatsAppAttendanceCommand({ payload, sendText }) {
         name: employee.name || employee.User_name || 'User',
         command: incomingText,
       }),
+    });
+  }
+
+  if (attendanceType === 'In' && sendText) {
+    await rolloverPendingOrders();
+    const taskResult = await getPendingOrdersForUser(employee);
+    await sendText({
+      to: payload.from,
+      body: buildTaskSummaryMessage({ employee, orders: taskResult.orders }),
     });
   }
 
