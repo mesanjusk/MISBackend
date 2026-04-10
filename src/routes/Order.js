@@ -10,6 +10,7 @@ const { v4: uuid } = require("uuid");
 const { updateOrderStatus } = require("../controllers/orderController");
 const { patchOrderStage, listOrderTasks } = require("../controllers/orderLifecycleController");
 const Customers = require("../repositories/customer");
+const ItemsRepo = require("../repositories/items");
 const {
   copyOrderTemplateFileOAuth,
   isDriveAutomationEnabled,
@@ -188,6 +189,90 @@ function normalizeVendorAssignments(assignments) {
   }, []);
 }
 
+
+
+async function enrichOrderItemsAndBuildWorkRows(lineItems = [], inheritedDueDate = null) {
+  const itemNames = [...new Set(lineItems.map((row) => norm(row.Item)).filter(Boolean))];
+  const catalog = await ItemsRepo.find({ Item_name: { $in: itemNames } }).lean();
+  const byName = new Map(catalog.map((item) => [norm(item.Item_name), item]));
+  const workRows = [];
+
+  const enrichedItems = lineItems.map((row) => {
+    const itemDoc = byName.get(norm(row.Item));
+    const qty = Number(row.Quantity || 0);
+    const enriched = {
+      ...row,
+      Item_uuid: itemDoc?.Item_uuid || row.Item_uuid || "",
+      Item_group: row.Item_group || itemDoc?.Item_group || "",
+      itemType: row.itemType || itemDoc?.itemType || "finished_item",
+      Rate: Number(row.Rate || itemDoc?.defaultSaleRate || 0),
+    };
+    enriched.Amount = Number(row.Amount || qty * Number(enriched.Rate || 0));
+
+    if (itemDoc?.itemType === 'finished_item' && Array.isArray(itemDoc?.bom) && itemDoc.bom.length) {
+      itemDoc.bom.forEach((component) => {
+        const compQtyBase = Number(component?.qty || 0);
+        const wasteFactor = 1 + Number(component?.wastePercent || 0) / 100;
+        const requiredQty = Number((qty * compQtyBase * wasteFactor).toFixed(4));
+        workRows.push({
+          sourceLineId: enriched.lineId,
+          sourceItemUuid: enriched.Item_uuid || '',
+          sourceItemName: enriched.Item,
+          sourceBomComponentId: String(component?._id || ''),
+          type: component?.componentType === 'service' ? 'service' : component?.componentType === 'consumable' ? 'consumable' : 'raw_material',
+          itemUuid: component?.componentItemUuid || '',
+          itemName: component?.componentItemName,
+          itemGroup: component?.itemGroup || '',
+          unit: component?.unit || 'Nos',
+          requiredQty,
+          reservedQty: 0,
+          consumedQty: 0,
+          executionMode: component?.executionMode || 'stock',
+          assignedVendorCustomerUuid: null,
+          assignedVendorName: null,
+          assignedUserUuid: null,
+          assignedUserName: null,
+          assignLater: true,
+          status: 'pending',
+          estimatedCost: Number(component?.defaultCost || 0),
+          actualCost: 0,
+          note: component?.note || '',
+          dueDate: inheritedDueDate || null,
+        });
+      });
+    } else if (itemDoc?.itemType === 'raw_material' || itemDoc?.itemType === 'service' || itemDoc?.itemType === 'consumable') {
+      workRows.push({
+        sourceLineId: enriched.lineId,
+        sourceItemUuid: enriched.Item_uuid || '',
+        sourceItemName: enriched.Item,
+        sourceBomComponentId: '',
+        type: itemDoc.itemType === 'service' ? 'service' : itemDoc.itemType === 'consumable' ? 'consumable' : 'raw_material',
+        itemUuid: enriched.Item_uuid || '',
+        itemName: enriched.Item,
+        itemGroup: enriched.Item_group || '',
+        unit: itemDoc?.unit || 'Nos',
+        requiredQty: qty,
+        reservedQty: 0,
+        consumedQty: 0,
+        executionMode: itemDoc?.executionMode || 'stock',
+        assignedVendorCustomerUuid: null,
+        assignedVendorName: null,
+        assignedUserUuid: null,
+        assignedUserName: null,
+        assignLater: true,
+        status: 'pending',
+        estimatedCost: Number(itemDoc?.defaultPurchaseRate || 0),
+        actualCost: 0,
+        note: row.Remark || '',
+        dueDate: inheritedDueDate || null,
+      });
+    }
+
+    return enriched;
+  });
+
+  return { enrichedItems, workRows };
+}
 /* ----------------------- CREATE NEW ORDER ----------------------- */
 
 router.post("/addOrder", async (req, res) => {
@@ -202,7 +287,7 @@ router.post("/addOrder", async (req, res) => {
       vendorAssignments = [],
       Type,
       isEnquiry,
-      stage = "design",
+      stage = "enquiry",
       priority = "medium",
       dueDate = null,
       assignedTo = null,
@@ -219,20 +304,20 @@ router.post("/addOrder", async (req, res) => {
 
     const now = new Date();
 
+    const effectiveDueDate = dueDate ? new Date(dueDate) : (!isEnquiryOnly ? buildDefaultDueDate() : null);
+
     const statusDefaults = {
       Task: isEnquiryOnly ? "Enquiry" : "Design",
       Assigned: "None",
       Status_number: 1,
-      Delivery_Date: now,
+      Delivery_Date: effectiveDueDate || now,
       CreatedAt: now,
     };
 
     const updatedStatus = (Status || []).map((s) => ({
       ...statusDefaults,
       ...s,
-      Task: isEnquiryOnly ? (s?.Task || 'Enquiry') : 'Design',
-      Assigned: assignedTo ? String(s?.Assigned || 'Assigned') : (isEnquiryOnly ? String(s?.Assigned || 'System') : 'None'),
-      Delivery_Date: toDate(s?.Delivery_Date, dueDate || buildDefaultDueDate()),
+      Delivery_Date: toDate(s?.Delivery_Date, now),
       CreatedAt: toDate(s?.CreatedAt, now),
     }));
 
@@ -255,6 +340,7 @@ router.post("/addOrder", async (req, res) => {
       orderNote || req.body?.Remark || req.body?.remark || req.body?.note || req.body?.comments || req.body?.description
     );
     const lineItems = normalizeItems(Items);
+    const { enrichedItems, workRows } = await enrichOrderItemsAndBuildWorkRows(lineItems, effectiveDueDate);
 
     const topRemark = normalizedOrderNote;
 
@@ -301,7 +387,8 @@ router.post("/addOrder", async (req, res) => {
       orderNote: normalizedOrderNote,
       vendorAssignments: normalizedVendorAssignments,
       Steps: flatSteps,
-      Items: lineItems,
+      Items: enrichedItems,
+      workRows,
       stage: String(stage || (isEnquiryOnly ? "enquiry" : "design")).toLowerCase(),
       stageHistory: [
         { stage: String(stage || (isEnquiryOnly ? "enquiry" : "design")).toLowerCase(), timestamp: new Date() },
@@ -309,7 +396,7 @@ router.post("/addOrder", async (req, res) => {
       priority: ["low", "medium", "high"].includes(String(priority || "").toLowerCase())
         ? String(priority).toLowerCase()
         : "medium",
-      dueDate: dueDate || buildDefaultDueDate(),
+      dueDate: effectiveDueDate || null,
       assignedTo: assignedTo || null,
       driveFile: {
         status: "pending",
@@ -405,6 +492,51 @@ const copiedFile = await copyOrderTemplateFileOAuth({
       message: "Failed to add order",
       error: error.message,
     });
+  }
+});
+
+router.get("/tasks/mine", async (req, res) => {
+  try {
+    const userName = String(req.query?.userName || req.user?.userName || "").trim();
+    if (!userName) {
+      return res.status(400).json({ success: false, message: "userName is required" });
+    }
+
+    const rows = await getPendingOrdersForUser(userName);
+    return res.json({
+      success: true,
+      orders: rows.orders,
+      summary: buildTaskSummaryMessage({ employee: userName, orders: rows.orders }),
+    });
+  } catch (error) {
+    console.error("tasks/mine error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to fetch order tasks" });
+  }
+});
+
+router.get("/tasks/queue", async (_req, res) => {
+  try {
+    const rows = await getUnassignedOrders();
+    return res.json({ success: true, orders: rows });
+  } catch (error) {
+    console.error("tasks/queue error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to fetch order queue" });
+  }
+});
+
+router.patch("/:id/assign", async (req, res) => {
+  try {
+    const updated = await assignOrderToUser({
+      orderId: req.params.id,
+      assignedTo: req.body?.assignedTo || null,
+      dueDate: req.body?.dueDate || null,
+      assignedBy: req.body?.assignedBy || req.user?.userName || "System",
+    });
+
+    return res.json({ success: true, order: updated });
+  } catch (error) {
+    console.error("assign order error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to assign order" });
   }
 });
 
@@ -579,62 +711,6 @@ const latestStatusProjectionStages = [
     },
   },
 ];
-
-
-
-router.get("/tasks/mine", async (req, res) => {
-  try {
-    const userName = String(req.query.userName || req.user?.userName || "").trim();
-    if (!userName) {
-      return res.status(400).json({ success: false, message: "userName is required" });
-    }
-
-    const user = await Users.findOne({ User_name: userName });
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    const result = await getPendingOrdersForUser(user);
-    res.json({
-      success: true,
-      result: {
-        ...result,
-        message: buildTaskSummaryMessage({ employee: user, orders: result.orders }),
-      },
-    });
-  } catch (error) {
-    console.error("tasks/mine error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-router.get("/tasks/queue", async (_req, res) => {
-  try {
-    const rows = await getUnassignedOrders();
-    res.json({ success: true, result: rows });
-  } catch (error) {
-    console.error("tasks/queue error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-router.patch("/:id/assign", async (req, res) => {
-  try {
-    const updated = await assignOrderToUser({
-      orderId: req.params.id,
-      userId: req.body?.userId,
-      userName: req.body?.userName,
-      assignedBy: req.body?.assignedBy || req.user?.userName || "System",
-      via: req.body?.via || "app",
-    });
-
-    res.json({ success: true, result: updated });
-  } catch (error) {
-    console.error("assign order error:", error);
-    const code = /not found/i.test(error.message) ? 404 : 400;
-    res.status(code).json({ success: false, message: error.message });
-  }
-});
 
 router.get("/GetOrderList", async (req, res) => {
   try {
