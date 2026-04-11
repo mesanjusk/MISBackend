@@ -10,7 +10,7 @@ const Customers = require('../repositories/customer');
 const Enquiry = require('../repositories/enquiry');
 const User = require('../repositories/users');
 const { emitNewMessage } = require('../socket');
-const { resolveAutoReplyRule, resolveReplyDelayMs } = require('../middleware/autoReply');
+const { resolveAutoReplyRule, resolveAutoReplyAction, resolveReplyDelayMs } = require('../middleware/autoReply');
 const { processIncomingMessageFlow } = require('../services/flowEngineService');
 const {
   uploadWhatsAppMediaToCloudinary,
@@ -670,8 +670,13 @@ const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
   const incomingText = String(incomingPayload.message || '').trim();
   if (!incomingText) return;
 
+  const contactDoc = await Contact.findOne({ phone: normalizePhone(incomingPayload.from) });
+
   console.log('[whatsapp] Auto reply resolver input:', incomingText);
-  const matchedRule = await resolveAutoReplyRule(incomingText);
+  const matchedRule = await resolveAutoReplyAction({
+    incomingText,
+    contactDoc,
+  });
   console.log('[whatsapp] Auto reply matched keyword:', matchedRule?.keyword || null);
   console.log('[whatsapp] Auto reply DB result:', matchedRule || null);
 
@@ -713,9 +718,25 @@ const normalizeTemplateLanguage = (language) => {
   return value.includes('_') ? value : value.toLowerCase() === 'en' ? 'en_US' : value;
 };
 
-const buildAutoReplyPayload = (payload = {}) => {
+const normalizeCatalogRows = (rows = []) =>
+  (Array.isArray(rows) ? rows : [])
+    .map((row) => (row && typeof row === 'object' ? row : null))
+    .filter(Boolean)
+    .map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [String(key || '').trim(), value == null ? '' : String(value).trim()])))
+    .filter((row) => Object.values(row).some((value) => String(value || '').trim()));
+
+const buildCatalogConfigFromPayload = (payload = {}) => ({
+  menuTitle: String(payload.menuTitle || payload.catalogConfig?.menuTitle || 'Product Price Finder').trim() || 'Product Price Finder',
+  menuIntro:
+    String(payload.menuIntro || payload.catalogConfig?.menuIntro || 'Choose product options to get the latest price.').trim() ||
+    'Choose product options to get the latest price.',
+  selectionFields: Array.isArray(payload.catalogConfig?.selectionFields) ? payload.catalogConfig.selectionFields : undefined,
+});
+
+const normalizeAutoReplyPayload = (payload = {}) => {
   const keyword = String(payload.keyword || '').trim();
   const matchType = String(payload.matchType || 'contains').trim().toLowerCase();
+  const ruleType = String(payload.ruleType || 'keyword').trim().toLowerCase();
   const replyType = String(payload.replyType || payload.replyMode || 'text').trim().toLowerCase();
   const isActive =
     typeof payload.isActive === 'boolean'
@@ -725,13 +746,8 @@ const buildAutoReplyPayload = (payload = {}) => {
       : true;
   const templateLanguage = normalizeTemplateLanguage(payload.templateLanguage || payload.language);
 
-  const reply =
-    replyType === 'template'
-      ? String(payload.reply || payload.templateName || '').trim()
-      : String(payload.reply || payload.replyText || '').trim();
-
-  if (!keyword || !reply) {
-    throw new AppError('keyword and reply are required', 400);
+  if (!keyword) {
+    throw new AppError('keyword is required', 400);
   }
 
   if (!['exact', 'contains', 'starts_with'].includes(matchType)) {
@@ -740,6 +756,10 @@ const buildAutoReplyPayload = (payload = {}) => {
 
   if (!['text', 'template'].includes(replyType)) {
     throw new AppError('Invalid replyType', 400);
+  }
+
+  if (!['keyword', 'product_catalog'].includes(ruleType)) {
+    throw new AppError('Invalid ruleType', 400);
   }
 
   const rawDelay = payload.delaySeconds;
@@ -753,28 +773,50 @@ const buildAutoReplyPayload = (payload = {}) => {
     delaySeconds = parsedDelay;
   }
 
-  return {
+  const normalizedPayload = {
     keyword,
-    reply,
     matchType,
+    ruleType,
     replyType,
     templateLanguage,
     isActive,
     delaySeconds,
   };
+
+  if (ruleType === 'product_catalog') {
+    const catalogRows = normalizeCatalogRows(payload.catalogRows);
+    if (!catalogRows.length) {
+      throw new AppError('catalogRows are required for product_catalog rules', 400);
+    }
+    normalizedPayload.reply = '';
+    normalizedPayload.catalogRows = catalogRows;
+    normalizedPayload.catalogConfig = buildCatalogConfigFromPayload(payload);
+    return normalizedPayload;
+  }
+
+  const reply =
+    replyType === 'template'
+      ? String(payload.reply || payload.templateName || '').trim()
+      : String(payload.reply || payload.replyText || '').trim();
+
+  if (!reply) {
+    throw new AppError('reply is required', 400);
+  }
+
+  normalizedPayload.reply = reply;
+  normalizedPayload.catalogRows = [];
+  normalizedPayload.catalogConfig = undefined;
+  return normalizedPayload;
 };
 
 const createAutoReplyRule = asyncHandler(async (req, res) => {
-  console.log('Incoming Auto Reply:', req.body);
-  const payload = buildAutoReplyPayload(req.body || {});
+  const payload = normalizeAutoReplyPayload(req.body || {});
   const savedRule = await AutoReply.create(payload);
-
-  console.log('[whatsapp] Auto reply save DB result:', savedRule);
   return res.status(201).json({ success: true, data: savedRule });
 });
 
 const updateAutoReplyRule = asyncHandler(async (req, res) => {
-  const payload = buildAutoReplyPayload(req.body || {});
+  const payload = normalizeAutoReplyPayload(req.body || {});
   const savedRule = await AutoReply.findByIdAndUpdate(req.params.id, payload, {
     new: true,
     runValidators: true,
@@ -808,27 +850,6 @@ const toggleAutoReplyRule = asyncHandler(async (req, res) => {
   await existingRule.save();
 
   return res.status(200).json({ success: true, data: existingRule.toObject() });
-});
-
-const sendText = asyncHandler(async (req, res) => {
-  const { to, body } = req.body;
-  if (!to || !body) throw new AppError('to and body are required', 400);
-
-  const data = await dispatchTextMessage({ to, body });
-  return res.status(200).json({ success: true, data });
-});
-
-
-const sendAdminAlert = asyncHandler(async (req, res) => {
-  const target = String(req.body?.to || ADMIN_ALERT_PHONE || '').replace(/\D/g, '');
-  const body = String(req.body?.body || '').trim();
-
-  if (!target || !body) {
-    throw new AppError('to and body are required', 400);
-  }
-
-  const data = await dispatchTextMessage({ to: target, body });
-  return res.status(200).json({ success: true, data });
 });
 
 const getAutoReplyRules = asyncHandler(async (_req, res) => {
