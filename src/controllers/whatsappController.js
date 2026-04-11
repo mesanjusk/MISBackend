@@ -719,38 +719,69 @@ const normalizeTemplateLanguage = (language) => {
   return value.includes('_') ? value : value.toLowerCase() === 'en' ? 'en_US' : value;
 };
 
+const normalizeCatalogCell = (value) => {
+  if (value == null) return '';
+  const normalized = String(value).trim();
+  if (!normalized) return '';
+  if (['nan', 'null', 'undefined'].includes(normalized.toLowerCase())) return '';
+  return normalized;
+};
+
+const isBlankCatalogCell = (value) => {
+  const normalized = normalizeCatalogCell(value);
+  return !normalized || normalized === '-';
+};
+
 const normalizeCatalogRows = (rows = []) =>
   (Array.isArray(rows) ? rows : [])
     .map((row) => (row && typeof row === 'object' ? row : null))
     .filter(Boolean)
-    .map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [String(key || '').trim(), value == null ? '' : String(value).trim()])))
-    .filter((row) => Object.values(row).some((value) => String(value || '').trim()));
+    .map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [String(key || '').trim(), normalizeCatalogCell(value)])
+      )
+    )
+    .filter((row) => Object.values(row).some((value) => !isBlankCatalogCell(value)));
 
 const getCatalogColumnNames = (catalogRows = []) =>
   [...new Set(catalogRows.flatMap((row) => Object.keys(row || {}).map((key) => String(key || '').trim())).filter(Boolean))];
 
 const deriveCatalogSelectionFields = (catalogRows = [], allColumns = []) => {
   const orderedNonEmptyColumns = allColumns.filter((column) =>
-    catalogRows.some((row) => {
-      const value = String(row?.[column] ?? '').trim();
-      return value && value !== '-';
-    })
+    catalogRows.some((row) => !isBlankCatalogCell(row?.[column]))
   );
 
-  if (orderedNonEmptyColumns.length <= 1) {
-    return orderedNonEmptyColumns;
-  }
+  if (!orderedNonEmptyColumns.length) return [];
 
-  return orderedNonEmptyColumns.slice(0, -1);
+  const resultFields = deriveCatalogResultFields({ catalogRows, allColumns: orderedNonEmptyColumns, selectionFields: [] });
+  const resultSet = new Set(resultFields.map((field) => String(field || '').trim().toLowerCase()));
+
+  return orderedNonEmptyColumns.filter(
+    (column) => !resultSet.has(String(column || '').trim().toLowerCase())
+  );
 };
 
 const deriveCatalogResultFields = ({ catalogRows = [], allColumns = [], selectionFields = [] }) => {
   const orderedNonEmptyColumns = allColumns.filter((column) =>
-    catalogRows.some((row) => {
-      const value = String(row?.[column] ?? '').trim();
-      return value && value !== '-';
-    })
+    catalogRows.some((row) => !isBlankCatalogCell(row?.[column]))
   );
+
+  if (!orderedNonEmptyColumns.length) return [];
+
+  const lowerHeaders = orderedNonEmptyColumns.map((column) => String(column || '').trim().toLowerCase());
+  const hasRate = lowerHeaders.includes('rate');
+  const hasDispatchDays = lowerHeaders.includes('dispatch days');
+
+  if (hasRate && hasDispatchDays) {
+    return orderedNonEmptyColumns.filter((column) => {
+      const key = String(column || '').trim().toLowerCase();
+      return key === 'dispatch days' || key === 'rate';
+    });
+  }
+
+  if (hasRate) {
+    return orderedNonEmptyColumns.filter((column) => String(column || '').trim().toLowerCase() === 'rate');
+  }
 
   const selectionSet = new Set(
     selectionFields.map((field) => String(field || '').trim().toLowerCase())
@@ -761,10 +792,10 @@ const deriveCatalogResultFields = ({ catalogRows = [], allColumns = [], selectio
   );
 
   if (remainingColumns.length) {
-    return remainingColumns;
+    return [remainingColumns[remainingColumns.length - 1]];
   }
 
-  return orderedNonEmptyColumns.length ? [orderedNonEmptyColumns[orderedNonEmptyColumns.length - 1]] : [];
+  return [orderedNonEmptyColumns[orderedNonEmptyColumns.length - 1]];
 };
 
 const normalizeCatalogFieldList = (fields = []) =>

@@ -16,7 +16,9 @@ const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
 
 const isBlankCatalogValue = (value) => {
   const normalized = normalizeDisplayValue(value);
-  return !normalized || normalized === '-';
+  if (!normalized) return true;
+  const lower = normalized.toLowerCase();
+  return normalized === '-' || lower === 'nan' || lower === 'null' || lower === 'undefined';
 };
 
 const matchAutoReplyRule = (incomingText, rules = []) => {
@@ -125,7 +127,7 @@ const buildCatalogResultText = ({ selectionFields = [], resultFields = [], selec
     pushLine(field, row?.[field]);
   });
 
-  return lines.length ? lines.join('\n') : 'No matching catalog details found.';
+  return lines.length ? `Here is your result:\n${lines.join('\n')}` : 'No matching catalog details found.';
 };
 
 const expireStaleSessions = async (phone) => {
