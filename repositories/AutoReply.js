@@ -11,7 +11,7 @@ const autoReplySchema = new mongoose.Schema(
 
     matchType: {
       type: String,
-      enum: ['exact', 'contains', 'starts_with'], // ✅ added
+      enum: ['exact', 'contains', 'starts_with'],
       default: 'contains',
     },
 
@@ -21,16 +21,35 @@ const autoReplySchema = new mongoose.Schema(
       default: 'text',
     },
 
-    reply: {
+    ruleType: {
       type: String,
-      required: true,
-      trim: true,
+      enum: ['keyword', 'product_catalog'],
+      default: 'keyword',
+      index: true,
     },
 
-    // ✅ NEW (for template replies)
+    reply: {
+      type: String,
+      trim: true,
+      default: '',
+      required() {
+        return String(this.ruleType || 'keyword') !== 'product_catalog';
+      },
+    },
+
     templateLanguage: {
       type: String,
       default: 'en_US',
+    },
+
+    catalogRows: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    catalogConfig: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
 
     isActive: {
@@ -40,18 +59,15 @@ const autoReplySchema = new mongoose.Schema(
 
     delaySeconds: {
       type: Number,
+      default: null,
       min: 0,
       max: 30,
-      default: null,
     },
   },
-  {
-    timestamps: true,
-    collection: 'autoReplies',
-  }
+  { timestamps: true }
 );
 
-// index for faster lookup
 autoReplySchema.index({ isActive: 1, keyword: 1, matchType: 1 });
+autoReplySchema.index({ ruleType: 1, isActive: 1 });
 
 module.exports = mongoose.model('AutoReply', autoReplySchema);

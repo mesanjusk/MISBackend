@@ -11,6 +11,10 @@ const { updateOrderStatus } = require("../controllers/orderController");
 const { patchOrderStage, listOrderTasks } = require("../controllers/orderLifecycleController");
 const Customers = require("../repositories/customer");
 const ItemsRepo = require("../repositories/items");
+const {
+  copyOrderTemplateFileOAuth,
+  isDriveAutomationEnabled,
+} = require("../services/googleDriveOAuthService");
 const Users = require("../repositories/users");
 const {
   buildDefaultDueDate,
@@ -19,10 +23,6 @@ const {
   assignOrderToUser,
   buildTaskSummaryMessage,
 } = require("../services/orderTaskService");
-const {
-  copyOrderTemplateFileOAuth,
-  isDriveAutomationEnabled,
-} = require("../services/googleDriveOAuthService");
 
 /* ----------------------- helpers ----------------------- */
 const isProd = process.env.NODE_ENV === "production";
@@ -304,10 +304,7 @@ router.post("/addOrder", async (req, res) => {
 
     const now = new Date();
 
-    const endOfToday = new Date();
-    endOfToday.setHours(20, 0, 0, 0);
-
-    const effectiveDueDate = dueDate ? new Date(dueDate) : (!isEnquiryOnly ? endOfToday : null);
+    const effectiveDueDate = dueDate ? new Date(dueDate) : (!isEnquiryOnly ? buildDefaultDueDate() : null);
 
     const statusDefaults = {
       Task: isEnquiryOnly ? "Enquiry" : "Design",
@@ -498,6 +495,51 @@ const copiedFile = await copyOrderTemplateFileOAuth({
   }
 });
 
+router.get("/tasks/mine", async (req, res) => {
+  try {
+    const userName = String(req.query?.userName || req.user?.userName || "").trim();
+    if (!userName) {
+      return res.status(400).json({ success: false, message: "userName is required" });
+    }
+
+    const rows = await getPendingOrdersForUser(userName);
+    return res.json({
+      success: true,
+      orders: rows.orders,
+      summary: buildTaskSummaryMessage({ employee: userName, orders: rows.orders }),
+    });
+  } catch (error) {
+    console.error("tasks/mine error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to fetch order tasks" });
+  }
+});
+
+router.get("/tasks/queue", async (_req, res) => {
+  try {
+    const rows = await getUnassignedOrders();
+    return res.json({ success: true, orders: rows });
+  } catch (error) {
+    console.error("tasks/queue error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to fetch order queue" });
+  }
+});
+
+router.patch("/:id/assign", async (req, res) => {
+  try {
+    const updated = await assignOrderToUser({
+      orderId: req.params.id,
+      assignedTo: req.body?.assignedTo || null,
+      dueDate: req.body?.dueDate || null,
+      assignedBy: req.body?.assignedBy || req.user?.userName || "System",
+    });
+
+    return res.json({ success: true, order: updated });
+  } catch (error) {
+    console.error("assign order error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to assign order" });
+  }
+});
+
 router.patch("/:id/stage", patchOrderStage);
 router.get("/:id/tasks", listOrderTasks);
 
@@ -669,60 +711,6 @@ const latestStatusProjectionStages = [
     },
   },
 ];
-
-router.get("/tasks/mine", async (req, res) => {
-  try {
-    const userName = String(req.query.userName || req.user?.userName || "").trim();
-    if (!userName) {
-      return res.status(400).json({ success: false, message: "userName is required" });
-    }
-
-    const user = await Users.findOne({ User_name: userName });
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    const result = await getPendingOrdersForUser(user);
-    res.json({
-      success: true,
-      result: {
-        ...result,
-        message: buildTaskSummaryMessage({ employee: user, orders: result.orders }),
-      },
-    });
-  } catch (error) {
-    console.error("tasks/mine error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-router.get("/tasks/queue", async (_req, res) => {
-  try {
-    const rows = await getUnassignedOrders();
-    res.json({ success: true, result: rows });
-  } catch (error) {
-    console.error("tasks/queue error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-router.patch("/:id/assign", async (req, res) => {
-  try {
-    const updated = await assignOrderToUser({
-      orderId: req.params.id,
-      userId: req.body?.userId,
-      userName: req.body?.userName,
-      assignedBy: req.body?.assignedBy || req.user?.userName || "System",
-      via: req.body?.via || "app",
-    });
-
-    res.json({ success: true, result: updated });
-  } catch (error) {
-    console.error("assign order error:", error);
-    const code = /not found/i.test(error.message) ? 404 : 400;
-    res.status(code).json({ success: false, message: error.message });
-  }
-});
 
 router.get("/GetOrderList", async (req, res) => {
   try {
