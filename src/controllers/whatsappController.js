@@ -1044,6 +1044,46 @@ const sendMessage = asyncHandler(async (req, res) => {
   return res.status(200).json({ success: true, data });
 });
 
+const sendText = asyncHandler(async (req, res) => {
+  const to = String(req.body?.to || '').trim();
+  const text = String(req.body?.text || req.body?.body || '').trim();
+
+  if (!to || !text) {
+    throw new AppError('to and text are required', 400);
+  }
+
+  const data = await dispatchTextMessage({ to, body: text });
+
+  return res.status(200).json({
+    success: true,
+    data,
+  });
+});
+
+const sendAdminAlert = asyncHandler(async (req, res) => {
+  const adminPhone = String(
+    process.env.ADMIN_ALERT_PHONE ||
+      process.env.WHATSAPP_ADMIN_PHONE ||
+      '919372333633'
+  ).trim();
+
+  const text = String(req.body?.text || req.body?.body || req.body?.message || '').trim();
+
+  if (!adminPhone || !text) {
+    throw new AppError('Admin phone and message are required', 400);
+  }
+
+  const data = await dispatchTextMessage({
+    to: adminPhone,
+    body: text,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data,
+  });
+});
+
 const getTemplates = asyncHandler(async (_req, res) => {
   const wabaId = String(process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '').trim();
   const accessToken = String(WHATSAPP_ACCESS_TOKEN || '').trim();
