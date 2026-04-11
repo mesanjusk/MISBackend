@@ -51,6 +51,12 @@ const autoReplySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    audienceScope: {
+      type: String,
+      enum: ['all', 'registered_only'],
+      default: 'all',
+      index: true,
+    },
 
     isActive: {
       type: Boolean,

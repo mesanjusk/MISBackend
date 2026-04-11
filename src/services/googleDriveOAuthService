@@ -136,7 +136,6 @@ async function copyOrderTemplateFileOAuth({
   orderNumber,
   customerName,
   description,
-  mobileNumber,
 }) {
   if (!templateFileId) {
     throw new Error("Missing DRIVE_TEMPLATE_FILE_ID");
@@ -146,10 +145,7 @@ async function copyOrderTemplateFileOAuth({
 
   const safeOrderNo = sanitizeFileName(orderNumber || "Order");
   const safeCustomerName = sanitizeFileName(customerName || "Customer");
-  const safeDescription = sanitizeFileName(description || "Work");
-  const safeMobile = sanitizeFileName(mobileNumber || "0000000000");
-
-  const fileName = `${safeOrderNo} - ${safeCustomerName} - ${safeDescription} - ${safeMobile}.cdr`;
+  const fileName = `${safeOrderNo} - ${safeCustomerName}`;
 
   const requestBody = {
     name: fileName,
@@ -163,6 +159,7 @@ async function copyOrderTemplateFileOAuth({
   const response = await drive.files.copy({
     fileId: templateFileId,
     supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
     requestBody,
     fields: "id,name,description,parents,webViewLink,webContentLink",
   });
