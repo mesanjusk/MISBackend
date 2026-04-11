@@ -1,6 +1,7 @@
 const AutoReply = require('../repositories/AutoReply');
 const CatalogSession = require('../repositories/catalogSession');
 const Customers = require('../repositories/customer');
+const Contact = require('../repositories/contact');
 const User = require('../repositories/users');
 
 const DEFAULT_DELAY_MIN_SECONDS = 2;
@@ -237,12 +238,21 @@ const isRegisteredSender = async (phone) => {
   const normalizedPhone = normalizePhone(phone);
   if (!normalizedPhone) return false;
 
-  const [customer, user] = await Promise.all([
+  const [customer, user, contact] = await Promise.all([
     Customers.exists({ Mobile_number: normalizedPhone }),
     User.exists({ $or: [{ Mobile_number: normalizedPhone }, { phone: normalizedPhone }] }),
+    Contact.findOne({ phone: normalizedPhone }, { name: 1, tags: 1, assignedAgent: 1 }).lean(),
   ]);
 
-  return Boolean(customer || user);
+  const isRecognizedContact =
+    !!contact &&
+    Boolean(
+      String(contact?.name || '').trim() ||
+        String(contact?.assignedAgent || '').trim() ||
+        (Array.isArray(contact?.tags) && contact.tags.length)
+    );
+
+  return Boolean(customer || user || isRecognizedContact);
 };
 
 const ensureRuleAccess = async ({ rule, phone }) => {
