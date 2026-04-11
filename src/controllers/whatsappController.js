@@ -676,6 +676,7 @@ const sendAutoReplyForIncomingMessage = async (incomingPayload) => {
   const matchedRule = await resolveAutoReplyAction({
     incomingText,
     contactDoc,
+    fromPhone: incomingPayload.from,
   });
   console.log('[whatsapp] Auto reply matched keyword:', matchedRule?.keyword || null);
   console.log('[whatsapp] Auto reply DB result:', matchedRule || null);
@@ -725,12 +726,48 @@ const normalizeCatalogRows = (rows = []) =>
     .map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [String(key || '').trim(), value == null ? '' : String(value).trim()])))
     .filter((row) => Object.values(row).some((value) => String(value || '').trim()));
 
+const getCatalogColumnNames = (catalogRows = []) =>
+  [...new Set(catalogRows.flatMap((row) => Object.keys(row || {}).map((key) => String(key || '').trim())).filter(Boolean))];
+
+const deriveCatalogSelectionFields = (catalogRows = [], allColumns = []) => {
+  const dynamicColumns = allColumns.filter((column) => {
+    const values = new Set(
+      catalogRows
+        .map((row) => String(row?.[column] ?? '').trim().toLowerCase())
+        .filter((value) => value && value !== '-')
+    );
+    return values.size > 1;
+  });
+
+  return dynamicColumns.length ? dynamicColumns : allColumns.slice(0, 1);
+};
+
+const deriveCatalogResultFields = ({ catalogRows = [], allColumns = [], selectionFields = [] }) => {
+  const selectionSet = new Set(selectionFields.map((field) => String(field || '').trim().toLowerCase()));
+  const nonSelectionColumns = allColumns.filter((column) => !selectionSet.has(String(column || '').trim().toLowerCase()));
+
+  const withValues = nonSelectionColumns.filter((column) =>
+    catalogRows.some((row) => {
+      const value = String(row?.[column] ?? '').trim();
+      return value && value !== '-';
+    })
+  );
+
+  return withValues.length ? withValues : nonSelectionColumns;
+};
+
+const normalizeCatalogFieldList = (fields = []) =>
+  (Array.isArray(fields) ? fields : [])
+    .map((field) => String(field || '').trim())
+    .filter(Boolean);
+
 const buildCatalogConfigFromPayload = (payload = {}) => ({
   menuTitle: String(payload.menuTitle || payload.catalogConfig?.menuTitle || 'Product Price Finder').trim() || 'Product Price Finder',
   menuIntro:
     String(payload.menuIntro || payload.catalogConfig?.menuIntro || 'Choose product options to get the latest price.').trim() ||
     'Choose product options to get the latest price.',
-  selectionFields: Array.isArray(payload.catalogConfig?.selectionFields) ? payload.catalogConfig.selectionFields : undefined,
+  selectionFields: normalizeCatalogFieldList(payload.catalogConfig?.selectionFields),
+  resultFields: normalizeCatalogFieldList(payload.catalogConfig?.resultFields),
 });
 
 const normalizeAutoReplyPayload = (payload = {}) => {
@@ -745,6 +782,8 @@ const normalizeAutoReplyPayload = (payload = {}) => {
       ? payload.active
       : true;
   const templateLanguage = normalizeTemplateLanguage(payload.templateLanguage || payload.language);
+  const audienceScopeRaw = String(payload.audienceScope || 'all').trim().toLowerCase();
+  const audienceScope = audienceScopeRaw === 'registered_only' ? 'registered_only' : 'all';
 
   if (!keyword) {
     throw new AppError('keyword is required', 400);
@@ -781,6 +820,7 @@ const normalizeAutoReplyPayload = (payload = {}) => {
     templateLanguage,
     isActive,
     delaySeconds,
+    audienceScope,
   };
 
   if (ruleType === 'product_catalog') {
@@ -788,9 +828,40 @@ const normalizeAutoReplyPayload = (payload = {}) => {
     if (!catalogRows.length) {
       throw new AppError('catalogRows are required for product_catalog rules', 400);
     }
+    const catalogColumns = getCatalogColumnNames(catalogRows);
+    if (!catalogColumns.length) {
+      throw new AppError('catalogRows must contain at least one column', 400);
+    }
+
+    const catalogConfig = buildCatalogConfigFromPayload(payload);
+    const selectionFieldsRequested = normalizeCatalogFieldList(catalogConfig.selectionFields);
+    const resultFieldsRequested = normalizeCatalogFieldList(catalogConfig.resultFields);
+
+    const fieldExistsInRows = (field) =>
+      catalogColumns.some((column) => column.toLowerCase() === String(field || '').trim().toLowerCase());
+
+    if (selectionFieldsRequested.some((field) => !fieldExistsInRows(field))) {
+      throw new AppError('catalogConfig.selectionFields contains unknown columns', 400);
+    }
+    if (resultFieldsRequested.some((field) => !fieldExistsInRows(field))) {
+      throw new AppError('catalogConfig.resultFields contains unknown columns', 400);
+    }
+
+    const selectionFields = selectionFieldsRequested.length
+      ? selectionFieldsRequested
+      : deriveCatalogSelectionFields(catalogRows, catalogColumns);
+
+    const resultFields = resultFieldsRequested.length
+      ? resultFieldsRequested
+      : deriveCatalogResultFields({ catalogRows, allColumns: catalogColumns, selectionFields });
+
     normalizedPayload.reply = '';
     normalizedPayload.catalogRows = catalogRows;
-    normalizedPayload.catalogConfig = buildCatalogConfigFromPayload(payload);
+    normalizedPayload.catalogConfig = {
+      ...catalogConfig,
+      selectionFields,
+      resultFields,
+    };
     return normalizedPayload;
   }
 
