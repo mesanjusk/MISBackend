@@ -75,20 +75,12 @@ async function copyOrderTemplateFile({
   }
 
   const response = await drive.files.copy({
-  fileId: templateFileId,
-
-  // 🔥 ADD THESE HERE
-  supportsAllDrives: true,
-  includeItemsFromAllDrives: true,
-
-  requestBody: {
-    name: fileName,
-    parents: [targetFolderId],
-    description: description || "",
-  },
-
-  fields: "id,name,webViewLink",
-});
+    fileId: templateFileId,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    requestBody,
+    fields: "id,name,description,parents,webViewLink,webContentLink",
+  });
 
   return response.data;
 }

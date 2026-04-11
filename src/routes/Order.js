@@ -31,6 +31,46 @@ const norm = (s) => String(s || "").trim();
 const normLower = (s) => String(s || "").trim().toLowerCase();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const toBool = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  if (value === undefined || value === null || value === "") return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  return fallback;
+};
+
+function resolveDrivePayloadConfig(body = {}) {
+  const nestedGoogleDrive = body?.googleDrive && typeof body.googleDrive === "object"
+    ? body.googleDrive
+    : {};
+
+  const templateFileId =
+    norm(body?.templateFileId) ||
+    norm(body?.driveTemplateFileId) ||
+    norm(body?.driveSourceFileId) ||
+    norm(body?.sourceTemplateFileId) ||
+    norm(body?.sourceFileId) ||
+    norm(nestedGoogleDrive?.sourceFileId) ||
+    norm(process.env.DRIVE_TEMPLATE_FILE_ID);
+
+  const targetFolderId =
+    norm(body?.targetFolderId) ||
+    norm(body?.driveFolderId) ||
+    norm(body?.folderId) ||
+    norm(nestedGoogleDrive?.folderId) ||
+    norm(process.env.DRIVE_TARGET_FOLDER_ID);
+
+  const automationEnabled = toBool(
+    body?.createDriveFile ??
+      body?.shouldCreateDriveFile ??
+      body?.driveAutoCopy ??
+      nestedGoogleDrive?.enabled,
+    isDriveAutomationEnabled()
+  );
+
+  return { templateFileId, targetFolderId, automationEnabled };
+}
 
 /** Resolve a Mongo filter from any incoming id type */
 function idToFilter(anyId) {
@@ -384,6 +424,7 @@ router.post("/addOrder", async (req, res) => {
       Customer_uuid,
       Status: updatedStatus,
       orderMode: finalOrderMode,
+      Remark: normalizedOrderNote,
       orderNote: normalizedOrderNote,
       vendorAssignments: normalizedVendorAssignments,
       Steps: flatSteps,
@@ -405,17 +446,23 @@ router.post("/addOrder", async (req, res) => {
 
     await newOrder.save();
 
-        let driveFile = {
+    const driveConfig = resolveDrivePayloadConfig(req.body || {});
+
+    let driveFile = {
       status: "skipped",
-      templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID || null,
-      folderId: process.env.DRIVE_TARGET_FOLDER_ID || null,
+      templateFileId: driveConfig.templateFileId || null,
+      folderId: driveConfig.targetFolderId || null,
       error: null,
     };
 
     let driveWarning = null;
 
     try {
-      if (isDriveAutomationEnabled() && !isEnquiryOnly) {
+      if (driveConfig.automationEnabled && !isEnquiryOnly) {
+        if (!driveConfig.templateFileId) {
+          throw new Error("Drive template file is not configured");
+        }
+
         const customer = await Customers.findOne({ Customer_uuid }).lean();
 
         if (!customer) {
@@ -428,19 +475,18 @@ router.post("/addOrder", async (req, res) => {
           "Work";
 
         const copiedFile = await copyOrderTemplateFileOAuth({
-          templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID,
-          targetFolderId: process.env.DRIVE_TARGET_FOLDER_ID,
+          templateFileId: driveConfig.templateFileId,
+          targetFolderId: driveConfig.targetFolderId,
           orderNumber: newOrderNumber,
           customerName: customer.Customer_name || "Customer",
           description: finalDescription,
-          mobileNumber: customer.Mobile_number || "",
         });
 
         driveFile = {
           status: "created",
-          templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID || null,
+          templateFileId: driveConfig.templateFileId || null,
           fileId: copiedFile.id || null,
-          folderId: process.env.DRIVE_TARGET_FOLDER_ID || null,
+          folderId: driveConfig.targetFolderId || null,
           name: copiedFile.name || null,
           description: copiedFile.description || finalDescription,
           webViewLink: copiedFile.webViewLink || null,
@@ -453,8 +499,8 @@ router.post("/addOrder", async (req, res) => {
       console.error("Google Drive copy error:", driveErr);
       driveFile = {
         status: "failed",
-        templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID || null,
-        folderId: process.env.DRIVE_TARGET_FOLDER_ID || null,
+        templateFileId: driveConfig.templateFileId || null,
+        folderId: driveConfig.targetFolderId || null,
         error: driveErr.message || "Unknown drive error",
         createdAt: null,
       };
