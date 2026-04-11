@@ -22,6 +22,12 @@ function getOAuthClient() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
+function isDriveAutomationEnabled() {
+  return (
+    String(process.env.DRIVE_AUTO_COPY_ON_ORDER || "false").toLowerCase() === "true"
+  );
+}
+
 function getGoogleDriveAuthUrl(returnTo = "") {
   const oauth2Client = getOAuthClient();
 
@@ -33,29 +39,56 @@ function getGoogleDriveAuthUrl(returnTo = "") {
   });
 }
 
+async function fetchGoogleAccountEmail(oauth2Client) {
+  try {
+    const oauth2 = google.oauth2({
+      auth: oauth2Client,
+      version: "v2",
+    });
+
+    const { data } = await oauth2.userinfo.get();
+    return data?.email || null;
+  } catch (error) {
+    console.warn("Unable to fetch Google account email:", error.message);
+    return null;
+  }
+}
+
 async function saveGoogleTokensFromCode(code) {
   const oauth2Client = getOAuthClient();
+  const existing = await GoogleDriveToken.findOne({
+    provider: "google_drive",
+  }).lean();
 
   const { tokens } = await oauth2Client.getToken(code);
 
-  if (!tokens.refresh_token) {
-    throw new Error("Refresh token not received. Please reconnect.");
+  oauth2Client.setCredentials(tokens);
+
+  const email = await fetchGoogleAccountEmail(oauth2Client);
+
+  const refreshToken = tokens.refresh_token || existing?.refreshToken || null;
+
+  if (!refreshToken) {
+    throw new Error("Refresh token not received. Please reconnect with consent.");
   }
 
-  await GoogleDriveToken.findOneAndUpdate(
+  const saved = await GoogleDriveToken.findOneAndUpdate(
     { provider: "google_drive" },
     {
       provider: "google_drive",
-      email: null,
-      refreshToken: tokens.refresh_token,
-      accessToken: tokens.access_token || null,
-      expiryDate: tokens.expiry_date || null,
+      email,
+      refreshToken,
+      accessToken: tokens.access_token || existing?.accessToken || null,
+      expiryDate: tokens.expiry_date || existing?.expiryDate || null,
+      scope: tokens.scope || existing?.scope || SCOPES.join(" "),
+      tokenType: tokens.token_type || existing?.tokenType || "Bearer",
+      updatedAt: new Date(),
     },
-    { upsert: true, new: true }
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
   return {
-    email: null,
+    email: saved?.email || null,
     connected: true,
   };
 }
@@ -63,7 +96,7 @@ async function saveGoogleTokensFromCode(code) {
 async function getAuthorizedDriveClient() {
   const saved = await GoogleDriveToken.findOne({
     provider: "google_drive",
-  }).lean();
+  });
 
   if (!saved?.refreshToken) {
     throw new Error("Google Drive is not connected yet");
@@ -74,14 +107,27 @@ async function getAuthorizedDriveClient() {
     refresh_token: saved.refreshToken,
   });
 
+  const { credentials } = await oauth2Client.refreshAccessToken();
+
+  if (credentials?.access_token) {
+    saved.accessToken = credentials.access_token;
+    saved.expiryDate = credentials.expiry_date || null;
+    if (credentials.refresh_token) {
+      saved.refreshToken = credentials.refresh_token;
+    }
+    await saved.save();
+  }
+
+  oauth2Client.setCredentials({
+    access_token: credentials?.access_token || saved.accessToken,
+    refresh_token: saved.refreshToken,
+    expiry_date: credentials?.expiry_date || saved.expiryDate || null,
+  });
+
   return google.drive({
     version: "v3",
     auth: oauth2Client,
   });
-}
-
-function isDriveAutomationEnabled() {
-  return String(process.env.DRIVE_AUTO_COPY_ON_ORDER || "false").toLowerCase() === "true";
 }
 
 async function copyOrderTemplateFileOAuth({
@@ -98,12 +144,13 @@ async function copyOrderTemplateFileOAuth({
 
   const drive = await getAuthorizedDriveClient();
 
-  const safeOrderNo = sanitizeFileName(orderNumber);
+  const safeOrderNo = sanitizeFileName(orderNumber || "Order");
   const safeCustomerName = sanitizeFileName(customerName || "Customer");
   const safeDescription = sanitizeFileName(description || "Work");
   const safeMobile = sanitizeFileName(mobileNumber || "0000000000");
 
   const fileName = `${safeOrderNo} - ${safeCustomerName} - ${safeDescription} - ${safeMobile}.cdr`;
+
   const requestBody = {
     name: fileName,
     description: String(description || "").trim(),

@@ -123,8 +123,8 @@ app.use("/paymentfollowup", paymentFollowupRouter);
 app.use("/dashboard", Dashboard);
 app.use("/contacts", Contacts);
 app.use("/api/google-drive", googleDriveOAuthRoutes);
+app.use("/google-drive", googleDriveOAuthRoutes);
 app.use("/", FlowRouter);
-
 // ---------- Init DB ---------
 (async () => {
   await connectDB();

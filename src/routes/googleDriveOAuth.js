@@ -4,6 +4,7 @@ const GoogleDriveToken = require("../repositories/googleDriveToken");
 const {
   getGoogleDriveAuthUrl,
   saveGoogleTokensFromCode,
+  isDriveAutomationEnabled,
 } = require("../services/googleDriveOAuthService");
 
 router.get("/connect", async (req, res) => {
@@ -82,6 +83,10 @@ router.get("/status", async (_req, res) => {
       success: true,
       connected: !!token?.refreshToken,
       email: token?.email || null,
+      automationEnabled: isDriveAutomationEnabled(),
+      templateFileIdConfigured: !!process.env.DRIVE_TEMPLATE_FILE_ID,
+      targetFolderIdConfigured: !!process.env.DRIVE_TARGET_FOLDER_ID,
+      redirectUriConfigured: !!process.env.GOOGLE_REDIRECT_URI,
     });
   } catch (error) {
     return res.status(500).json({

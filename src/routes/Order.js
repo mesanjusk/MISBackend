@@ -405,7 +405,7 @@ router.post("/addOrder", async (req, res) => {
 
     await newOrder.save();
 
-    let driveFile = {
+        let driveFile = {
       status: "skipped",
       templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID || null,
       folderId: process.env.DRIVE_TARGET_FOLDER_ID || null,
@@ -423,22 +423,18 @@ router.post("/addOrder", async (req, res) => {
         }
 
         const finalDescription =
-  String(topRemark || "").trim() ||
-  (lineItems?.[0]?.Remark || "").trim() ||
-  "Work";
+          String(topRemark || "").trim() ||
+          (lineItems?.[0]?.Remark || "").trim() ||
+          "Work";
 
-const shortDescription = finalDescription.slice(0, 40);
-
-  
-const copiedFile = await copyOrderTemplateFileOAuth({
-  templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID,
-  targetFolderId: process.env.DRIVE_TARGET_FOLDER_ID,
-  orderNumber: newOrderNumber,
-  customerName: customer.Customer_name,
-  description: finalDescription,
-  mobileNumber: customer.Mobile_number || "",
-});
-
+        const copiedFile = await copyOrderTemplateFileOAuth({
+          templateFileId: process.env.DRIVE_TEMPLATE_FILE_ID,
+          targetFolderId: process.env.DRIVE_TARGET_FOLDER_ID,
+          orderNumber: newOrderNumber,
+          customerName: customer.Customer_name || "Customer",
+          description: finalDescription,
+          mobileNumber: customer.Mobile_number || "",
+        });
 
         driveFile = {
           status: "created",
@@ -446,7 +442,7 @@ const copiedFile = await copyOrderTemplateFileOAuth({
           fileId: copiedFile.id || null,
           folderId: process.env.DRIVE_TARGET_FOLDER_ID || null,
           name: copiedFile.name || null,
-          description: copiedFile.description || String(topRemark || "").trim(),
+          description: copiedFile.description || finalDescription,
           webViewLink: copiedFile.webViewLink || null,
           webContentLink: copiedFile.webContentLink || null,
           error: null,
