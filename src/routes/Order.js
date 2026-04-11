@@ -475,12 +475,13 @@ router.post("/addOrder", async (req, res) => {
           "Work";
 
         const copiedFile = await copyOrderTemplateFileOAuth({
-          templateFileId: driveConfig.templateFileId,
-          targetFolderId: driveConfig.targetFolderId,
-          orderNumber: newOrderNumber,
-          customerName: customer.Customer_name || "Customer",
-          description: finalDescription,
-        });
+  templateFileId: driveConfig.templateFileId,
+  targetFolderId: driveConfig.targetFolderId,
+  orderNumber: newOrderNumber,
+  customerName: customer.Customer_name || "Customer",
+  description: finalDescription,
+  mobileNumber: customer.Mobile_number || "",
+});
 
         driveFile = {
           status: "created",
