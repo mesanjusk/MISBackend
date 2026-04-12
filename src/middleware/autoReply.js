@@ -243,8 +243,7 @@ const buildCatalogMultiResultText = ({ selectionFields = [], resultFields = [], 
   });
 
   lines.push('Reply with the option number to choose one, or send the keyword again to restart.');
-  return lines.join('
-').trim();
+  return lines.join('\n').trim();
 };
 
 const runCatalogStateMachine = ({ rule, selectionFields, resultFields, rows, selectedValues, startStep, incomingText }) => {
