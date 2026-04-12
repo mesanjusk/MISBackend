@@ -771,11 +771,9 @@ const deriveCatalogResultFields = ({ catalogRows = [], allColumns = [], selectio
   const lowerHeaders = orderedNonEmptyColumns.map((column) => String(column || '').trim().toLowerCase());
   const hasRate = lowerHeaders.includes('rate');
   const deliveryAliases = new Set(['dispatch days', 'delivery', 'delivary']);
-  const deliveryFields = orderedNonEmptyColumns.filter((column) =>
-    deliveryAliases.has(String(column || '').trim().toLowerCase())
-  );
+  const hasDelivery = lowerHeaders.some((header) => deliveryAliases.has(header));
 
-  if (hasRate && deliveryFields.length) {
+  if (hasRate && hasDelivery) {
     return orderedNonEmptyColumns.filter((column) => {
       const key = String(column || '').trim().toLowerCase();
       return key === 'rate' || deliveryAliases.has(key);
@@ -783,11 +781,6 @@ const deriveCatalogResultFields = ({ catalogRows = [], allColumns = [], selectio
   }
 
   if (hasRate) {
-    const rateField = orderedNonEmptyColumns.find((column) => String(column || '').trim().toLowerCase() === 'rate');
-    const trailingField = orderedNonEmptyColumns[orderedNonEmptyColumns.length - 1];
-    if (trailingField && String(trailingField || '').trim().toLowerCase() !== 'rate') {
-      return [rateField, trailingField].filter(Boolean);
-    }
     return orderedNonEmptyColumns.filter((column) => String(column || '').trim().toLowerCase() === 'rate');
   }
 
@@ -799,17 +792,11 @@ const deriveCatalogResultFields = ({ catalogRows = [], allColumns = [], selectio
     (column) => !selectionSet.has(String(column || '').trim().toLowerCase())
   );
 
-  if (remainingColumns.length > 1) {
-    return remainingColumns.slice(-2);
-  }
-
   if (remainingColumns.length) {
     return [remainingColumns[remainingColumns.length - 1]];
   }
 
-  return orderedNonEmptyColumns.length > 1
-    ? orderedNonEmptyColumns.slice(-2)
-    : [orderedNonEmptyColumns[orderedNonEmptyColumns.length - 1]];
+  return [orderedNonEmptyColumns[orderedNonEmptyColumns.length - 1]];
 };
 
 const normalizeCatalogFieldList = (fields = []) =>
