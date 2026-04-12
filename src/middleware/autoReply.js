@@ -8,6 +8,8 @@ const DEFAULT_DELAY_MIN_SECONDS = 2;
 const DEFAULT_DELAY_MAX_SECONDS = 5;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const RESTART_INPUTS = new Set(['restart', 'reset', 'start over']);
+const SMALL_RESULT_THRESHOLD = 4;
+const MIN_SELECTION_STEPS_BEFORE_SHORTLIST = 2;
 
 const normalizeIncomingText = (text) => String(text || '').trim().toLowerCase();
 const normalizeDisplayValue = (value) => String(value ?? '').trim();
@@ -129,6 +131,59 @@ const buildCatalogResultText = ({ selectionFields = [], resultFields = [], selec
 
   return lines.length ? `Here is your result:\n${lines.join('\n')}` : 'No matching catalog details found.';
 };
+const buildCatalogOptionSummary = ({ row = {}, fields = [] }) => {
+  const lines = [];
+
+  fields.forEach((field) => {
+    const display = normalizeDisplayValue(row?.[field]);
+    if (isBlankCatalogValue(display)) return;
+    lines.push(`${field}: ${display}`);
+  });
+
+  return lines.join('\n');
+};
+
+const buildCatalogRemainingMatchesText = ({
+  selectionFields = [],
+  resultFields = [],
+  selectedValues = {},
+  rows = [],
+}) => {
+  const uniqueRows = [];
+  const seen = new Set();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = JSON.stringify(row || {});
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueRows.push(row);
+  }
+
+  if (!uniqueRows.length) {
+    return 'No matching products were found. Send the keyword again to restart.';
+  }
+
+  const activeSelectedFields = selectionFields.filter((field) =>
+    !isBlankCatalogValue(selectedValues?.[field])
+  );
+  const remainingFields = selectionFields.filter(
+    (field) => !activeSelectedFields.includes(field)
+  );
+
+  const preferredFields = [...activeSelectedFields, ...remainingFields, ...resultFields];
+  const lines = [`I found ${uniqueRows.length} matching options:`];
+
+  uniqueRows.forEach((row, index) => {
+    const summary = buildCatalogOptionSummary({ row, fields: preferredFields });
+    if (summary) {
+      lines.push(`${index + 1}.`);
+      lines.push(summary);
+    }
+  });
+
+  lines.push('Send the keyword again to restart and narrow it further.');
+  return lines.filter(Boolean).join('\n');
+};
 
 const expireStaleSessions = async (phone) => {
   const now = new Date();
@@ -198,6 +253,19 @@ const runCatalogStateMachine = ({ rule, selectionFields, resultFields, rows, sel
   let candidateRows = filterCatalogRows(rows, filters);
 
   while (stepIndex < selectionFields.length) {
+    if (
+      candidateRows.length > 1 &&
+      candidateRows.length <= SMALL_RESULT_THRESHOLD &&
+      stepIndex >= MIN_SELECTION_STEPS_BEFORE_SHORTLIST
+    ) {
+      return {
+        status: 'shortlist',
+        selectedValues: filters,
+        stepIndex,
+        rows: candidateRows,
+      };
+    }
+
     const field = selectionFields[stepIndex];
     const options = getOptionsForField(candidateRows, field);
 
@@ -238,21 +306,11 @@ const runCatalogStateMachine = ({ rule, selectionFields, resultFields, rows, sel
   }
 
   if (candidateRows.length > 1) {
-    const uniqueRows = [];
-    const seen = new Set();
-
-    for (const row of candidateRows) {
-      const key = JSON.stringify(row || {});
-      if (seen.has(key)) continue;
-      seen.add(key);
-      uniqueRows.push(row);
-    }
-
     return {
-      status: 'completed',
+      status: 'shortlist',
       selectedValues: filters,
       stepIndex,
-      row: uniqueRows[0] || null,
+      rows: candidateRows,
     };
   }
 
@@ -334,6 +392,19 @@ const startCatalogSession = async ({ rule, phone, incomingText = '' }) => {
     };
   }
 
+  if (machineResult.status === 'shortlist') {
+    await CatalogSession.updateMany({ phone, ruleId: rule._id, status: 'active' }, { $set: { status: 'completed' } });
+    return {
+      replyType: 'text',
+      reply: buildCatalogRemainingMatchesText({
+        selectionFields,
+        resultFields,
+        selectedValues: machineResult.selectedValues,
+        rows: machineResult.rows,
+      }),
+    };
+  }
+
   if (machineResult.status === 'no_match') {
     await CatalogSession.updateMany({ phone, ruleId: rule._id, status: 'active' }, { $set: { status: 'closed' } });
     return { replyType: 'text', reply: 'No matching products were found. Send the keyword again to restart.' };
@@ -391,6 +462,19 @@ const continueCatalogSession = async ({ rule, session, incomingText, phone }) =>
         resultFields,
         selectedValues: machineResult.selectedValues,
         row: machineResult.row,
+      }),
+    };
+  }
+
+  if (machineResult.status === 'shortlist') {
+    await closeSession(session?._id, 'completed');
+    return {
+      replyType: 'text',
+      reply: buildCatalogRemainingMatchesText({
+        selectionFields,
+        resultFields,
+        selectedValues: machineResult.selectedValues,
+        rows: machineResult.rows,
       }),
     };
   }
