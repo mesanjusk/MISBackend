@@ -728,17 +728,23 @@ router.get("/tasks/queue", async (_req, res) => {
 
 router.patch("/:id/assign", async (req, res) => {
   try {
+    const assignedValue = String(req.body?.assignedTo || "").trim();
+
     const updated = await assignOrderToUser({
       orderId: req.params.id,
-      assignedTo: req.body?.assignedTo || null,
-      dueDate: req.body?.dueDate || null,
+      userId: mongoose.isValidObjectId(assignedValue) ? assignedValue : null,
+      userName: mongoose.isValidObjectId(assignedValue) ? null : assignedValue,
       assignedBy: req.body?.assignedBy || req.user?.userName || "System",
+      via: "app",
     });
 
     return res.json({ success: true, order: updated });
   } catch (error) {
     console.error("assign order error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Failed to assign order" });
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to assign order",
+    });
   }
 });
 
