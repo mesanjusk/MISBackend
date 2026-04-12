@@ -3,6 +3,7 @@ const router = express.Router();
 const Attendance = require("../repositories/attendance");
 const User = require("../repositories/users");
 const { markAttendance } = require("../services/attendanceService");
+const { getPendingOrdersForUser } = require("../services/orderTaskService");
 const { formatIST } = require("../utils/dateTime");
 
 // Add attendance entry (keeps the existing functionality)
@@ -30,7 +31,8 @@ router.post('/addAttendance', async (req, res) => {
     if (todayAttendance) {
       todayAttendance.User.push({ Type, Time, CreatedAt: new Date().toISOString() });
       await todayAttendance.save();
-      return res.json({ success: true, message: "New entry added to today's attendance." });
+      const assignmentSnapshot = Type === 'In' ? await getPendingOrdersForUser(user.User_name).catch(() => ({ orders: [] })) : { orders: [] };
+      return res.json({ success: true, message: "New entry added to today's attendance.", pendingAssignments: assignmentSnapshot.orders || [] });
     }
 
     await markAttendance({
@@ -41,7 +43,8 @@ router.post('/addAttendance', async (req, res) => {
       source: 'dashboard',
       createdAt: new Date(),
     });
-    res.json({ success: true, message: "New attendance recorded successfully." });
+    const assignmentSnapshot = Type === 'In' ? await getPendingOrdersForUser(user.User_name).catch(() => ({ orders: [] })) : { orders: [] };
+    res.json({ success: true, message: "New attendance recorded successfully.", pendingAssignments: assignmentSnapshot.orders || [] });
 
   } catch (error) {
     console.error("Error saving attendance:", error);
@@ -136,8 +139,9 @@ router.get('/getTodayAttendance/:userName', async (req, res) => {
 
     const sortedEntries = todayAttendance.User.sort((a, b) => new Date(a.CreatedAt) - new Date(b.CreatedAt));
     const flow = sortedEntries.map(entry => entry.Type);
+    const assignmentSnapshot = await getPendingOrdersForUser(user.User_name).catch(() => ({ orders: [] }));
 
-    res.json({ success: true, flow });
+    res.json({ success: true, flow, pendingAssignments: assignmentSnapshot.orders || [] });
 
   } catch (error) {
     console.error("Error fetching today's attendance:", error);

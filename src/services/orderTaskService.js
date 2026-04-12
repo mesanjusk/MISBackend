@@ -3,6 +3,7 @@ const Orders = require('../repositories/order');
 const Users = require('../repositories/users');
 
 const CLOSED_STAGES = new Set(['ready', 'delivered', 'paid']);
+const DESIGN_STAGE_KEYS = new Set(['enquiry', 'approved', 'design']);
 
 function getIstDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -30,6 +31,13 @@ function isPendingOrder(order) {
   return !CLOSED_STAGES.has(String(order?.stage || '').toLowerCase());
 }
 
+function isDesignAssignmentPending(order) {
+  if (!isPendingOrder(order)) return false;
+  const latestStatusTask = Array.isArray(order?.Status) && order.Status.length ? order.Status[order.Status.length - 1] : null;
+  const taskLower = String(latestStatusTask?.Task || order?.stage || '').trim().toLowerCase();
+  return taskLower.includes('design') || DESIGN_STAGE_KEYS.has(taskLower);
+}
+
 function decorateOrder(order, now = new Date()) {
   const due = order?.dueDate ? new Date(order.dueDate) : null;
   const latestStatusTask = Array.isArray(order?.Status) && order.Status.length ? order.Status[order.Status.length - 1] : null;
@@ -54,7 +62,7 @@ async function getPendingOrdersForUser(userOrName) {
     ],
   }).sort({ dueDate: 1, createdAt: 1 }).lean();
 
-  const orders = rows.map((row) => decorateOrder(row)).filter(isPendingOrder);
+  const orders = rows.map((row) => decorateOrder(row)).filter(isDesignAssignmentPending);
   return {
     user: {
       id: String(user._id),
@@ -77,7 +85,7 @@ async function getUnassignedOrders() {
     ],
   }).sort({ createdAt: 1 }).lean();
 
-  return rows.map((row) => decorateOrder(row));
+  return rows.map((row) => decorateOrder(row)).filter(isDesignAssignmentPending);
 }
 
 async function assignOrderToUser({ orderId, userId, userName, assignedBy = 'System', via = 'app' }) {

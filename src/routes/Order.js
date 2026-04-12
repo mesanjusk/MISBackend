@@ -16,6 +16,8 @@ const {
   isDriveAutomationEnabled,
 } = require("../services/googleDriveOAuthService");
 const Users = require("../repositories/users");
+const ProductionJob = require("../repositories/productionJob");
+const VendorLedger = require("../repositories/vendorLedger");
 const {
   buildDefaultDueDate,
   getPendingOrdersForUser,
@@ -227,6 +229,163 @@ function normalizeVendorAssignments(assignments) {
 
     return acc;
   }, []);
+}
+
+function mapVendorJobType(value = "") {
+  const lower = String(value || "").trim().toLowerCase();
+  if (!lower) return "manual";
+  if (lower.includes("print")) return "printing";
+  if (lower.includes("laminat")) return "lamination";
+  if (lower.includes("cut")) return "cutting";
+  if (lower.includes("pack")) return "packing";
+  if (lower.includes("purchase")) return "purchase";
+  if (["manual", "other"].includes(lower)) return lower;
+  return "other";
+}
+
+async function nextCounterValue(id, seed = 0) {
+  const current = await Counter.findById(id).lean();
+  if (!current?.seq) {
+    await Counter.updateOne({ _id: id }, { $max: { seq: seed } }, { upsert: true });
+  }
+  const updated = await Counter.findByIdAndUpdate(
+    id,
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  ).lean();
+  return Number(updated?.seq || 1);
+}
+
+async function syncVendorJobsForOrder(order, assignments = [], actor = "system") {
+  if (!order?.Order_uuid) return [];
+
+  const existingJobs = await ProductionJob.find({ "linkedOrders.orderUuid": order.Order_uuid }).lean();
+  const existingByAssignmentId = new Map(
+    existingJobs
+      .map((job) => {
+        const linked = Array.isArray(job.linkedOrders)
+          ? job.linkedOrders.find((entry) => String(entry?.orderUuid || "") === String(order.Order_uuid))
+          : null;
+        return [String(linked?.orderItemLineId || ""), job];
+      })
+      .filter(([key]) => key)
+  );
+
+  const touchedJobIds = [];
+  const createdOrUpdated = [];
+
+  for (const row of assignments) {
+    const assignmentId = String(row.assignmentId || "").trim();
+    if (!assignmentId) continue;
+
+    const linkedOrders = [{
+      orderUuid: order.Order_uuid,
+      orderNumber: order.Order_Number,
+      orderItemLineId: assignmentId,
+      quantity: Number(row.qty || 0),
+      outputQuantity: Number(row.qty || 0),
+      costShareAmount: Number(row.amount || 0),
+      allocationBasis: "manual",
+    }];
+
+    let job = existingByAssignmentId.get(assignmentId);
+    if (job) {
+      const updated = await ProductionJob.findByIdAndUpdate(
+        job._id,
+        {
+          $set: {
+            vendor_uuid: row.vendorCustomerUuid,
+            vendor_name: row.vendorName,
+            job_type: mapVendorJobType(row.workType),
+            job_date: row.dueDate || order.dueDate || new Date(),
+            status: row.status === "completed" ? "completed" : "draft",
+            jobValue: Number(row.amount || 0),
+            notes: row.note || "",
+            linkedOrders,
+            createdBy: actor,
+          },
+        },
+        { new: true }
+      ).lean();
+      touchedJobIds.push(String(updated._id));
+      createdOrUpdated.push(updated);
+    } else {
+      const jobNumber = await nextCounterValue("production_job_number", 0);
+      const created = await ProductionJob.create({
+        job_uuid: uuid(),
+        job_number: jobNumber,
+        job_type: mapVendorJobType(row.workType),
+        job_mode: "jobwork_only",
+        vendor_uuid: row.vendorCustomerUuid,
+        vendor_name: row.vendorName,
+        job_date: row.dueDate || order.dueDate || new Date(),
+        status: row.status === "completed" ? "completed" : "draft",
+        inputItems: [],
+        outputItems: [],
+        linkedOrders,
+        advanceAmount: 0,
+        jobValue: Number(row.amount || 0),
+        materialValue: 0,
+        otherCharges: 0,
+        notes: row.note || "",
+        createdBy: actor,
+      });
+      touchedJobIds.push(String(created._id));
+      createdOrUpdated.push(created.toObject ? created.toObject() : created);
+    }
+
+    await VendorLedger.findOneAndUpdate(
+      {
+        vendor_uuid: row.vendorCustomerUuid,
+        order_uuid: order.Order_uuid,
+        reference_type: "vendor_assignment",
+        reference_id: assignmentId,
+      },
+      {
+        $set: {
+          vendor_name: row.vendorName,
+          date: row.dueDate || order.dueDate || new Date(),
+          entry_type: "job_bill",
+          order_number: order.Order_Number,
+          amount: Number(row.amount || 0),
+          dr_cr: "cr",
+          narration: `${row.workType || "Vendor job"} for order #${order.Order_Number}`,
+        },
+        $setOnInsert: {
+          job_uuid: "",
+          transaction_uuid: "",
+          reference_type: "vendor_assignment",
+          reference_id: assignmentId,
+        },
+      },
+      { upsert: true, new: true }
+    );
+  }
+
+  if (touchedJobIds.length) {
+    const touchedSet = new Set(touchedJobIds);
+    const staleJobs = existingJobs.filter((job) => !touchedSet.has(String(job._id)));
+    if (staleJobs.length) {
+      await ProductionJob.deleteMany({ _id: { $in: staleJobs.map((job) => job._id) } });
+      const staleAssignmentIds = staleJobs
+        .map((job) => {
+          const linked = Array.isArray(job.linkedOrders)
+            ? job.linkedOrders.find((entry) => String(entry?.orderUuid || "") === String(order.Order_uuid))
+            : null;
+          return String(linked?.orderItemLineId || "");
+        })
+        .filter(Boolean);
+      if (staleAssignmentIds.length) {
+        await VendorLedger.deleteMany({
+          order_uuid: order.Order_uuid,
+          reference_type: "vendor_assignment",
+          reference_id: { $in: staleAssignmentIds },
+        });
+      }
+    }
+  }
+
+  return createdOrUpdated;
 }
 
 
@@ -1154,12 +1313,38 @@ router.post("/addStatus", async (req, res) => {
 /* ----------------------- UPDATE ORDER (generic) ----------------------- */
 router.put("/updateOrder/:id", async (req, res) => {
   try {
-    const { Delivery_Date, Items, ...otherFields } = req.body;
+    const { Delivery_Date, Items, Steps, vendorAssignments, orderMode, orderNote, assignedTo, assignToUserId, stage, ...otherFields } = req.body;
 
-    if (Items) otherFields.Items = normalizeItems(Items);
-
-    const order = await Orders.findById(req.params.id);
+    const filter = mongoose.isValidObjectId(req.params.id) ? { _id: req.params.id } : { Order_uuid: req.params.id };
+    const order = await Orders.findOne(filter);
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    if (Items) {
+      const incomingItems = normalizeItems(Items);
+      const { enrichedItems, workRows } = await enrichOrderItemsAndBuildWorkRows(incomingItems, order.dueDate || null);
+      order.Items = enrichedItems;
+      order.workRows = workRows;
+      order.orderMode = String(orderMode || (incomingItems.length ? "items" : "note")).toLowerCase() === "items" ? "items" : "note";
+    }
+
+    if (typeof orderNote !== "undefined") {
+      order.orderNote = norm(orderNote);
+      order.Remark = norm(orderNote);
+    }
+
+    if (typeof otherFields.Remark !== "undefined" && typeof orderNote === "undefined") {
+      order.orderNote = norm(otherFields.Remark);
+      order.Remark = norm(otherFields.Remark);
+      delete otherFields.Remark;
+    }
+
+    if (Array.isArray(Steps)) {
+      order.Steps = normalizeSteps(Steps);
+    }
+
+    if (Array.isArray(vendorAssignments)) {
+      order.vendorAssignments = normalizeVendorAssignments(vendorAssignments);
+    }
 
     if (Delivery_Date) {
       const lastIndex = (order.Status?.length || 1) - 1;
@@ -1169,14 +1354,92 @@ router.put("/updateOrder/:id", async (req, res) => {
           order.Status[lastIndex].Delivery_Date
         );
       }
+      order.dueDate = toDate(Delivery_Date, order.dueDate || new Date());
+    }
+
+    if (stage) {
+      order.stage = String(stage).trim().toLowerCase();
+      order.stageHistory = Array.isArray(order.stageHistory) ? order.stageHistory : [];
+      const latestStage = order.stageHistory[order.stageHistory.length - 1]?.stage;
+      if (latestStage !== order.stage) {
+        order.stageHistory.push({ stage: order.stage, timestamp: new Date() });
+      }
     }
 
     Object.assign(order, otherFields);
+
+    if (assignedTo || assignToUserId) {
+      const assignedUser = await Users.findById(assignedTo || assignToUserId).lean();
+      if (assignedUser) {
+        order.assignedTo = assignedUser._id;
+        if (Array.isArray(order.Status) && order.Status.length) {
+          const last = order.Status[order.Status.length - 1];
+          last.Assigned = assignedUser.User_name;
+          last.Delivery_Date = order.dueDate || buildDefaultDueDate();
+        }
+      }
+    }
+
     const saved = await order.save();
-    return res.json({ success: true, result: saved });
+    let vendorJobs = [];
+    if (Array.isArray(saved.vendorAssignments) && saved.vendorAssignments.length) {
+      vendorJobs = await syncVendorJobsForOrder(saved, saved.vendorAssignments, req.body?.updatedBy || req.user?.userName || "system");
+    } else {
+      await ProductionJob.deleteMany({ "linkedOrders.orderUuid": saved.Order_uuid });
+      await VendorLedger.deleteMany({ order_uuid: saved.Order_uuid, reference_type: "vendor_assignment" });
+    }
+
+    const refreshed = await Orders.findById(saved._id).lean();
+    return res.json({ success: true, result: refreshed, vendorJobs, message: "Order updated successfully" });
   } catch (err) {
     console.error("Update error:", err);
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/reports/planning", async (_req, res) => {
+  try {
+    const [orders, jobs] = await Promise.all([
+      Orders.find({}, {
+        Order_uuid: 1,
+        Order_Number: 1,
+        Customer_uuid: 1,
+        stage: 1,
+        dueDate: 1,
+        assignedTo: 1,
+        vendorAssignments: 1,
+        Steps: 1,
+        Status: 1,
+        createdAt: 1,
+      }).sort({ createdAt: -1 }).lean(),
+      ProductionJob.find({}).sort({ job_date: -1, createdAt: -1 }).lean(),
+    ]);
+
+    const orderRows = orders.map((order) => {
+      const latestStatusTask = Array.isArray(order.Status) && order.Status.length ? order.Status[order.Status.length - 1] : null;
+      const linkedJobs = jobs.filter((job) => Array.isArray(job.linkedOrders) && job.linkedOrders.some((entry) => String(entry?.orderUuid || "") === String(order.Order_uuid)));
+      return {
+        ...order,
+        latestStatusTask,
+        vendorJobCount: linkedJobs.length,
+        vendorJobCost: linkedJobs.reduce((sum, job) => sum + Number(job.jobValue || 0), 0),
+        unassignedDesign: String(latestStatusTask?.Task || order.stage || "").toLowerCase().includes("design") && (!latestStatusTask?.Assigned || String(latestStatusTask?.Assigned || "").toLowerCase() === "none"),
+      };
+    });
+
+    return res.json({ success: true, result: { orders: orderRows, jobs } });
+  } catch (error) {
+    console.error("planning report error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to load planning report" });
+  }
+});
+
+router.get("/design-unassigned", async (_req, res) => {
+  try {
+    const rows = await getUnassignedOrders();
+    return res.json({ success: true, result: rows });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Failed to load unassigned design orders" });
   }
 });
 
