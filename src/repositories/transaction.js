@@ -18,6 +18,13 @@ const TransactionSchema=new mongoose.Schema({
     Payment_mode: { type: String, required: true},
     Created_by: { type: String, required: true },
     image: { type: String },
+    Customer_uuid: { type: String },
+    Upi_reference: { type: String },
+    Upi_status: { type: String },
+    Upi_app: { type: String },
+    Upi_payee_vpa: { type: String },
+    Upi_response_raw: { type: String },
+    Source: { type: String },
     Journal_entry: [journalSchema],
  },  { timestamps: true })
 
