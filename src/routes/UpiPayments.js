@@ -19,24 +19,77 @@ const parsePositiveAmount = (value) => {
 };
 
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
-
 const normalizeStatus = (value) => toTrimmedString(value).toLowerCase();
 
 const buildUpiLink = ({ payeeUpiId, payeeName, amount, note, transactionRef, currency = 'INR' }) => {
+  const cleanVpa = toTrimmedString(payeeUpiId);
+  const cleanName = toTrimmedString(payeeName);
+  if (!cleanVpa || !cleanName) return '';
+
   const params = new URLSearchParams({
-    pa: payeeUpiId,
-    pn: payeeName,
+    pa: cleanVpa,
+    pn: cleanName,
     am: String(amount),
     cu: currency,
     tr: transactionRef,
   });
 
-  if (note) {
-    params.set('tn', note);
-  }
-
+  if (note) params.set('tn', note);
   return `upi://pay?${params.toString()}`;
 };
+
+const buildShareLink = (req, transactionRef) => {
+  const origin = `${req.protocol}://${req.get('host')}`;
+  return `${origin}/upi/collect/${encodeURIComponent(transactionRef)}`;
+};
+
+const sanitizeAttempt = (doc) => {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    payment_uuid: doc.payment_uuid,
+    customerId: doc.customerId,
+    customerName: doc.customerName,
+    mobileNumber: doc.mobileNumber,
+    relatedAccountId: doc.relatedAccountId,
+    relatedAccountName: doc.relatedAccountName,
+    relatedOrderId: doc.relatedOrderId,
+    amount: doc.amount,
+    currency: doc.currency,
+    note: doc.note,
+    transactionRef: doc.transactionRef,
+    payeeUpiId: doc.payeeUpiId,
+    payeeName: doc.payeeName,
+    upiLink: doc.upiLink,
+    shareLink: doc.shareLink,
+    status: doc.status,
+    initiationSource: doc.initiationSource,
+    initiatedBy: doc.initiatedBy,
+    appReturnPayload: doc.appReturnPayload,
+    rawResponse: doc.rawResponse,
+    metadata: doc.metadata,
+    transactionUuid: doc.transactionUuid,
+    transactionId: doc.transactionId,
+    confirmedAt: doc.confirmedAt,
+    cancelledAt: doc.cancelledAt,
+    expiresAt: doc.expiresAt,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+};
+
+router.get(
+  '/public/:transactionRef',
+  asyncHandler(async (req, res) => {
+    const transactionRef = toTrimmedString(req.params.transactionRef);
+    if (!transactionRef) throw new AppError('transactionRef is required', 400);
+
+    const result = await UpiPaymentAttempt.findOne({ transactionRef }).lean();
+    if (!result) throw new AppError('UPI payment request not found', 404);
+
+    return res.json({ success: true, result: sanitizeAttempt(result) });
+  })
+);
 
 router.use(requireAuth);
 
@@ -44,18 +97,17 @@ router.post(
   '/payments/attempt',
   asyncHandler(async (req, res) => {
     const amount = parsePositiveAmount(req.body.amount);
-    const payeeUpiId = toTrimmedString(req.body.payeeUpiId);
-    const payeeName = toTrimmedString(req.body.payeeName);
     const transactionRef = toTrimmedString(req.body.transactionRef);
+    const status = normalizeStatus(req.body.status || 'pending') || 'pending';
 
     if (!amount) throw new AppError('Valid amount is required', 400);
-    if (!payeeUpiId) throw new AppError('payeeUpiId is required', 400);
-    if (!payeeName) throw new AppError('payeeName is required', 400);
     if (!transactionRef) throw new AppError('transactionRef is required', 400);
+    if (!ALLOWED_STATUSES.includes(status)) throw new AppError('Invalid status', 400);
 
     const note = toTrimmedString(req.body.note);
     const currency = 'INR';
-
+    const payeeUpiId = toTrimmedString(req.body.payeeUpiId);
+    const payeeName = toTrimmedString(req.body.payeeName);
     const upiLink = buildUpiLink({
       payeeUpiId,
       payeeName,
@@ -73,6 +125,7 @@ router.post(
         customerName: toTrimmedString(req.body.customerName),
         mobileNumber: toTrimmedString(req.body.mobileNumber),
         relatedAccountId: toTrimmedString(req.body.relatedAccountId) || null,
+        relatedAccountName: toTrimmedString(req.body.relatedAccountName),
         relatedOrderId: toTrimmedString(req.body.relatedOrderId) || null,
         amount,
         currency,
@@ -81,12 +134,14 @@ router.post(
         payeeUpiId,
         payeeName,
         upiLink,
-        status: 'created',
-        initiationSource: 'dashboard',
+        shareLink: buildShareLink(req, transactionRef),
+        status,
+        initiationSource: toTrimmedString(req.body.initiationSource) || 'dashboard',
         initiatedBy: toTrimmedString(req.user?.id) || null,
         appReturnPayload: req.body.appReturnPayload || null,
         rawResponse: req.body.rawResponse || null,
         metadata: req.body.metadata || null,
+        expiresAt: req.body.expiresAt || null,
       });
     } catch (error) {
       if (error?.code === 11000 && error?.keyPattern?.transactionRef) {
@@ -97,8 +152,8 @@ router.post(
 
     return res.status(201).json({
       success: true,
-      message: 'UPI payment attempt created successfully',
-      result: attempt,
+      message: 'UPI payment request created successfully',
+      result: sanitizeAttempt(attempt),
     });
   })
 );
@@ -108,22 +163,18 @@ router.get(
   asyncHandler(async (req, res) => {
     const status = normalizeStatus(req.query.status);
     const customerId = toTrimmedString(req.query.customerId);
+    const onlyPending = String(req.query.onlyPending || '').toLowerCase() === 'true';
 
     const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 20, 1), 100);
 
     const filter = {};
-
     if (status) {
-      if (!ALLOWED_STATUSES.includes(status)) {
-        throw new AppError('Invalid status filter', 400);
-      }
+      if (!ALLOWED_STATUSES.includes(status)) throw new AppError('Invalid status filter', 400);
       filter.status = status;
     }
-
-    if (customerId) {
-      filter.customerId = customerId;
-    }
+    if (onlyPending) filter.status = { $in: ['created', 'initiated', 'pending'] };
+    if (customerId) filter.customerId = customerId;
 
     const [result, total] = await Promise.all([
       UpiPaymentAttempt.find(filter)
@@ -136,7 +187,7 @@ router.get(
 
     return res.json({
       success: true,
-      result,
+      result: result.map(sanitizeAttempt),
       pagination: {
         total,
         page,
@@ -152,10 +203,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const transactionRef = toTrimmedString(req.params.transactionRef);
     const result = await UpiPaymentAttempt.findOne({ transactionRef }).lean();
-
-    if (!result) throw new AppError('UPI payment attempt not found', 404);
-
-    return res.json({ success: true, result });
+    if (!result) throw new AppError('UPI payment request not found', 404);
+    return res.json({ success: true, result: sanitizeAttempt(result) });
   })
 );
 
@@ -163,13 +212,11 @@ router.get(
   '/payments/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    if (!isValidObjectId(id)) throw new AppError('Invalid payment attempt id', 400);
+    if (!isValidObjectId(id)) throw new AppError('Invalid payment request id', 400);
 
     const result = await UpiPaymentAttempt.findById(id).lean();
-
-    if (!result) throw new AppError('UPI payment attempt not found', 404);
-
-    return res.json({ success: true, result });
+    if (!result) throw new AppError('UPI payment request not found', 404);
+    return res.json({ success: true, result: sanitizeAttempt(result) });
   })
 );
 
@@ -177,45 +224,32 @@ router.patch(
   '/payments/:id/status',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    if (!isValidObjectId(id)) throw new AppError('Invalid payment attempt id', 400);
+    if (!isValidObjectId(id)) throw new AppError('Invalid payment request id', 400);
 
     const status = normalizeStatus(req.body.status);
+    if (!ALLOWED_STATUSES.includes(status)) throw new AppError('Invalid status', 400);
 
-    if (!ALLOWED_STATUSES.includes(status)) {
-      throw new AppError('Invalid status', 400);
-    }
-
-    const update = {
-      status,
-    };
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'appReturnPayload')) {
-      update.appReturnPayload = req.body.appReturnPayload;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'rawResponse')) {
-      update.rawResponse = req.body.rawResponse;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'note')) {
-      update.note = toTrimmedString(req.body.note);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'metadata')) {
-      update.metadata = req.body.metadata;
-    }
+    const update = { status };
+    if (Object.prototype.hasOwnProperty.call(req.body, 'appReturnPayload')) update.appReturnPayload = req.body.appReturnPayload;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'rawResponse')) update.rawResponse = req.body.rawResponse;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'note')) update.note = toTrimmedString(req.body.note);
+    if (Object.prototype.hasOwnProperty.call(req.body, 'metadata')) update.metadata = req.body.metadata;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'transactionUuid')) update.transactionUuid = toTrimmedString(req.body.transactionUuid);
+    if (Object.prototype.hasOwnProperty.call(req.body, 'transactionId')) update.transactionId = Number(req.body.transactionId) || null;
+    if (status === 'success') update.confirmedAt = new Date();
+    if (status === 'cancelled') update.cancelledAt = new Date();
 
     const result = await UpiPaymentAttempt.findByIdAndUpdate(id, update, {
       new: true,
       runValidators: true,
     }).lean();
 
-    if (!result) throw new AppError('UPI payment attempt not found', 404);
+    if (!result) throw new AppError('UPI payment request not found', 404);
 
     return res.json({
       success: true,
-      message: 'UPI payment status updated successfully',
-      result,
+      message: 'UPI payment request updated successfully',
+      result: sanitizeAttempt(result),
     });
   })
 );

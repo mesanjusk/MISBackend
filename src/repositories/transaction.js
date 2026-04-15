@@ -18,22 +18,23 @@ const TransactionSchema=new mongoose.Schema({
     Payment_mode: { type: String, required: true},
     Created_by: { type: String, required: true },
     image: { type: String },
-    Customer_uuid: { type: String },
-    Upi_reference: { type: String },
-    Upi_status: { type: String },
-    Upi_app: { type: String },
-    Upi_payee_vpa: { type: String },
-    Upi_response_raw: { type: String },
-    Source: { type: String },
     Journal_entry: [journalSchema],
+    Customer_uuid: { type: String, default: null },
+    Upi_reference: { type: String, default: '' },
+    Upi_status: { type: String, default: '' },
+    Upi_app: { type: String, default: '' },
+    Upi_payee_vpa: { type: String, default: '' },
+    Upi_response_raw: { type: mongoose.Schema.Types.Mixed, default: null },
+    Source: { type: String, default: '' },
  },  { timestamps: true })
 
-// Indexes for efficient financial queries
 TransactionSchema.index({ Transaction_id: 1 });
 TransactionSchema.index({ Order_uuid: 1 });
 TransactionSchema.index({ Transaction_date: 1 });
 TransactionSchema.index({ Payment_mode: 1 });
 TransactionSchema.index({ Created_by: 1 });
+TransactionSchema.index({ Customer_uuid: 1 });
+TransactionSchema.index({ Upi_reference: 1 });
 
  const Transaction = mongoose.model("Transaction", TransactionSchema);
 

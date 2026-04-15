@@ -194,12 +194,12 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       image: imageUrl,
       Created_by,
       Customer_uuid: Customer_uuid || null,
-      Upi_reference: Upi_reference || null,
-      Upi_status: Upi_status || null,
-      Upi_app: Upi_app || null,
-      Upi_payee_vpa: Upi_payee_vpa || null,
+      Upi_reference: Upi_reference || '',
+      Upi_status: Upi_status || '',
+      Upi_app: Upi_app || '',
+      Upi_payee_vpa: Upi_payee_vpa || '',
       Upi_response_raw: Upi_response_raw || null,
-      Source: Source || null,
+      Source: Source || '',
     });
 
     await newTransaction.save();
@@ -339,12 +339,6 @@ router.put("/:uuid", upload.single("image"), async (req, res) => {
       Created_by,
       Journal_entry,
       Customer_uuid: Customer_uuid || null,
-      Upi_reference: Upi_reference || null,
-      Upi_status: Upi_status || null,
-      Upi_app: Upi_app || null,
-      Upi_payee_vpa: Upi_payee_vpa || null,
-      Upi_response_raw: Upi_response_raw || null,
-      Source: Source || null,
     };
 
     // Only overwrite image if we actually uploaded a new one
