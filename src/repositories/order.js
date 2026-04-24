@@ -63,12 +63,24 @@ const itemSchema = new mongoose.Schema(
 const vendorAssignmentSchema = new mongoose.Schema(
   {
     assignmentId: { type: String, default: uuidv4 },
-    vendorCustomerUuid: { type: String, required: true },
+    // Kept old field name for backward compatibility with existing orders/UI.
+    // It now stores VendorMaster.Vendor_uuid, not Customer_uuid.
+    vendorCustomerUuid: { type: String, required: true, index: true },
+    vendorUuid: { type: String, default: "", index: true },
     vendorName: { type: String, required: true },
     workType: { type: String, default: "General" },
+    sequence: { type: Number, default: 1, min: 1 },
+    inputItem: { type: String, default: "" },
+    outputItem: { type: String, default: "" },
+    jobMode: {
+      type: String,
+      enum: ["jobwork_only", "vendor_with_material", "own_material_sent", "mixed"],
+      default: "jobwork_only",
+    },
     note: { type: String, default: "" },
     qty: { type: Number, default: 0, min: 0 },
     amount: { type: Number, default: 0, min: 0 },
+    advanceAmount: { type: Number, default: 0, min: 0 },
     dueDate: { type: Date, default: null },
     paymentStatus: {
       type: String,
@@ -189,6 +201,7 @@ OrdersSchema.index({ "workRows.itemName": 1 });
 OrdersSchema.index({ "Steps.vendorId": 1 });
 OrdersSchema.index({ "Steps.posting.isPosted": 1 });
 OrdersSchema.index({ "vendorAssignments.vendorCustomerUuid": 1 });
+OrdersSchema.index({ "vendorAssignments.vendorUuid": 1 });
 OrdersSchema.index({ createdAt: -1 });
 
 function recalcTotals(doc) {

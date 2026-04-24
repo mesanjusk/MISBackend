@@ -118,7 +118,21 @@ async function getAuthorizedDriveClient() {
   });
 
   if (!saved?.refreshToken) {
-    throw new Error("Google Drive is not connected yet");
+    await GoogleDriveToken.deleteMany({ provider: "google_drive" });
+    const err = new Error("Google Drive disconnected. Please reconnect Google Drive.");
+    err.code = "GOOGLE_DRIVE_RECONNECT_REQUIRED";
+    err.reconnectRequired = true;
+    throw err;
+  }
+
+  // If only an expired access token exists, or the token document is incomplete,
+  // clear it immediately so the frontend can force reconnect instead of failing later.
+  if (!saved.refreshToken || (saved.expiryDate && Number(saved.expiryDate) < Date.now() && !saved.refreshToken)) {
+    await GoogleDriveToken.deleteMany({ provider: "google_drive" });
+    const err = new Error("Google Drive token expired. Please reconnect Google Drive.");
+    err.code = "GOOGLE_DRIVE_RECONNECT_REQUIRED";
+    err.reconnectRequired = true;
+    throw err;
   }
 
   const oauth2Client = getOAuthClient();

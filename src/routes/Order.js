@@ -20,6 +20,7 @@ const GoogleDriveToken = require("../repositories/googleDriveToken");
 const Users = require("../repositories/users");
 const ProductionJob = require("../repositories/productionJob");
 const VendorLedger = require("../repositories/vendorLedger");
+const VendorMaster = require("../repositories/vendorMaster");
 const {
   buildDefaultDueDate,
   getPendingOrdersForUser,
@@ -43,6 +44,38 @@ const toBool = (value, fallback = false) => {
   if (["false", "0", "no"].includes(normalized)) return false;
   return fallback;
 };
+
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+async function resolveVendorMasterFromPayload(row = {}) {
+  const vendorUuid = norm(row.vendorUuid || row.vendor_uuid || row.vendorCustomerUuid || row.vendorId || row.Customer_uuid);
+  const vendorName = norm(row.vendorName || row.vendor_name || row.Customer_name || row.name);
+
+  if (vendorUuid) {
+    const existing = await VendorMaster.findOne({ Vendor_uuid: vendorUuid }).lean();
+    if (existing) return existing;
+  }
+
+  if (vendorName) {
+    const byName = await VendorMaster.findOne({ Vendor_name: vendorName }).lean();
+    if (byName) return byName;
+
+    const created = await VendorMaster.create({
+      Vendor_uuid: vendorUuid || uuid(),
+      Vendor_name: vendorName,
+      Vendor_type: row.jobMode === "vendor_with_material" ? "mixed" : "jobwork",
+      Active: true,
+      Jobwork_capable: true,
+      Raw_material_capable: row.jobMode === "vendor_with_material",
+    });
+    return created.toObject ? created.toObject() : created;
+  }
+
+  return null;
+}
 
 function resolveDrivePayloadConfig(body = {}) {
   const nestedGoogleDrive = body?.googleDrive && typeof body.googleDrive === "object"
@@ -202,35 +235,50 @@ function normalizeSteps(steps) {
   }, []);
 }
 
-function normalizeVendorAssignments(assignments) {
+async function normalizeVendorAssignments(assignments) {
   if (!Array.isArray(assignments)) return [];
-  return assignments.reduce((acc, row) => {
-    const vendorCustomerUuid = norm(row?.vendorCustomerUuid || row?.vendorId || row?.Customer_uuid);
-    const vendorName = norm(row?.vendorName || row?.Customer_name || row?.name);
-    if (!vendorCustomerUuid || !vendorName) return acc;
+  const rows = [];
 
-    const amount = Number(row?.amount ?? 0);
-    const qty = Number(row?.qty ?? 0);
+  for (const row of assignments) {
+    const vendor = await resolveVendorMasterFromPayload(row);
+    const vendorUuid = norm(vendor?.Vendor_uuid || row?.vendorUuid || row?.vendor_uuid || row?.vendorCustomerUuid || row?.vendorId || row?.Customer_uuid);
+    const vendorName = norm(vendor?.Vendor_name || row?.vendorName || row?.vendor_name || row?.Customer_name || row?.name);
+    if (!vendorUuid || !vendorName) continue;
 
-    acc.push({
+    const amount = toSafeNumber(row?.amount, 0);
+    const qty = toSafeNumber(row?.qty, 0);
+    const advanceAmount = toSafeNumber(row?.advanceAmount ?? row?.advance ?? row?.advance_paid, 0);
+    const sequence = Math.max(1, Math.trunc(toSafeNumber(row?.sequence, rows.length + 1)));
+    const jobModeRaw = String(row?.jobMode || row?.job_mode || "jobwork_only").toLowerCase();
+    const jobMode = ["jobwork_only", "vendor_with_material", "own_material_sent", "mixed"].includes(jobModeRaw)
+      ? jobModeRaw
+      : "jobwork_only";
+
+    rows.push({
       assignmentId: norm(row?.assignmentId) || undefined,
-      vendorCustomerUuid,
+      vendorCustomerUuid: vendorUuid,
+      vendorUuid,
       vendorName,
       workType: norm(row?.workType || row?.work || row?.label) || "General",
+      sequence,
+      inputItem: norm(row?.inputItem || row?.input_item),
+      outputItem: norm(row?.outputItem || row?.output_item),
+      jobMode,
       note: norm(row?.note || row?.remark || row?.description),
-      qty: Number.isFinite(qty) && qty >= 0 ? qty : 0,
-      amount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+      qty: qty >= 0 ? qty : 0,
+      amount: amount >= 0 ? amount : 0,
+      advanceAmount: advanceAmount >= 0 ? advanceAmount : 0,
       dueDate: row?.dueDate ? new Date(row.dueDate) : null,
       paymentStatus: ["pending", "partial", "paid"].includes(String(row?.paymentStatus || "").toLowerCase())
         ? String(row.paymentStatus).toLowerCase()
-        : "pending",
+        : advanceAmount > 0 && amount > advanceAmount ? "partial" : advanceAmount > 0 && amount <= advanceAmount && amount > 0 ? "paid" : "pending",
       status: ["pending", "in_progress", "completed"].includes(String(row?.status || "").toLowerCase())
         ? String(row.status).toLowerCase()
         : "pending",
     });
+  }
 
-    return acc;
-  }, []);
+  return rows.sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
 }
 
 function mapVendorJobType(value = "") {
@@ -290,18 +338,27 @@ async function syncVendorJobsForOrder(order, assignments = [], actor = "system")
       allocationBasis: "manual",
     }];
 
+    const inputItems = row.inputItem ? [{ itemName: row.inputItem, itemType: "raw", quantity: Number(row.qty || 0), amount: 0 }] : [];
+    const outputItems = row.outputItem ? [{ itemName: row.outputItem, itemType: "semi_finished", quantity: Number(row.qty || 0), amount: 0 }] : [];
+
     let job = existingByAssignmentId.get(assignmentId);
+    let savedJob;
     if (job) {
-      const updated = await ProductionJob.findByIdAndUpdate(
+      savedJob = await ProductionJob.findByIdAndUpdate(
         job._id,
         {
           $set: {
-            vendor_uuid: row.vendorCustomerUuid,
+            vendor_uuid: row.vendorUuid || row.vendorCustomerUuid,
             vendor_name: row.vendorName,
             job_type: mapVendorJobType(row.workType),
+            job_mode: row.jobMode || "jobwork_only",
             job_date: row.dueDate || order.dueDate || new Date(),
-            status: row.status === "completed" ? "completed" : "draft",
+            status: row.status === "completed" ? "completed" : row.status === "in_progress" ? "in_progress" : "draft",
+            inputItems,
+            outputItems,
+            advanceAmount: Number(row.advanceAmount || 0),
             jobValue: Number(row.amount || 0),
+            materialValue: row.jobMode === "vendor_with_material" ? Number(row.amount || 0) : 0,
             notes: row.note || "",
             linkedOrders,
             createdBy: actor,
@@ -309,59 +366,97 @@ async function syncVendorJobsForOrder(order, assignments = [], actor = "system")
         },
         { new: true }
       ).lean();
-      touchedJobIds.push(String(updated._id));
-      createdOrUpdated.push(updated);
+      touchedJobIds.push(String(savedJob._id));
+      createdOrUpdated.push(savedJob);
     } else {
       const jobNumber = await nextCounterValue("production_job_number", 0);
       const created = await ProductionJob.create({
         job_uuid: uuid(),
         job_number: jobNumber,
         job_type: mapVendorJobType(row.workType),
-        job_mode: "jobwork_only",
-        vendor_uuid: row.vendorCustomerUuid,
+        job_mode: row.jobMode || "jobwork_only",
+        vendor_uuid: row.vendorUuid || row.vendorCustomerUuid,
         vendor_name: row.vendorName,
         job_date: row.dueDate || order.dueDate || new Date(),
-        status: row.status === "completed" ? "completed" : "draft",
-        inputItems: [],
-        outputItems: [],
+        status: row.status === "completed" ? "completed" : row.status === "in_progress" ? "in_progress" : "draft",
+        inputItems,
+        outputItems,
         linkedOrders,
-        advanceAmount: 0,
+        advanceAmount: Number(row.advanceAmount || 0),
         jobValue: Number(row.amount || 0),
-        materialValue: 0,
+        materialValue: row.jobMode === "vendor_with_material" ? Number(row.amount || 0) : 0,
         otherCharges: 0,
         notes: row.note || "",
         createdBy: actor,
       });
-      touchedJobIds.push(String(created._id));
-      createdOrUpdated.push(created.toObject ? created.toObject() : created);
+      savedJob = created.toObject ? created.toObject() : created;
+      touchedJobIds.push(String(savedJob._id));
+      createdOrUpdated.push(savedJob);
     }
 
+    const vendorUuid = row.vendorUuid || row.vendorCustomerUuid;
     await VendorLedger.findOneAndUpdate(
       {
-        vendor_uuid: row.vendorCustomerUuid,
+        vendor_uuid: vendorUuid,
         order_uuid: order.Order_uuid,
-        reference_type: "vendor_assignment",
+        reference_type: "vendor_assignment_bill",
         reference_id: assignmentId,
       },
       {
         $set: {
           vendor_name: row.vendorName,
           date: row.dueDate || order.dueDate || new Date(),
-          entry_type: "job_bill",
+          entry_type: row.jobMode === "vendor_with_material" ? "material_bill" : "job_bill",
+          job_uuid: savedJob?.job_uuid || "",
           order_number: order.Order_Number,
           amount: Number(row.amount || 0),
           dr_cr: "cr",
-          narration: `${row.workType || "Vendor job"} for order #${order.Order_Number}`,
+          narration: `Stage ${row.sequence || ""} - ${row.workType || "Vendor job"} for order #${order.Order_Number}`.trim(),
+          transaction_uuid: "",
         },
         $setOnInsert: {
-          job_uuid: "",
-          transaction_uuid: "",
-          reference_type: "vendor_assignment",
+          reference_type: "vendor_assignment_bill",
           reference_id: assignmentId,
         },
       },
       { upsert: true, new: true }
     );
+
+    if (Number(row.advanceAmount || 0) > 0) {
+      await VendorLedger.findOneAndUpdate(
+        {
+          vendor_uuid: vendorUuid,
+          order_uuid: order.Order_uuid,
+          reference_type: "vendor_assignment_advance",
+          reference_id: assignmentId,
+        },
+        {
+          $set: {
+            vendor_name: row.vendorName,
+            date: new Date(),
+            entry_type: "advance_paid",
+            job_uuid: savedJob?.job_uuid || "",
+            order_number: order.Order_Number,
+            amount: Number(row.advanceAmount || 0),
+            dr_cr: "dr",
+            narration: `Advance paid for ${row.workType || "vendor job"} on order #${order.Order_Number}`,
+            transaction_uuid: "",
+          },
+          $setOnInsert: {
+            reference_type: "vendor_assignment_advance",
+            reference_id: assignmentId,
+          },
+        },
+        { upsert: true, new: true }
+      );
+    } else {
+      await VendorLedger.deleteMany({
+        vendor_uuid: vendorUuid,
+        order_uuid: order.Order_uuid,
+        reference_type: "vendor_assignment_advance",
+        reference_id: assignmentId,
+      });
+    }
   }
 
   if (touchedJobIds.length) {
@@ -380,7 +475,7 @@ async function syncVendorJobsForOrder(order, assignments = [], actor = "system")
       if (staleAssignmentIds.length) {
         await VendorLedger.deleteMany({
           order_uuid: order.Order_uuid,
-          reference_type: "vendor_assignment",
+          reference_type: { $in: ["vendor_assignment", "vendor_assignment_bill", "vendor_assignment_advance"] },
           reference_id: { $in: staleAssignmentIds },
         });
       }
@@ -534,7 +629,7 @@ router.post("/addOrder", async (req, res) => {
     }
 
     const flatSteps = normalizeSteps(Steps);
-    const normalizedVendorAssignments = normalizeVendorAssignments(vendorAssignments);
+    const normalizedVendorAssignments = await normalizeVendorAssignments(vendorAssignments);
     const requestedOrderMode = String(orderMode || "").trim().toLowerCase();
     const finalOrderMode = requestedOrderMode === "items" ? "items" : "note";
     const normalizedOrderNote = norm(
@@ -606,6 +701,11 @@ router.post("/addOrder", async (req, res) => {
     });
 
     await newOrder.save();
+
+    let vendorJobs = [];
+    if (Array.isArray(newOrder.vendorAssignments) && newOrder.vendorAssignments.length) {
+      vendorJobs = await syncVendorJobsForOrder(newOrder, newOrder.vendorAssignments, req.body?.createdBy || req.user?.userName || "system");
+    }
 
     const driveConfig = resolveDrivePayloadConfig(req.body || {});
 
@@ -695,6 +795,7 @@ router.post("/addOrder", async (req, res) => {
       orderId: newOrder._id,
       orderNumber: newOrderNumber,
       result: savedOrder,
+      vendorJobs,
       driveFile,
       warning: driveWarning,
     });
@@ -1360,7 +1461,7 @@ router.put("/updateOrder/:id", async (req, res) => {
     }
 
     if (Array.isArray(vendorAssignments)) {
-      order.vendorAssignments = normalizeVendorAssignments(vendorAssignments);
+      order.vendorAssignments = await normalizeVendorAssignments(vendorAssignments);
     }
 
     if (Delivery_Date) {
@@ -1403,7 +1504,7 @@ router.put("/updateOrder/:id", async (req, res) => {
       vendorJobs = await syncVendorJobsForOrder(saved, saved.vendorAssignments, req.body?.updatedBy || req.user?.userName || "system");
     } else {
       await ProductionJob.deleteMany({ "linkedOrders.orderUuid": saved.Order_uuid });
-      await VendorLedger.deleteMany({ order_uuid: saved.Order_uuid, reference_type: "vendor_assignment" });
+      await VendorLedger.deleteMany({ order_uuid: saved.Order_uuid, reference_type: { $in: ["vendor_assignment", "vendor_assignment_bill", "vendor_assignment_advance"] } });
     }
 
     const refreshed = await Orders.findById(saved._id).lean();
@@ -1744,6 +1845,32 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
           },
         ],
         { session }
+      );
+
+      await VendorLedger.findOneAndUpdate(
+        {
+          vendor_uuid: step.vendorId || resolvedVendor,
+          order_uuid: order.Order_uuid,
+          reference_type: "order_step_bill",
+          reference_id: String(step._id),
+        },
+        {
+          $set: {
+            vendor_name: step.vendorName || vendorName || "",
+            date: txnDate,
+            entry_type: "job_bill",
+            order_number: order.Order_Number,
+            amount,
+            dr_cr: "cr",
+            narration: `Posted outsourced step ${step.label} for order #${order.Order_Number}`,
+            transaction_uuid: txnDocs[0].Transaction_uuid || "",
+          },
+          $setOnInsert: {
+            reference_type: "order_step_bill",
+            reference_id: String(step._id),
+          },
+        },
+        { upsert: true, session }
       );
 
       step.posting = { isPosted: true, txnId: txnDocs[0]._id, postedAt: new Date() };
