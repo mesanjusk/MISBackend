@@ -14,7 +14,9 @@ const ItemsRepo = require("../repositories/items");
 const {
   copyOrderTemplateFileOAuth,
   isDriveAutomationEnabled,
+  isGoogleAuthError,
 } = require("../services/googleDriveOAuthService");
+const GoogleDriveToken = require("../repositories/googleDriveToken");
 const Users = require("../repositories/users");
 const ProductionJob = require("../repositories/productionJob");
 const VendorLedger = require("../repositories/vendorLedger");
@@ -657,14 +659,23 @@ router.post("/addOrder", async (req, res) => {
       }
     } catch (driveErr) {
       console.error("Google Drive copy error:", driveErr);
+      const reconnectRequired = Boolean(driveErr?.reconnectRequired) || isGoogleAuthError(driveErr);
+
+      if (reconnectRequired) {
+        await GoogleDriveToken.deleteMany({ provider: "google_drive" });
+      }
+
       driveFile = {
         status: "failed",
         templateFileId: driveConfig.templateFileId || null,
         folderId: driveConfig.targetFolderId || null,
-        error: driveErr.message || "Unknown drive error",
+        error: reconnectRequired
+          ? "Google Drive disconnected. Please reconnect Google Drive."
+          : driveErr.message || "Unknown drive error",
+        reconnectRequired,
         createdAt: null,
       };
-      driveWarning = driveErr.message || "Drive copy failed";
+      driveWarning = driveFile.error || "Drive copy failed";
     }
 
     await Orders.updateOne(

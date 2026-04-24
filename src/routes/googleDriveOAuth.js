@@ -5,6 +5,7 @@ const {
   getGoogleDriveAuthUrl,
   saveGoogleTokensFromCode,
   isDriveAutomationEnabled,
+  getGoogleDriveConnectionStatus,
 } = require("../services/googleDriveOAuthService");
 
 router.get("/connect", async (req, res) => {
@@ -73,20 +74,17 @@ router.get("/callback", async (req, res) => {
   }
 });
 
-router.get("/status", async (_req, res) => {
+router.get("/status", async (req, res) => {
   try {
-    const token = await GoogleDriveToken.findOne({
-      provider: "google_drive",
-    }).lean();
+    const verifyToken = ["1", "true", "yes"].includes(
+      String(req.query?.check || req.query?.verify || "").toLowerCase()
+    );
+
+    const status = await getGoogleDriveConnectionStatus({ verifyToken });
 
     return res.json({
       success: true,
-      connected: !!token?.refreshToken,
-      email: token?.email || null,
-      automationEnabled: isDriveAutomationEnabled(),
-      templateFileIdConfigured: !!process.env.DRIVE_TEMPLATE_FILE_ID,
-      targetFolderIdConfigured: !!process.env.DRIVE_TARGET_FOLDER_ID,
-      redirectUriConfigured: !!process.env.GOOGLE_REDIRECT_URI,
+      ...status,
     });
   } catch (error) {
     return res.status(500).json({
