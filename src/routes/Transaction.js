@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 
 const Transaction = require("../repositories/transaction");
-const Orders = require("../repositories/order"); // ✅ NEW: to update bill status in Orders
+const Orders = require("../repositories/order"); // kept for legacy helpers
+const { refreshOrderPaymentStatus } = require("../services/businessWorkflowService");
 const { v4: uuid } = require("uuid");
 
 const multer = require("multer");
@@ -204,8 +205,8 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
 
     await newTransaction.save();
 
-    // ✅ NEW: Auto mark bill paid in Orders if linked to an order
-    await markOrderPaid({ Order_uuid, Order_number, txn: newTransaction });
+    // Keep order status safe: paid only when received amount covers order total.
+    await refreshOrderPaymentStatus({ orderUuid: Order_uuid, orderNumber: Order_number });
 
     return res.status(201).json({
       success: true,
@@ -359,8 +360,8 @@ router.put("/:uuid", upload.single("image"), async (req, res) => {
       });
     }
 
-    // ✅ keep order paid (in case edited txn adds Order_uuid / Order_number)
-    await markOrderPaid({ Order_uuid: updated.Order_uuid, Order_number: updated.Order_number, txn: updated });
+    // Recalculate paid/unpaid safely after edit.
+    await refreshOrderPaymentStatus({ orderUuid: updated.Order_uuid, orderNumber: updated.Order_number });
 
     return res.json({
       success: true,
@@ -394,8 +395,8 @@ router.delete("/:uuid", async (req, res) => {
       Transaction_uuid: transactionUuid,
     });
 
-    // ✅ NEW: if no other transactions for same order, mark unpaid
-    await maybeMarkOrderUnpaid({ Order_uuid: tx.Order_uuid, Order_number: tx.Order_number });
+    // Recalculate paid/unpaid safely after delete.
+    await refreshOrderPaymentStatus({ orderUuid: tx.Order_uuid, orderNumber: tx.Order_number });
 
     return res.json({
       success: true,
