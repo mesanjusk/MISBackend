@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const Priority = require("../repositories/priority");
 const { v4: uuid } = require("uuid");
@@ -83,7 +84,10 @@ router.delete(
   "/DeletePriority/:priorityUuid",
   asyncHandler(async (req, res) => {
     const { priorityUuid } = req.params;
-    const result = await Priority.findOneAndDelete({ Priority_uuid: priorityUuid });
+    const filters = [{ Priority_uuid: priorityUuid }];
+    if (mongoose.isValidObjectId(priorityUuid)) filters.push({ _id: priorityUuid });
+
+    const result = await Priority.findOneAndDelete({ $or: filters });
 
     if (!result) {
       throw new AppError("Priority not found", 404);

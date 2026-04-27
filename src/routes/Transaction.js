@@ -256,6 +256,17 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Distinct payment modes
+router.get("/distinctPaymentModes", async (req, res) => {
+  try {
+    const modes = await Transaction.distinct("Payment_mode");
+    return res.json({ success: true, result: modes });
+  } catch (error) {
+    console.error("Error in GET /transactions/distinctPaymentModes:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch modes" });
+  }
+});
+
 // Get single transaction by uuid
 router.get("/:uuid", async (req, res) => {
   try {
@@ -411,16 +422,6 @@ router.delete("/:uuid", async (req, res) => {
   }
 });
 
-// Distinct payment modes
-router.get("/distinctPaymentModes", async (req, res) => {
-  try {
-    const modes = await Transaction.distinct("Payment_mode");
-    res.json({ success: true, result: modes });
-  } catch (error) {
-    console.error("Error in GET /transactions/distinctPaymentModes:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch modes" });
-  }
-});
 
 
 

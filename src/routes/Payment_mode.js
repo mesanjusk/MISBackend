@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const Payment_mode = require("../repositories/payment_mode");
 const { v4: uuid } = require("uuid");
@@ -83,9 +84,10 @@ router.delete(
   "/DeletePayment/:paymentUuid",
   asyncHandler(async (req, res) => {
     const { paymentUuid } = req.params;
-    const result = await Payment_mode.findOneAndDelete({
-      Payment_mode_uuid: paymentUuid,
-    });
+    const filters = [{ Payment_mode_uuid: paymentUuid }];
+    if (mongoose.isValidObjectId(paymentUuid)) filters.push({ _id: paymentUuid });
+
+    const result = await Payment_mode.findOneAndDelete({ $or: filters });
 
     if (!result) {
       throw new AppError("payment not found", 404);

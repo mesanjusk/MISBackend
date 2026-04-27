@@ -1,49 +1,88 @@
 const express = require('express');
 const router = express.Router();
-const Message = require('../repositories/Message');     // Adjust if needed
-const Customer = require('../repositories/customer');   // Adjust if needed
+const Message = require('../repositories/Message');
+const Customer = require('../repositories/customer');
 
+const normalizeDigits = (value = '') => String(value || '').replace(/\D/g, '');
+const buildPhoneVariants = (value = '') => {
+  const digits = normalizeDigits(value);
+  const last10 = digits.slice(-10);
+  return [...new Set([value, digits, last10, `+${digits}`, `91${last10}`, `+91${last10}`].filter(Boolean))];
+};
 
 /**
  * GET /chatlist
- * Returns a list of customers who have any chat history (sent/received)
+ * Returns customers who have any WhatsApp chat history.
  */
-router.get('/chatlist', async (req, res) => {
+router.get('/chatlist', async (_req, res) => {
   try {
-    const fromNumbers = await Message.distinct('from', { from: { $ne: 'me' } });
-    const toNumbers = await Message.distinct('to', { to: { $ne: 'me' } });
+    const messages = await Message.find({}).sort({ timestamp: -1, time: -1, createdAt: -1 }).lean();
+    const numberSet = new Set();
 
-    const uniqueNumbers = [...new Set([...fromNumbers, ...toNumbers])];
-
-    const customers = await Customer.find({
-      Mobile_number: { $in: uniqueNumbers }
+    messages.forEach((message) => {
+      const from = normalizeDigits(message?.from);
+      const to = normalizeDigits(message?.to);
+      if (message?.fromMe || message?.direction === 'outgoing') {
+        if (to) numberSet.add(to.slice(-10));
+      } else if (from) {
+        numberSet.add(from.slice(-10));
+      }
     });
 
-    res.json({ success: true, list: customers });
+    const numbers = [...numberSet].filter(Boolean);
+    const phoneRegexes = numbers.map((num) => new RegExp(`${num}$`));
+    const customers = phoneRegexes.length
+      ? await Customer.find({ Mobile_number: { $in: phoneRegexes } }).lean()
+      : [];
+
+    return res.json({ success: true, list: customers });
   } catch (err) {
     console.error('Error in /chatlist:', err);
-    res.status(500).json({ success: false, error: 'Failed to load chat list' });
+    return res.status(500).json({ success: false, error: 'Failed to load chat list' });
+  }
+});
+
+/**
+ * GET /messages/:number
+ * Returns WhatsApp messages for a phone number.
+ */
+router.get('/messages/:number', async (req, res) => {
+  try {
+    const variants = buildPhoneVariants(req.params.number);
+    const messages = await Message.find({
+      $or: [{ from: { $in: variants } }, { to: { $in: variants } }],
+    })
+      .sort({ timestamp: 1, time: 1, createdAt: 1 })
+      .lean();
+
+    return res.json({ success: true, messages });
+  } catch (err) {
+    console.error('Error in /messages/:number:', err);
+    return res.status(500).json({ success: false, error: 'Failed to load messages' });
   }
 });
 
 /**
  * GET /customer/by-number/:number
- * Finds a customer by normalized WhatsApp number
+ * Finds a customer by normalized WhatsApp number.
  */
 router.get('/customer/by-number/:number', async (req, res) => {
   try {
-    const number = req.params.number;
+    const variants = buildPhoneVariants(req.params.number);
+    const regexes = variants.map((num) => new RegExp(`${normalizeDigits(num).slice(-10)}$`));
 
-    const customer = await Customer.findOne({ Mobile_number: number });
+    const customer = await Customer.findOne({
+      $or: [
+        { Mobile_number: { $in: variants } },
+        { Mobile_number: { $in: regexes } },
+      ],
+    }).lean();
 
-    if (customer) {
-      res.json({ success: true, customer });
-    } else {
-      res.json({ success: false, error: 'Customer not found' });
-    }
+    if (customer) return res.json({ success: true, customer });
+    return res.json({ success: false, error: 'Customer not found' });
   } catch (err) {
     console.error('Error in /customer/by-number:', err);
-    res.status(500).json({ success: false, error: 'Error fetching customer' });
+    return res.status(500).json({ success: false, error: 'Error fetching customer' });
   }
 });
 

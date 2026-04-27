@@ -230,6 +230,36 @@ router.get("/GetLinkedCustomerIds", async (req, res) => {
   }
 });
 
+/* ----------------------------------------------------------------
+   Get customer report (Status, Tags, LastInteraction)
+----------------------------------------------------------------- */
+router.get("/GetCustomerReport", async (req, res) => {
+  try {
+    const data = await Customers.find({}).lean();
+    if ((data || []).length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No customers found" });
+    }
+
+    const report = data.map((customer) => ({
+      Customer_name: S(customer?.Customer_name),
+      Mobile_number: S(customer?.Mobile_number),
+      Customer_group: S(customer?.Customer_group),
+      Status: customer?.Status,
+      Tags: Array.isArray(customer?.Tags) ? customer.Tags.join(", ") : "",
+      LastInteraction: customer?.LastInteraction || "No interaction",
+    }));
+
+    return res.json({ success: true, result: report });
+  } catch (error) {
+    console.error("Error generating customer report:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
+  }
+});
+
 router.get("/:id/timeline", getCustomerTimeline);
 
 /* ----------------------------------------------------------------
@@ -356,34 +386,5 @@ router.delete("/DeleteCustomer/:id", async (req, res) => {
   }
 });
 
-/* ----------------------------------------------------------------
-   Get customer report (Status, Tags, LastInteraction)
------------------------------------------------------------------ */
-router.get("/GetCustomerReport", async (req, res) => {
-  try {
-    const data = await Customers.find({}).lean();
-    if ((data || []).length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "No customers found" });
-    }
-
-    const report = data.map((customer) => ({
-      Customer_name: S(customer?.Customer_name),
-      Mobile_number: S(customer?.Mobile_number),
-      Customer_group: S(customer?.Customer_group),
-      Status: customer?.Status,
-      Tags: Array.isArray(customer?.Tags) ? customer.Tags.join(", ") : "",
-      LastInteraction: customer?.LastInteraction || "No interaction",
-    }));
-
-    return res.json({ success: true, result: report });
-  } catch (error) {
-    console.error("Error generating customer report:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error" });
-  }
-});
 
 module.exports = router;

@@ -46,8 +46,22 @@ router.post("/", async (req, res) => {
     });
   }
 });
+router.get("/", async (req, res) => {
+  try {
+    const data = await Tasks.find({}).sort({ Task_name: 1 }).lean();
+    const tasks = data.map((task) => ({
+      ...task,
+      name: task.Task_name,
+      date: task.deadline,
+      progress: task.status === "done" ? 100 : task.status === "in_progress" ? 50 : 0,
+    }));
 
-
+    return res.json({ success: true, result: data, tasks });
+  } catch (err) {
+    console.error("Error fetching tasks:", err);
+    return res.status(500).json({ success: false, message: "Error fetching tasks" });
+  }
+});
 
   router.get("/GetTaskList", async (req, res) => {
     try {

@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 const Users = require("../repositories/users");
 const { v4: uuid } = require("uuid");
@@ -274,7 +275,10 @@ router.get('/getUserByName/:username', async (req, res) => {
 router.delete('/DeleteUser/:userUuid', async (req, res) => {
   const { userUuid } = req.params;
   try {
-    const result = await Users.findOneAndDelete({ User_uuid: userUuid });
+    const filters = [{ User_uuid: userUuid }];
+    if (mongoose.isValidObjectId(userUuid)) filters.push({ _id: userUuid });
+
+    const result = await Users.findOneAndDelete({ $or: filters });
     if (!result) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
