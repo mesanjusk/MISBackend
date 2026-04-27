@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const Orders = require('../repositories/order');
 const Tasks = require('../repositories/tasks');
+const Customers = require('../repositories/customer');
+const { sendMessage } = require('./metaApiService');
 
 const VALID_STAGES = [
   'enquiry',
@@ -25,6 +27,47 @@ const resolveOrderFilter = (rawId) => {
 };
 
 const normalizeStage = (stage) => String(stage || '').trim().toLowerCase();
+
+
+
+const normalizePhone = (value = '') => String(value || '').replace(/\D/g, '');
+
+const sendEnvWhatsAppText = async ({ to, body }) => {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.PHONE_NUMBER_ID;
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  if (!phoneNumberId || !accessToken) {
+    throw new Error('WhatsApp env credentials missing (WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN)');
+  }
+  return sendMessage({
+    phoneNumberId,
+    accessToken,
+    payload: {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: normalizePhone(to),
+      type: 'text',
+      text: { preview_url: false, body },
+    },
+  });
+};
+
+const notifyDeliveredOrder = async (order) => {
+  try {
+    const customer = await Customers.findOne({ Customer_uuid: order.Customer_uuid }).lean();
+    const mobile = normalizePhone(customer?.Mobile_number);
+    if (!mobile) return;
+
+    const customerName = customer?.Customer_name || order.customerName || 'Customer';
+    const amount = Number(order.Amount || order.saleSubtotal || 0);
+    const businessName = process.env.BUSINESS_NAME || process.env.APP_NAME || 'MIS System';
+    const body = `Dear ${customerName}, your order #${order.Order_Number} is ready for delivery.\n\nAmount due: Rs ${amount}.\n\nPlease arrange payment. Thank you! - ${businessName}`;
+
+    await sendEnvWhatsAppText({ to: mobile, body });
+    console.log(`WhatsApp sent to ${mobile} for delivered order #${order.Order_Number}`);
+  } catch (error) {
+    console.error(`WhatsApp failed: ${error.message}`);
+  }
+};
 
 const assertValidStage = (stage) => {
   if (!stageIndex.has(stage)) {
@@ -65,15 +108,23 @@ const updateOrderStage = async ({ orderId, stage }) => {
     return await Orders.findById(order._id);
   }
 
-  await Orders.updateOne(
-    { _id: order._id },
-    {
-      $set: { stage: normalizedStage },
-      $push: { stageHistory: { stage: normalizedStage, timestamp: new Date() } },
-    }
-  );
+  const updatePayload = {
+    $set: { stage: normalizedStage },
+    $push: { stageHistory: { stage: normalizedStage, timestamp: new Date() } },
+  };
 
-  return await Orders.findById(order._id);
+  if (normalizedStage === 'delivered') {
+    updatePayload.$set.deliveryNotifiedAt = new Date();
+  }
+
+  await Orders.updateOne({ _id: order._id }, updatePayload);
+
+  const updatedOrder = await Orders.findById(order._id);
+  if (normalizedStage === 'delivered') {
+    await notifyDeliveredOrder({ ...order, ...updatedOrder.toObject?.() });
+  }
+
+  return updatedOrder;
 };
 
 const getOrderTasks = async (orderId) => {

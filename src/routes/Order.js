@@ -50,6 +50,15 @@ const toSafeNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+async function resolveAssignableUser(rawValue) {
+  const value = norm(rawValue);
+  if (!value) return null;
+  const query = mongoose.isValidObjectId(value)
+    ? { _id: value }
+    : { $or: [{ User_uuid: value }, { User_name: value }, { Mobile_number: value }] };
+  return Users.findOne(query).lean();
+}
+
 async function resolveVendorMasterFromPayload(row = {}) {
   const vendorUuid = norm(row.vendorUuid || row.vendor_uuid || row.vendorCustomerUuid || row.vendorId || row.Customer_uuid);
   const vendorName = norm(row.vendorName || row.vendor_name || row.Customer_name || row.name);
@@ -587,6 +596,8 @@ router.post("/addOrder", async (req, res) => {
       priority = "medium",
       dueDate = null,
       assignedTo = null,
+      assignToUserUuid = null,
+      assignToUserId = null,
     } = req.body;
 
     const rawType = typeof Type === "string" ? Type.trim().toLowerCase() : "";
@@ -601,10 +612,11 @@ router.post("/addOrder", async (req, res) => {
     const now = new Date();
 
     const effectiveDueDate = dueDate ? new Date(dueDate) : (!isEnquiryOnly ? buildDefaultDueDate() : null);
+    const assignedUserForOrder = await resolveAssignableUser(assignedTo || assignToUserUuid || assignToUserId);
 
     const statusDefaults = {
       Task: isEnquiryOnly ? "Enquiry" : "Design",
-      Assigned: "None",
+      Assigned: assignedUserForOrder?.User_name || "None",
       Status_number: 1,
       Delivery_Date: effectiveDueDate || now,
       CreatedAt: now,
@@ -694,7 +706,7 @@ router.post("/addOrder", async (req, res) => {
         ? String(priority).toLowerCase()
         : "medium",
       dueDate: effectiveDueDate || null,
-      assignedTo: assignedTo || null,
+      assignedTo: assignedUserForOrder?._id || null,
       driveFile: {
         status: "pending",
       },
@@ -1431,7 +1443,7 @@ router.post("/addStatus", async (req, res) => {
 /* ----------------------- UPDATE ORDER (generic) ----------------------- */
 router.put("/updateOrder/:id", async (req, res) => {
   try {
-    const { Delivery_Date, Items, Steps, vendorAssignments, orderMode, orderNote, assignedTo, assignToUserId, stage, ...otherFields } = req.body;
+    const { Delivery_Date, Items, Steps, vendorAssignments, orderMode, orderNote, assignedTo, assignToUserId, assignToUserUuid, stage, ...otherFields } = req.body;
 
     const filter = mongoose.isValidObjectId(req.params.id) ? { _id: req.params.id } : { Order_uuid: req.params.id };
     const order = await Orders.findOne(filter);
@@ -1464,6 +1476,17 @@ router.put("/updateOrder/:id", async (req, res) => {
       order.vendorAssignments = await normalizeVendorAssignments(vendorAssignments);
     }
 
+    if (otherFields.dueDate) {
+      order.dueDate = toDate(otherFields.dueDate, order.dueDate || new Date());
+      delete otherFields.dueDate;
+    }
+
+    if (otherFields.priority) {
+      const p = String(otherFields.priority).toLowerCase();
+      if (["low", "medium", "high"].includes(p)) order.priority = p;
+      delete otherFields.priority;
+    }
+
     if (Delivery_Date) {
       const lastIndex = (order.Status?.length || 1) - 1;
       if (lastIndex >= 0) {
@@ -1486,8 +1509,8 @@ router.put("/updateOrder/:id", async (req, res) => {
 
     Object.assign(order, otherFields);
 
-    if (assignedTo || assignToUserId) {
-      const assignedUser = await Users.findById(assignedTo || assignToUserId).lean();
+    if (assignedTo || assignToUserId || assignToUserUuid) {
+      const assignedUser = await resolveAssignableUser(assignedTo || assignToUserId || assignToUserUuid);
       if (assignedUser) {
         order.assignedTo = assignedUser._id;
         if (Array.isArray(order.Status) && order.Status.length) {

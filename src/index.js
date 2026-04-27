@@ -42,6 +42,9 @@ const googleDriveOAuthRoutes = require("./routes/googleDriveOAuth");
 const FlowRouter = require("./routes/Flow");
 const UpiPayments = require("./routes/UpiPayments");
 const BusinessOps = require("./routes/BusinessOps");
+const PurchaseOrder = require("./routes/PurchaseOrder");
+const Scheduler = require("./routes/Scheduler");
+const { initScheduler, initTaskDigestScheduler } = require("./services/messageScheduler");
 const {
   verifyWebhook,
   receiveWebhook,
@@ -97,6 +100,8 @@ app.use("/api/contacts", Contacts);
 app.use("/api/calllogs", CallLogs);
 app.use("/api/upi", UpiPayments);
 app.use("/api/business-control", BusinessOps);
+app.use("/api/purchaseorder", PurchaseOrder);
+app.use("/api/scheduler", Scheduler);
 app.use("/api", FlowRouter);
 
 // ---------- WhatsApp webhook aliases ----------
@@ -131,12 +136,16 @@ app.use("/calllogs", CallLogs);
 app.use("/api", Chat);
 app.use("/", Chat);
 app.use("/business-control", BusinessOps);
+app.use("/purchaseorder", PurchaseOrder);
+app.use("/scheduler", Scheduler);
 app.use("/api/google-drive", googleDriveOAuthRoutes);
 app.use("/google-drive", googleDriveOAuthRoutes);
 app.use("/", FlowRouter);
 // ---------- Init DB ---------
 (async () => {
   await connectDB();
+  initScheduler();
+  initTaskDigestScheduler();
 })();
 
 // ---------- Error handling ----------

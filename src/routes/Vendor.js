@@ -86,6 +86,16 @@ router.post('/addVendor', async (req, res) => {
   const { Order_Number, Order_uuid, Item_uuid } = req.body;
 
   try {
+    if (req.body?.Vendor_name || req.body?.vendor_name) {
+      const vendor = await ensureVendorMaster({
+        vendor_name: req.body.Vendor_name || req.body.vendor_name,
+        mobile_number: req.body.Mobile_number || req.body.mobile_number || req.body.phone,
+        vendor_type: req.body.Vendor_type || req.body.vendor_type || 'jobwork',
+        notes: req.body.Notes || req.body.notes || '',
+      });
+      return res.json({ success: true, result: vendor });
+    }
+
     const check = await VendorsLegacy.findOne({ Order_Number: Order_Number });
     if (check) return res.json('exist');
 
@@ -124,6 +134,91 @@ router.get('/GetVendorList', async (_req, res) => {
   } catch (err) {
     console.error('Error fetching vendors:', err);
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+
+router.get('/masters/summary', async (_req, res) => {
+  try {
+    const [vendors, orders, ledgerEntries] = await Promise.all([
+      VendorMaster.find({}).sort({ Vendor_name: 1 }).lean(),
+      Orders.find({ 'vendorAssignments.0': { $exists: true } }, { Order_Number: 1, Order_uuid: 1, createdAt: 1, vendorAssignments: 1 }).lean(),
+      VendorLedger.find({}).lean(),
+    ]);
+
+    const ledgerByVendor = ledgerEntries.reduce((acc, entry) => {
+      const key = entry.vendor_uuid;
+      if (!acc[key]) acc[key] = { debit: 0, credit: 0 };
+      const amount = Number(entry.amount || 0);
+      if (entry.dr_cr === 'dr') acc[key].debit += amount;
+      else acc[key].credit += amount;
+      return acc;
+    }, {});
+
+    const assignedByVendor = orders.reduce((acc, order) => {
+      (order.vendorAssignments || []).forEach((row) => {
+        const key = row.vendorUuid || row.vendorCustomerUuid;
+        if (!key) return;
+        if (!acc[key]) acc[key] = { totalAssigned: 0, count: 0 };
+        acc[key].totalAssigned += Number(row.amount || 0);
+        acc[key].count += 1;
+      });
+      return acc;
+    }, {});
+
+    const result = vendors.map((vendor) => {
+      const ledger = ledgerByVendor[vendor.Vendor_uuid] || { debit: 0, credit: 0 };
+      const assigned = assignedByVendor[vendor.Vendor_uuid] || { totalAssigned: 0, count: 0 };
+      return {
+        ...vendor,
+        totalWorkAssigned: assigned.totalAssigned,
+        totalPaid: ledger.debit,
+        balanceDue: Math.max(0, ledger.credit - ledger.debit),
+        assignedOrderCount: assigned.count,
+      };
+    });
+
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Vendor summary failed', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/masters/:vendorUuid/order-ledger', async (req, res) => {
+  try {
+    const vendorUuid = String(req.params.vendorUuid || '').trim();
+    const orders = await Orders.find({
+      $or: [
+        { 'vendorAssignments.vendorUuid': vendorUuid },
+        { 'vendorAssignments.vendorCustomerUuid': vendorUuid },
+      ],
+    }).sort({ createdAt: -1 }).lean();
+
+    const result = [];
+    orders.forEach((order) => {
+      (order.vendorAssignments || [])
+        .filter((row) => row.vendorUuid === vendorUuid || row.vendorCustomerUuid === vendorUuid)
+        .forEach((row) => {
+          const amount = Number(row.amount || 0);
+          const paid = Number(row.advanceAmount || 0);
+          result.push({
+            orderUuid: order.Order_uuid,
+            orderNumber: order.Order_Number,
+            date: order.createdAt,
+            workType: row.workType || row.outputItem || 'General',
+            amount,
+            paid,
+            balance: Math.max(0, amount - paid),
+            status: row.paymentStatus || row.status || 'pending',
+          });
+        });
+    });
+
+    res.json({ success: true, result });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

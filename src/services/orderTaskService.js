@@ -95,7 +95,7 @@ async function assignOrderToUser({ orderId, userId, userName, assignedBy = 'Syst
 
   const user = userId
     ? await Users.findById(userId)
-    : await Users.findOne({ User_name: String(userName || '').trim() });
+    : await Users.findOne({ $or: [{ User_name: String(userName || '').trim() }, { User_uuid: String(userName || '').trim() }] });
 
   if (!user) throw new Error('Assignee user not found');
 

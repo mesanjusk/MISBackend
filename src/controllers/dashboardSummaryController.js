@@ -3,6 +3,7 @@ const Transaction = require('../repositories/transaction');
 const Attendance = require('../repositories/attendance');
 const Users = require('../repositories/users');
 const Usertasks = require('../repositories/usertask');
+const Customers = require('../repositories/customer');
 const { getPendingOrdersForUser } = require('../services/orderTaskService');
 
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
@@ -289,4 +290,256 @@ const getDashboardSummary = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardSummary };
+
+const asNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const getOrderCustomerName = async (customerUuid) => {
+  if (!customerUuid) return '';
+  const customer = await Customers.findOne({ Customer_uuid: customerUuid }, { Customer_name: 1, Mobile_number: 1 }).lean();
+  return customer?.Customer_name || '';
+};
+
+const getOutstandingSummary = async (_req, res) => {
+  try {
+    const unpaidOrders = await Orders.find({ billStatus: 'unpaid' }).lean();
+    const customerIds = [...new Set(unpaidOrders.map((order) => order.Customer_uuid).filter(Boolean))];
+    const customers = await Customers.find({ Customer_uuid: { $in: customerIds } }, { Customer_uuid: 1, Customer_name: 1 }).lean();
+    const customerMap = new Map(customers.map((customer) => [customer.Customer_uuid, customer.Customer_name]));
+
+    const grouped = new Map();
+    let totalOutstandingAmount = 0;
+
+    unpaidOrders.forEach((order) => {
+      const amount = asNumber(order.Amount || order.saleSubtotal, 0);
+      totalOutstandingAmount += amount;
+      const key = order.Customer_uuid || 'unknown';
+      const current = grouped.get(key) || {
+        customerUuid: order.Customer_uuid || '',
+        customerName: customerMap.get(order.Customer_uuid) || order.customerName || 'Unknown Customer',
+        totalDue: 0,
+        oldestOrderDate: order.createdAt || order.updatedAt || null,
+      };
+      current.totalDue += amount;
+      const orderDate = normalizeDateValue(order.createdAt || order.updatedAt);
+      const oldest = normalizeDateValue(current.oldestOrderDate);
+      if (orderDate && (!oldest || orderDate < oldest)) current.oldestOrderDate = orderDate;
+      grouped.set(key, current);
+    });
+
+    const customerWiseBreakdown = Array.from(grouped.values()).sort((a, b) => b.totalDue - a.totalDue);
+
+    return res.json({
+      success: true,
+      totalOutstandingAmount,
+      totalUnpaidOrders: unpaidOrders.length,
+      customerWiseBreakdown,
+    });
+  } catch (error) {
+    console.error('Outstanding summary error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch outstanding summary' });
+  }
+};
+
+const getStuckOrders = async (_req, res) => {
+  try {
+    const now = new Date();
+    const readyCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+    const [readyOrders, deliveredUnpaidOrders] = await Promise.all([
+      Orders.find({ stage: 'ready', updatedAt: { $lt: readyCutoff } }).sort({ updatedAt: 1 }).lean(),
+      Orders.find({ stage: 'delivered', billStatus: 'unpaid' }).sort({ updatedAt: 1 }).lean(),
+    ]);
+    const customerIds = [...new Set([...readyOrders, ...deliveredUnpaidOrders].map((order) => order.Customer_uuid).filter(Boolean))];
+    const customers = await Customers.find({ Customer_uuid: { $in: customerIds } }, { Customer_uuid: 1, Customer_name: 1 }).lean();
+    const customerMap = new Map(customers.map((customer) => [customer.Customer_uuid, customer.Customer_name]));
+
+    const readyNotDelivered = readyOrders.map((order) => ({
+      Order_Number: order.Order_Number,
+      Order_uuid: order.Order_uuid,
+      customerName: customerMap.get(order.Customer_uuid) || order.customerName || 'Unknown Customer',
+      dueDate: order.dueDate || null,
+      hoursStuck: Math.max(0, Math.round((now - new Date(order.updatedAt || now)) / 36_000) / 10),
+    }));
+
+    const deliveredNotPaid = deliveredUnpaidOrders.map((order) => ({
+      Order_Number: order.Order_Number,
+      Order_uuid: order.Order_uuid,
+      customerName: customerMap.get(order.Customer_uuid) || order.customerName || 'Unknown Customer',
+      Amount: asNumber(order.Amount || order.saleSubtotal, 0),
+      daysSinceDelivery: Math.max(0, Math.floor((now - new Date(order.updatedAt || now)) / 86_400_000)),
+    }));
+
+    return res.json({ success: true, readyNotDelivered, deliveredNotPaid });
+  } catch (error) {
+    console.error('Stuck orders error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch stuck orders' });
+  }
+};
+
+const getDailyCashPosition = async (_req, res) => {
+  try {
+    const now = new Date();
+    const from = startOfDay(now);
+    const to = endOfDay(now);
+    const transactions = await Transaction.find({ Transaction_date: { $gte: from, $lte: to } }).lean();
+
+    const grouped = new Map();
+    let cashIn = 0;
+    let cashOut = 0;
+    let upiIn = 0;
+    let bankIn = 0;
+
+    transactions.forEach((txn) => {
+      const mode = String(txn.Payment_mode || 'Other');
+      const moneyIn = asNumber(txn.Total_Debit, 0);
+      const moneyOut = asNumber(txn.Total_Credit, 0);
+      const current = grouped.get(mode) || { mode, in: 0, out: 0 };
+      current.in += moneyIn;
+      current.out += moneyOut;
+      grouped.set(mode, current);
+
+      const modeLower = mode.toLowerCase();
+      if (modeLower.includes('cash')) {
+        cashIn += moneyIn;
+        cashOut += moneyOut;
+      }
+      if (modeLower.includes('upi')) upiIn += moneyIn;
+      if (modeLower.includes('bank')) bankIn += moneyIn;
+    });
+
+    return res.json({
+      success: true,
+      cashIn,
+      cashOut,
+      netCash: cashIn - cashOut,
+      upiIn,
+      bankIn,
+      breakdown: Array.from(grouped.values()),
+    });
+  } catch (error) {
+    console.error('Daily cash position error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch daily cash position' });
+  }
+};
+
+const getCustomerAging = async (req, res) => {
+  try {
+    const filter = { billStatus: 'unpaid' };
+    const fromDate = normalizeDateValue(req.query?.fromDate);
+    const toDate = normalizeDateValue(req.query?.toDate);
+    if (fromDate || toDate) {
+      filter.createdAt = {};
+      if (fromDate) filter.createdAt.$gte = startOfDay(fromDate);
+      if (toDate) filter.createdAt.$lte = endOfDay(toDate);
+    }
+
+    const orders = await Orders.find(filter).lean();
+    const customerIds = [...new Set(orders.map((order) => order.Customer_uuid).filter(Boolean))];
+    const customers = await Customers.find({ Customer_uuid: { $in: customerIds } }, { Customer_uuid: 1, Customer_name: 1, Mobile_number: 1 }).lean();
+    const customerMap = new Map(customers.map((customer) => [customer.Customer_uuid, customer]));
+    const now = new Date();
+    const rows = new Map();
+
+    orders.forEach((order) => {
+      const customer = customerMap.get(order.Customer_uuid) || {};
+      const key = order.Customer_uuid || 'unknown';
+      const createdAt = normalizeDateValue(order.createdAt || order.updatedAt) || now;
+      const days = Math.max(0, Math.floor((startOfDay(now) - startOfDay(createdAt)) / 86_400_000));
+      const amount = asNumber(order.Amount || order.saleSubtotal, 0);
+      const row = rows.get(key) || {
+        customerUuid: order.Customer_uuid || '',
+        customerName: customer.Customer_name || order.customerName || 'Unknown Customer',
+        mobile: customer.Mobile_number || '',
+        total0to30: 0,
+        total31to60: 0,
+        total61to90: 0,
+        total90plus: 0,
+        grandTotal: 0,
+        oldestOrderDays: 0,
+      };
+
+      if (days <= 30) row.total0to30 += amount;
+      else if (days <= 60) row.total31to60 += amount;
+      else if (days <= 90) row.total61to90 += amount;
+      else row.total90plus += amount;
+
+      row.grandTotal += amount;
+      row.oldestOrderDays = Math.max(row.oldestOrderDays, days);
+      rows.set(key, row);
+    });
+
+    return res.json({ success: true, result: Array.from(rows.values()).sort((a, b) => b.grandTotal - a.grandTotal) });
+  } catch (error) {
+    console.error('Customer aging error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch customer aging report' });
+  }
+};
+
+const entryAccount = (entry = {}) => String(entry.Account_id || entry.Account || '').trim().toLowerCase();
+const entryType = (entry = {}) => String(entry.Type || '').trim().toLowerCase();
+
+const isCashAccount = (entry = {}) => entryAccount(entry).includes('cash');
+
+const getCashBookSummary = async (_req, res) => {
+  try {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
+    const txns = await Transaction.find({}).sort({ Transaction_date: 1, createdAt: 1 }).lean();
+
+    let historicalDebit = 0;
+    let historicalCredit = 0;
+    let beforeTodayDebit = 0;
+    let beforeTodayCredit = 0;
+    let todayReceipts = 0;
+    let todayPayments = 0;
+    let lastTransactionTime = null;
+
+    txns.forEach((txn) => {
+      const txnDate = normalizeDateValue(txn.Transaction_date || txn.createdAt);
+      (txn.Journal_entry || []).forEach((entry) => {
+        if (!isCashAccount(entry)) return;
+        const amount = asNumber(entry.Amount, 0);
+        const debit = entryType(entry) === 'debit';
+        const credit = entryType(entry) === 'credit';
+        if (debit) historicalDebit += amount;
+        if (credit) historicalCredit += amount;
+        if (txnDate && txnDate < todayStart) {
+          if (debit) beforeTodayDebit += amount;
+          if (credit) beforeTodayCredit += amount;
+        }
+        if (txnDate && txnDate >= todayStart && txnDate <= todayEnd) {
+          if (debit) todayReceipts += amount;
+          if (credit) todayPayments += amount;
+          if (!lastTransactionTime || txnDate > lastTransactionTime) lastTransactionTime = txnDate;
+        }
+      });
+    });
+
+    const openingBalance = beforeTodayDebit - beforeTodayCredit;
+    const closingBalance = historicalDebit - historicalCredit;
+
+    return res.json({
+      success: true,
+      openingBalance,
+      todayReceipts,
+      todayPayments,
+      closingBalance,
+      lastTransactionTime,
+    });
+  } catch (error) {
+    console.error('Cash book summary error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch cash book summary' });
+  }
+};
+
+module.exports = {
+  getDashboardSummary,
+  getOutstandingSummary,
+  getStuckOrders,
+  getDailyCashPosition,
+  getCustomerAging,
+  getCashBookSummary,
+};

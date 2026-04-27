@@ -3,7 +3,14 @@ const express = require('express');
 const router = express.Router();
 const Orders = require('../repositories/order');
 const Transaction = require('../repositories/transaction');
-const { getDashboardSummary } = require('../controllers/dashboardSummaryController');
+const {
+  getDashboardSummary,
+  getOutstandingSummary,
+  getStuckOrders,
+  getDailyCashPosition,
+  getCustomerAging,
+  getCashBookSummary,
+} = require('../controllers/dashboardSummaryController');
 
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
 const endOfDay   = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
@@ -32,6 +39,11 @@ function getRange(period) {
 }
 
 router.get('/summary', getDashboardSummary);
+router.get('/outstanding-summary', getOutstandingSummary);
+router.get('/stuck-orders', getStuckOrders);
+router.get('/daily-cash-position', getDailyCashPosition);
+router.get('/customer-aging', getCustomerAging);
+router.get('/cash-book-summary', getCashBookSummary);
 
 router.get('/:period', async (req, res) => {
   try {
