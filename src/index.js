@@ -44,6 +44,7 @@ const UpiPayments = require("./routes/UpiPayments");
 const BusinessOps = require("./routes/BusinessOps");
 const PurchaseOrder = require("./routes/PurchaseOrder");
 const Scheduler = require("./routes/Scheduler");
+const Stock = require("./routes/Stock");
 const { initScheduler, initTaskDigestScheduler } = require("./services/messageScheduler");
 const {
   verifyWebhook,
@@ -102,6 +103,7 @@ app.use("/api/upi", UpiPayments);
 app.use("/api/business-control", BusinessOps);
 app.use("/api/purchaseorder", PurchaseOrder);
 app.use("/api/scheduler", Scheduler);
+app.use("/api/stock", Stock);
 app.use("/api", FlowRouter);
 
 // ---------- WhatsApp webhook aliases ----------
@@ -121,6 +123,7 @@ app.use("/item", Items);
 app.use("/itemgroup", Itemgroup);
 app.use("/priority", Priority);
 app.use("/order", Orders);
+app.use("/orders", Orders);
 app.use("/enquiry", Enquiry);
 app.use("/payment_mode", Payment_mode);
 app.use("/transaction", Transaction);
@@ -138,6 +141,7 @@ app.use("/", Chat);
 app.use("/business-control", BusinessOps);
 app.use("/purchaseorder", PurchaseOrder);
 app.use("/scheduler", Scheduler);
+app.use("/stock", Stock);
 app.use("/api/google-drive", googleDriveOAuthRoutes);
 app.use("/google-drive", googleDriveOAuthRoutes);
 app.use("/", FlowRouter);

@@ -9,6 +9,7 @@ const { v4: uuid } = require("uuid");
 // keep this import if you still use it elsewhere
 const { updateOrderStatus } = require("../controllers/orderController");
 const { patchOrderStage, listOrderTasks } = require("../controllers/orderLifecycleController");
+const { autoCreateDesignerTask } = require("../services/orderLifecycleService");
 const Customers = require("../repositories/customer");
 const ItemsRepo = require("../repositories/items");
 const {
@@ -714,6 +715,10 @@ router.post("/addOrder", async (req, res) => {
 
     await newOrder.save();
 
+    if (String(newOrder.stage || '').toLowerCase() === 'design') {
+      await autoCreateDesignerTask(newOrder);
+    }
+
     let vendorJobs = [];
     if (Array.isArray(newOrder.vendorAssignments) && newOrder.vendorAssignments.length) {
       vendorJobs = await syncVendorJobsForOrder(newOrder, newOrder.vendorAssignments, req.body?.createdBy || req.user?.userName || "system");
@@ -873,6 +878,18 @@ router.patch("/:id/assign", async (req, res) => {
 });
 
 router.patch("/:id/stage", patchOrderStage);
+router.post("/:id/lifecycle", async (req, res) => {
+  try {
+    const action = String(req.body?.action || '').trim().toLowerCase();
+    const stage = req.body?.stage || (action === 'mark_delivered' ? 'delivered' : '');
+    if (!stage) return res.status(400).json({ success: false, message: 'stage is required' });
+    req.body.stage = stage;
+    return patchOrderStage(req, res);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || 'Failed to update lifecycle' });
+  }
+});
+
 router.get("/:id/tasks", listOrderTasks);
 
 /* ----------------------- UNIFIED VIEW ----------------------- */

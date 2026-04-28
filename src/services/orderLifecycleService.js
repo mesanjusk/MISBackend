@@ -1,7 +1,11 @@
 const mongoose = require('mongoose');
+const { v4: uuid } = require('uuid');
 const Orders = require('../repositories/order');
 const Tasks = require('../repositories/tasks');
 const Customers = require('../repositories/customer');
+const PaymentFollowup = require('../repositories/paymentFollowup');
+const Users = require('../repositories/users');
+const Usertasks = require('../repositories/usertask');
 const { sendMessage } = require('./metaApiService');
 
 const VALID_STAGES = [
@@ -27,9 +31,6 @@ const resolveOrderFilter = (rawId) => {
 };
 
 const normalizeStage = (stage) => String(stage || '').trim().toLowerCase();
-
-
-
 const normalizePhone = (value = '') => String(value || '').replace(/\D/g, '');
 
 const sendEnvWhatsAppText = async ({ to, body }) => {
@@ -51,21 +52,100 @@ const sendEnvWhatsAppText = async ({ to, body }) => {
   });
 };
 
-const notifyDeliveredOrder = async (order) => {
+const autoCreateDesignerTask = async (order) => {
   try {
-    const customer = await Customers.findOne({ Customer_uuid: order.Customer_uuid }).lean();
+    if (!order) return null;
+    const orderUuid = order.Order_uuid || String(order._id || '');
+    const orderNumber = order.Order_Number || order.orderNumber || '';
+    const customerName = order.Customer_name || order.customerName || '';
+    const taskName = `Design work for Order #${orderNumber} — ${customerName}`.trim();
+
+    const duplicate = await Usertasks.findOne({
+      Usertask_name: taskName,
+      Status: { $in: ['Pending', 'pending'] },
+    }).lean();
+    if (duplicate) return duplicate;
+
+    const designers = await Users.find({
+      $or: [
+        { Role: 'Designer' },
+        { role: 'Designer' },
+        { User_type: 'Designer' },
+        { User_group: /designer/i },
+      ],
+    }).sort({ createdAt: 1 }).lean();
+
+    if (!designers.length) return null;
+
+    const designer = designers[0];
+    const lastUsertask = await Usertasks.findOne().sort({ Usertask_Number: -1 }).lean();
+    const nextNumber = Number(lastUsertask?.Usertask_Number || 0) + 1;
+    const deadline = order.dueDate || order.Delivery_Date || new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const now = new Date();
+
+    return await Usertasks.create({
+      Usertask_uuid: uuid(),
+      Usertask_Number: nextNumber,
+      User: designer.User_name,
+      Usertask_name: taskName,
+      Date: now,
+      Time: now.toLocaleTimeString('en-US', { hour12: false }),
+      Deadline: deadline,
+      Remark: `Auto-assigned from order lifecycle. Order UUID: ${orderUuid}`,
+      Status: 'Pending',
+    });
+  } catch (err) {
+    console.error('Failed to auto-create designer task:', err.message);
+    return null;
+  }
+};
+
+const notifyDeliveredOrder = async (order) => {
+  let customer = null;
+  let customerName = order.customerName || 'Customer';
+  try {
+    customer = await Customers.findOne({ Customer_uuid: order.Customer_uuid }).lean();
     const mobile = normalizePhone(customer?.Mobile_number);
-    if (!mobile) return;
+    customerName = customer?.Customer_name || order.customerName || 'Customer';
 
-    const customerName = customer?.Customer_name || order.customerName || 'Customer';
-    const amount = Number(order.Amount || order.saleSubtotal || 0);
-    const businessName = process.env.BUSINESS_NAME || process.env.APP_NAME || 'MIS System';
-    const body = `Dear ${customerName}, your order #${order.Order_Number} is ready for delivery.\n\nAmount due: Rs ${amount}.\n\nPlease arrange payment. Thank you! - ${businessName}`;
-
-    await sendEnvWhatsAppText({ to: mobile, body });
-    console.log(`WhatsApp sent to ${mobile} for delivered order #${order.Order_Number}`);
+    if (mobile) {
+      const amount = Number(order.Amount || order.saleSubtotal || order.Total_Amount || 0);
+      const businessName = process.env.BUSINESS_NAME || process.env.APP_NAME || 'MIS System';
+      const body = `Dear ${customerName}, your order #${order.Order_Number} is ready for delivery.\n\nAmount due: Rs ${amount}.\n\nPlease arrange payment. Thank you! - ${businessName}`;
+      await sendEnvWhatsAppText({ to: mobile, body });
+      console.log(`WhatsApp sent to ${mobile} for delivered order #${order.Order_Number}`);
+    }
   } catch (error) {
     console.error(`WhatsApp failed: ${error.message}`);
+  }
+
+  try {
+    const orderTotal = Number(order.Total_Amount || order.totalAmount || order.Amount || order.saleSubtotal || 0);
+    const paidAmount = Number(order.paidAmount || order.Paid_Amount || 0);
+    const pendingAmount = orderTotal - paidAmount;
+    if (pendingAmount > 0) {
+      const title = `Order #${order.Order_Number} payment reminder`;
+      const exists = await PaymentFollowup.findOne({
+        customer_name: customerName,
+        amount: pendingAmount,
+        title,
+        status: 'pending',
+      }).lean();
+      if (!exists) {
+        await PaymentFollowup.create({
+          followup_uuid: uuid(),
+          customer_name: customerName,
+          amount: pendingAmount,
+          title,
+          remark: `Auto-created on delivery of Order #${order.Order_Number}`,
+          followup_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+          status: 'pending',
+          created_by: 'system',
+        });
+      }
+    }
+  } catch (followupErr) {
+    console.error('Failed to create payment followup:', followupErr.message);
   }
 };
 
@@ -120,8 +200,14 @@ const updateOrderStage = async ({ orderId, stage }) => {
   await Orders.updateOne({ _id: order._id }, updatePayload);
 
   const updatedOrder = await Orders.findById(order._id);
+  const mergedOrder = { ...order, ...(updatedOrder.toObject?.() || {}) };
+
+  if (normalizedStage === 'design') {
+    await autoCreateDesignerTask(mergedOrder);
+  }
+
   if (normalizedStage === 'delivered') {
-    await notifyDeliveredOrder({ ...order, ...updatedOrder.toObject?.() });
+    await notifyDeliveredOrder(mergedOrder);
   }
 
   return updatedOrder;
@@ -149,4 +235,5 @@ module.exports = {
   VALID_STAGES,
   updateOrderStage,
   getOrderTasks,
+  autoCreateDesignerTask,
 };

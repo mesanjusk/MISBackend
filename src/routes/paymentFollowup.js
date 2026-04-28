@@ -112,4 +112,81 @@ router.patch("/:id/status", async (req, res) => {
   }
 });
 
+
+// POST /paymentfollowup/send-overdue-reminders
+// Finds all pending followups overdue by >= X days and sends WhatsApp reminders.
+router.post('/send-overdue-reminders', async (req, res) => {
+  try {
+    const { minDaysOverdue = 3 } = req.body || {};
+    const Customers = require('../repositories/customer');
+    const { sendMessage } = require('../services/metaApiService');
+    const cutoffDate = new Date(Date.now() - Number(minDaysOverdue || 3) * 24 * 60 * 60 * 1000);
+    const overdueFollowups = await PaymentFollowup.find({
+      status: 'pending',
+      followup_date: { $lte: cutoffDate },
+    }).lean();
+
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.PHONE_NUMBER_ID;
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    for (const followup of overdueFollowups) {
+      try {
+        if (!phoneNumberId || !accessToken) {
+          skipped += 1;
+          continue;
+        }
+        const customer = await Customers.findOne({
+          $or: [
+            { Customer_name: followup.customer_name },
+            { Customer_uuid: followup.Customer_uuid || followup.customerUuid || '' },
+          ],
+        }).lean();
+        const mobile = String(customer?.Mobile_number || followup.Mobile_number || '').replace(/D/g, '');
+        if (!mobile) {
+          skipped += 1;
+          continue;
+        }
+        const amountStr = `₹${Number(followup.amount || 0).toLocaleString('en-IN')}`;
+        const msg = [
+          `Dear ${followup.customer_name || 'Customer'},`,
+          '',
+          `This is a payment reminder for ${amountStr} pending against your order/account.`,
+          '',
+          'Kindly arrange payment at the earliest.',
+          '',
+          'Thank you.',
+        ].join('\n');
+
+        await sendMessage({
+          phoneNumberId,
+          accessToken,
+          payload: {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: mobile,
+            type: 'text',
+            text: { preview_url: false, body: msg },
+          },
+        });
+
+        await PaymentFollowup.findByIdAndUpdate(followup._id, {
+          Last_Reminder: new Date(),
+          Reminder_Count: Number(followup.Reminder_Count || 0) + 1,
+        });
+        sent += 1;
+      } catch (innerErr) {
+        console.error('Reminder failed for followup:', followup._id, innerErr.message);
+        failed += 1;
+      }
+    }
+
+    res.json({ sent, failed, skipped, total: overdueFollowups.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

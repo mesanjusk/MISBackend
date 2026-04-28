@@ -225,7 +225,7 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
 // Get all transactions with optional filters
 router.get("/", async (req, res) => {
   try {
-    const { fromDate, toDate, paymentMode, createdBy, customerUuid } = req.query;
+    const { fromDate, toDate, paymentMode, createdBy, customerUuid, accountFilter, limit } = req.query;
 
     const filter = {};
 
@@ -239,9 +239,24 @@ router.get("/", async (req, res) => {
     if (createdBy) filter.Created_by = createdBy;
     if (customerUuid) filter.Customer_uuid = customerUuid;
 
-    const transactions = await Transaction.find(filter)
-      .sort({ Transaction_date: -1 })
-      .lean();
+    if (accountFilter) {
+      const acct = String(accountFilter).trim();
+      const variants = Array.from(new Set([acct, acct.toLowerCase(), acct.toUpperCase()]));
+      filter.Journal_entry = {
+        $elemMatch: {
+          $or: [
+            { Account_id: { $in: variants } },
+            { Account: { $in: variants } },
+          ],
+        },
+      };
+    }
+
+    const safeLimit = Math.min(Math.max(Number(limit || 0), 0), 2000);
+    let query = Transaction.find(filter).sort({ Transaction_date: -1 });
+    if (safeLimit) query = query.limit(safeLimit);
+
+    const transactions = await query.lean();
 
     return res.json({
       success: true,
@@ -255,7 +270,6 @@ router.get("/", async (req, res) => {
     });
   }
 });
-
 // Distinct payment modes
 router.get("/distinctPaymentModes", async (req, res) => {
   try {

@@ -45,6 +45,47 @@ router.get('/daily-cash-position', getDailyCashPosition);
 router.get('/customer-aging', getCustomerAging);
 router.get('/cash-book-summary', getCashBookSummary);
 
+router.get('/bank-book-summary', async (_req, res) => {
+  try {
+    const txns = await Transaction.find({}).lean();
+    let total = 0;
+    for (const txn of txns) {
+      for (const entry of (txn.Journal_entry || [])) {
+        const acct = String(entry.Account_id || entry.Account || '').trim();
+        if (acct.toLowerCase() === 'bank') {
+          if (String(entry.Type).toLowerCase() === 'debit') total += Number(entry.Amount || 0);
+          else total -= Number(entry.Amount || 0);
+        }
+      }
+    }
+    res.json({ closingBalance: total, lastTransactionTime: new Date() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/trial-balance', async (_req, res) => {
+  try {
+    const txns = await Transaction.find({}).lean();
+    const map = {};
+    for (const txn of txns) {
+      for (const entry of (txn.Journal_entry || [])) {
+        const acct = String(entry.Account_id || entry.Account || '').trim();
+        if (!acct) continue;
+        if (!map[acct]) map[acct] = { accountName: acct, totalDebit: 0, totalCredit: 0 };
+        const amt = Number(entry.Amount || 0);
+        if (String(entry.Type).toLowerCase() === 'debit') map[acct].totalDebit += amt;
+        else map[acct].totalCredit += amt;
+      }
+    }
+    const accounts = Object.values(map).sort((a, b) => a.accountName.localeCompare(b.accountName));
+    res.json({ accounts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 router.get('/:period', async (req, res) => {
   try {
     const period = String(req.params.period || 'today').toLowerCase();

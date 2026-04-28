@@ -143,9 +143,69 @@ async function sendDigestToAllUsers(mode = 'morning') {
   return report;
 }
 
+async function sendOwnerDailySummary() {
+  try {
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.PHONE_NUMBER_ID;
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+    const ownerMobile = process.env.OWNER_WHATSAPP_NUMBER;
+
+    if (!phoneNumberId || !accessToken || !ownerMobile) {
+      console.log('Daily owner summary skipped — WhatsApp credentials or OWNER_WHATSAPP_NUMBER not set');
+      return { skipped: true };
+    }
+
+    const now = new Date();
+    const allOrders = await Orders.find({}).lean();
+    const pendingOrders = allOrders.filter((o) => {
+      const stage = String(o.stage || '').toLowerCase();
+      return !['delivered', 'paid', 'cancelled'].includes(stage);
+    });
+    const readyOrders = allOrders.filter((o) => {
+      const stage = String(o.stage || '').toLowerCase();
+      return stage === 'ready' || stage === 'finished';
+    });
+
+    let totalOutstanding = 0;
+    for (const order of allOrders) {
+      const total = Number(order.Total_Amount || order.totalAmount || order.Amount || order.saleSubtotal || 0);
+      const paid = Number(order.paidAmount || order.Paid_Amount || 0);
+      if (total > paid) totalOutstanding += (total - paid);
+    }
+
+    const summary = [
+      '📊 *Daily Business Summary*',
+      `${now.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}`,
+      '',
+      `📋 Active Orders: ${pendingOrders.length}`,
+      `🚚 Ready to Dispatch: ${readyOrders.length}`,
+      `💰 Total Outstanding: ₹${totalOutstanding.toLocaleString('en-IN')}`,
+      '',
+      'Login to dashboard for full details.',
+    ].join('\n');
+
+    await sendMessage({
+      phoneNumberId,
+      accessToken,
+      payload: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: normalizeNumber(ownerMobile),
+        type: 'text',
+        text: { preview_url: false, body: summary },
+      },
+    });
+    console.log('Daily owner summary sent at', now.toISOString());
+    return { sent: true };
+  } catch (err) {
+    console.error('Failed to send daily owner summary:', err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
 let schedulerStarted = false;
 let lastMorningRun = '';
 let lastEveningRun = '';
+let lastOwnerSummaryRun = '';
 
 function initTaskDigestScheduler() {
   if (schedulerStarted) return;
@@ -160,6 +220,10 @@ function initTaskDigestScheduler() {
       if (hour === 9 && minute === 0 && lastMorningRun !== key) {
         lastMorningRun = key;
         await sendDigestToAllUsers('morning');
+      }
+      if (hour === 9 && minute === 0 && lastOwnerSummaryRun !== key) {
+        lastOwnerSummaryRun = key;
+        await sendOwnerDailySummary();
       }
       if (hour === 19 && minute === 0 && lastEveningRun !== key) {
         lastEveningRun = key;
@@ -178,4 +242,5 @@ module.exports = {
   cancelScheduledMessage,
   sendDigestToAllUsers,
   initTaskDigestScheduler,
+  sendOwnerDailySummary,
 };
