@@ -35,6 +35,9 @@ const isProd = process.env.NODE_ENV === "production";
 
 const norm = (s) => String(s || "").trim();
 const normLower = (s) => String(s || "").trim().toLowerCase();
+const DEFAULT_ORDER_ASSIGNEE_NAME = "Sai";
+const OFFICE_USER_GROUP = "office user";
+const isOfficeUser = (user = {}) => normLower(user.User_group) === OFFICE_USER_GROUP;
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const toBool = (value, fallback = false) => {
@@ -58,6 +61,28 @@ async function resolveAssignableUser(rawValue) {
     ? { _id: value }
     : { $or: [{ User_uuid: value }, { User_name: value }, { Mobile_number: value }] };
   return Users.findOne(query).lean();
+}
+
+async function resolveDefaultOfficeAssignee() {
+  const exactSaiOffice = await Users.findOne({
+    User_name: new RegExp(`^${escapeRegex(DEFAULT_ORDER_ASSIGNEE_NAME)}$`, "i"),
+    User_group: /^Office User$/i,
+  }).lean();
+  if (exactSaiOffice) return exactSaiOffice;
+
+  const exactSaiAnyGroup = await Users.findOne({
+    User_name: new RegExp(`^${escapeRegex(DEFAULT_ORDER_ASSIGNEE_NAME)}$`, "i"),
+  }).lean();
+  if (exactSaiAnyGroup) return exactSaiAnyGroup;
+
+  return Users.findOne({ User_group: /^Office User$/i }).sort({ User_name: 1 }).lean();
+}
+
+async function resolveOfficeAssignee(rawValue, { fallbackToDefault = false } = {}) {
+  const requestedUser = await resolveAssignableUser(rawValue);
+  if (requestedUser && isOfficeUser(requestedUser)) return requestedUser;
+  if (fallbackToDefault) return resolveDefaultOfficeAssignee();
+  return null;
 }
 
 async function resolveVendorMasterFromPayload(row = {}) {
@@ -613,11 +638,15 @@ router.post("/addOrder", async (req, res) => {
     const now = new Date();
 
     const effectiveDueDate = dueDate ? new Date(dueDate) : (!isEnquiryOnly ? buildDefaultDueDate() : null);
-    const assignedUserForOrder = await resolveAssignableUser(assignedTo || assignToUserUuid || assignToUserId);
+    const requestedAssignee = assignedTo || assignToUserUuid || assignToUserId || DEFAULT_ORDER_ASSIGNEE_NAME;
+    const assignedUserForOrder = !isEnquiryOnly
+      ? await resolveOfficeAssignee(requestedAssignee, { fallbackToDefault: true })
+      : await resolveAssignableUser(requestedAssignee);
+    const assignedDisplayName = assignedUserForOrder?.User_name || (!isEnquiryOnly ? DEFAULT_ORDER_ASSIGNEE_NAME : "None");
 
     const statusDefaults = {
       Task: isEnquiryOnly ? "Enquiry" : "Design",
-      Assigned: assignedUserForOrder?.User_name || "None",
+      Assigned: assignedDisplayName,
       Status_number: 1,
       Delivery_Date: effectiveDueDate || now,
       CreatedAt: now,
@@ -1527,7 +1556,7 @@ router.put("/updateOrder/:id", async (req, res) => {
     Object.assign(order, otherFields);
 
     if (assignedTo || assignToUserId || assignToUserUuid) {
-      const assignedUser = await resolveAssignableUser(assignedTo || assignToUserId || assignToUserUuid);
+      const assignedUser = await resolveOfficeAssignee(assignedTo || assignToUserId || assignToUserUuid);
       if (assignedUser) {
         order.assignedTo = assignedUser._id;
         if (Array.isArray(order.Status) && order.Status.length) {
