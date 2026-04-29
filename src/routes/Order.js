@@ -624,6 +624,7 @@ router.post("/addOrder", async (req, res) => {
       assignedTo = null,
       assignToUserUuid = null,
       assignToUserId = null,
+      productionStepsEnabled,
     } = req.body;
 
     const rawType = typeof Type === "string" ? Type.trim().toLowerCase() : "";
@@ -670,7 +671,7 @@ router.post("/addOrder", async (req, res) => {
       });
     }
 
-    const flatSteps = normalizeSteps(Steps);
+    const flatSteps = productionStepsEnabled === false ? [] : normalizeSteps(Steps);
     const normalizedVendorAssignments = await normalizeVendorAssignments(vendorAssignments);
     const requestedOrderMode = String(orderMode || "").trim().toLowerCase();
     const finalOrderMode = requestedOrderMode === "items" ? "items" : "note";
@@ -1489,7 +1490,7 @@ router.post("/addStatus", async (req, res) => {
 /* ----------------------- UPDATE ORDER (generic) ----------------------- */
 router.put("/updateOrder/:id", async (req, res) => {
   try {
-    const { Delivery_Date, Items, Steps, vendorAssignments, orderMode, orderNote, assignedTo, assignToUserId, assignToUserUuid, stage, ...otherFields } = req.body;
+    const { Delivery_Date, Items, Steps, vendorAssignments, orderMode, orderNote, assignedTo, assignToUserId, assignToUserUuid, stage, productionStepsEnabled, ...otherFields } = req.body;
 
     const filter = mongoose.isValidObjectId(req.params.id) ? { _id: req.params.id } : { Order_uuid: req.params.id };
     const order = await Orders.findOne(filter);
@@ -1514,7 +1515,9 @@ router.put("/updateOrder/:id", async (req, res) => {
       delete otherFields.Remark;
     }
 
-    if (Array.isArray(Steps)) {
+    if (productionStepsEnabled === false) {
+      order.Steps = [];
+    } else if (Array.isArray(Steps)) {
       order.Steps = normalizeSteps(Steps);
     }
 
