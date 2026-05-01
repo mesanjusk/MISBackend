@@ -14,7 +14,7 @@ const logger = require('../utils/logger');
 
 // LOGIN
 // LOGIN
-router.post("/login", authLimiter, validate({ body: z.object({ Mobile_number: z.string().min(10), Password: z.string().min(1) }) }), async (req, res) => {
+router.post("/login", authLimiter, validate({ body: z.object({ User_name: z.string().min(1), Password: z.string().min(1) }) }), async (req, res) => {
   const { User_name, Password } = req.body;
 
   try {
