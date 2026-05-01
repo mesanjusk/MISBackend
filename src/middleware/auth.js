@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const AppError = require('../utils/AppError');
+const logger = require('../utils/logger');
 
 const requireAuth = (req, _res, next) => {
   const authHeader = req.headers.authorization;
@@ -22,6 +23,11 @@ const requireAuth = (req, _res, next) => {
 
     return next();
   } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      logger.info({ path: req.originalUrl }, 'Expired token presented');
+      return next(new AppError('Token expired. Please log in again.', 401));
+    }
+    logger.warn({ err: error.message, path: req.originalUrl }, 'Invalid token');
     return next(new AppError('Invalid or expired token', 401));
   }
 };

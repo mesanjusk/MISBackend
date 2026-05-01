@@ -274,7 +274,7 @@ router.get('/orders/list', async (_req, res) => {
   try {
     const orders = await Orders.find({}, { Order_uuid: 1, Order_Number: 1, Items: 1, Customer_uuid: 1, stage: 1, saleSubtotal: 1, createdAt: 1 })
       .sort({ createdAt: -1 })
-      .limit(300)
+      .limit(200)
       .lean();
     res.json({ success: true, result: orders });
   } catch (error) {
@@ -340,7 +340,7 @@ router.get('/production-jobs', async (req, res) => {
     const filter = {};
     if (req.query.vendor_uuid) filter.vendor_uuid = String(req.query.vendor_uuid);
     if (req.query.status) filter.status = String(req.query.status);
-    const jobs = await ProductionJob.find(filter).sort({ job_date: -1, createdAt: -1 }).limit(500).lean();
+    const jobs = await ProductionJob.find(filter).sort({ job_date: -1, createdAt: -1 }).limit(200).lean();
     res.json({ success: true, result: jobs });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -473,7 +473,7 @@ router.get('/stock-movements', async (req, res) => {
     const filter = {};
     if (req.query.vendor_uuid) filter.vendor_uuid = String(req.query.vendor_uuid);
     if (req.query.item_name) filter.item_name = String(req.query.item_name);
-    const rows = await StockMovement.find(filter).sort({ date: -1, createdAt: -1 }).limit(1000).lean();
+    const rows = await StockMovement.find(filter).sort({ date: -1, createdAt: -1 }).limit(300).lean();
     res.json({ success: true, result: rows });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
