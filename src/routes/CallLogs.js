@@ -3,6 +3,7 @@ const router = express.Router();
 const CallLogs = require("../repositories/callLogs");
 const { v4: uuid } = require("uuid");
 const jwt = require('jsonwebtoken');
+const logger = require('../utils/logger');
 
 
 router.post("/addCallLog", async (req, res) => {
@@ -27,7 +28,7 @@ router.post("/addCallLog", async (req, res) => {
             return res.json({ success: true, message: "CallLog saved successfully!" });
         }
     } catch (e) {
-        console.error("Error saving call:", e);
+        logger.error("Error saving call:", e);
         return res.status(500).json({ success: false, message: "Error saving CallLog" });
     }
 });

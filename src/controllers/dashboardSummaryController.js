@@ -5,6 +5,7 @@ const Users = require('../repositories/users');
 const Usertasks = require('../repositories/usertask');
 const Customers = require('../repositories/customer');
 const { getPendingOrdersForUser } = require('../services/orderTaskService');
+const logger = require('../utils/logger');
 
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
 const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
@@ -285,7 +286,7 @@ const getDashboardSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Dashboard summary error:', error);
+    logger.error('Dashboard summary error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch dashboard summary' });
   }
 };
@@ -338,7 +339,7 @@ const getOutstandingSummary = async (_req, res) => {
       customerWiseBreakdown,
     });
   } catch (error) {
-    console.error('Outstanding summary error:', error);
+    logger.error('Outstanding summary error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch outstanding summary' });
   }
 };
@@ -373,7 +374,7 @@ const getStuckOrders = async (_req, res) => {
 
     return res.json({ success: true, readyNotDelivered, deliveredNotPaid });
   } catch (error) {
-    console.error('Stuck orders error:', error);
+    logger.error('Stuck orders error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch stuck orders' });
   }
 };
@@ -419,7 +420,7 @@ const getDailyCashPosition = async (_req, res) => {
       breakdown: Array.from(grouped.values()),
     });
   } catch (error) {
-    console.error('Daily cash position error:', error);
+    logger.error('Daily cash position error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch daily cash position' });
   }
 };
@@ -472,7 +473,7 @@ const getCustomerAging = async (req, res) => {
 
     return res.json({ success: true, result: Array.from(rows.values()).sort((a, b) => b.grandTotal - a.grandTotal) });
   } catch (error) {
-    console.error('Customer aging error:', error);
+    logger.error('Customer aging error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch customer aging report' });
   }
 };
@@ -530,7 +531,7 @@ const getCashBookSummary = async (_req, res) => {
       lastTransactionTime,
     });
   } catch (error) {
-    console.error('Cash book summary error:', error);
+    logger.error('Cash book summary error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch cash book summary' });
   }
 };

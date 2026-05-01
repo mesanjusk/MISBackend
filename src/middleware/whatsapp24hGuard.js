@@ -1,4 +1,5 @@
 const Message = require('../repositories/Message');
+const logger = require('../utils/logger');
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -74,7 +75,7 @@ const enforceWhatsApp24hWindow = async (req, res, next) => {
     const filter = buildIncomingFilter(conversationKeys);
 
     if (!filter) {
-      console.warn('[whatsapp-24h-guard] Skipped enforcement: unable to resolve conversation identity', {
+      logger.warn('[whatsapp-24h-guard] Skipped enforcement: unable to resolve conversation identity', {
         path: req.originalUrl,
         hasTo: Boolean(req.body?.to),
         hasContactId: Boolean(req.body?.contactId),
@@ -102,7 +103,7 @@ const enforceWhatsApp24hWindow = async (req, res, next) => {
     };
 
     if (!isInsideWindow && messageType !== 'template') {
-      console.warn('[whatsapp-24h-guard] Blocked outbound message outside 24h window', {
+      logger.warn('[whatsapp-24h-guard] Blocked outbound message outside 24h window', {
         path: req.originalUrl,
         messageType,
         to: req.body?.to || null,

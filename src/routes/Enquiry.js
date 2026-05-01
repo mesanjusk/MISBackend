@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Enquiry = require("../repositories/enquiry");
 const { v4: uuid } = require("uuid");
+const logger = require('../utils/logger');
 
 router.post("/addEnquiry", async (req, res) => {
   const { Customer_name, Priority = "Normal", Item = "New Enquiry", Task = "Design", Delivery_Date, Assigned = "Sai", Remark } = req.body;
@@ -28,7 +29,7 @@ router.post("/addEnquiry", async (req, res) => {
       await newEnquiry.save();
       res.json({ success: true, message: "Enquiry added successfully" });
   } catch (error) {
-      console.error("Error saving Enquiry:", error);
+      logger.error("Error saving Enquiry:", error);
       res.status(500).json({ success: false, message: "Failed to add Enquiry" });
   }
 });

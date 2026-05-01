@@ -4,6 +4,7 @@ const Users = require('../repositories/users');
 const Orders = require('../repositories/order');
 const Usertasks = require('../repositories/usertask');
 const { sendMessage } = require('./metaApiService');
+const logger = require('../utils/logger');
 
 async function processScheduledMessages() {
   const now = new Date();
@@ -18,7 +19,7 @@ async function processScheduledMessages() {
         continue;
       }
     } catch (err) {
-      console.error('Failed to send scheduled message', err);
+      logger.error('Failed to send scheduled message', err);
       msg.status = 'failed';
     }
     await msg.save();
@@ -136,7 +137,7 @@ async function sendDigestToAllUsers(mode = 'morning') {
       await sendEnvText(mobile, message);
       report.push({ user: user.User_name, sent: true });
     } catch (error) {
-      console.error(`Digest failed for ${user.User_name}:`, error.message);
+      logger.error(`Digest failed for ${user.User_name}:`, error.message);
       report.push({ user: user.User_name, sent: false, error: error.message });
     }
   }
@@ -197,7 +198,7 @@ async function sendOwnerDailySummary() {
     console.log('Daily owner summary sent at', now.toISOString());
     return { sent: true };
   } catch (err) {
-    console.error('Failed to send daily owner summary:', err.message);
+    logger.error('Failed to send daily owner summary:', err.message);
     return { sent: false, error: err.message };
   }
 }
@@ -230,7 +231,7 @@ function initTaskDigestScheduler() {
         await sendDigestToAllUsers('evening');
       }
     } catch (error) {
-      console.error('Task digest scheduler error:', error);
+      logger.error('Task digest scheduler error:', error);
     }
   }, 60 * 1000);
 }

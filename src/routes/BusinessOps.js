@@ -10,6 +10,7 @@ const {
   payVendorForOrder,
   getBusinessControlSummary,
 } = require('../services/businessWorkflowService');
+const logger = require('../utils/logger');
 
 function actorFromReq(req) {
   return req.user?.userName || req.user?.User_name || req.body?.createdBy || req.body?.Created_by || 'system';
@@ -20,7 +21,7 @@ function sendOk(res, result, message = 'OK') {
 }
 
 function sendError(res, error, fallback = 'Operation failed') {
-  console.error('[business-control]', error);
+  logger.error('[business-control]', error);
   return res.status(error.statusCode || 500).json({
     success: false,
     message: error.message || fallback,

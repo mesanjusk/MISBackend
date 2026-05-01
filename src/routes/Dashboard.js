@@ -11,6 +11,7 @@ const {
   getCustomerAging,
   getCashBookSummary,
 } = require('../controllers/dashboardSummaryController');
+const logger = require('../utils/logger');
 
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
 const endOfDay   = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
@@ -120,7 +121,7 @@ router.get('/:period', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Dashboard error:', err);
+    logger.error('Dashboard error:', err);
     res.status(500).json({ success: false, message: 'Dashboard error' });
   }
 });

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Message = require('../repositories/Message');
 const Customer = require('../repositories/customer');
+const logger = require('../utils/logger');
 
 const normalizeDigits = (value = '') => String(value || '').replace(/\D/g, '');
 const buildPhoneVariants = (value = '') => {
@@ -37,7 +38,7 @@ router.get('/chatlist', async (_req, res) => {
 
     return res.json({ success: true, list: customers });
   } catch (err) {
-    console.error('Error in /chatlist:', err);
+    logger.error('Error in /chatlist:', err);
     return res.status(500).json({ success: false, error: 'Failed to load chat list' });
   }
 });
@@ -57,7 +58,7 @@ router.get('/messages/:number', async (req, res) => {
 
     return res.json({ success: true, messages });
   } catch (err) {
-    console.error('Error in /messages/:number:', err);
+    logger.error('Error in /messages/:number:', err);
     return res.status(500).json({ success: false, error: 'Failed to load messages' });
   }
 });
@@ -81,7 +82,7 @@ router.get('/customer/by-number/:number', async (req, res) => {
     if (customer) return res.json({ success: true, customer });
     return res.json({ success: false, error: 'Customer not found' });
   } catch (err) {
-    console.error('Error in /customer/by-number:', err);
+    logger.error('Error in /customer/by-number:', err);
     return res.status(500).json({ success: false, error: 'Error fetching customer' });
   }
 });

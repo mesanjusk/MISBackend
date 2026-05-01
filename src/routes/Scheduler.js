@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { sendDigestToAllUsers } = require('../services/messageScheduler');
+const logger = require('../utils/logger');
 
 router.post('/send-digest', async (req, res) => {
   try {
@@ -8,7 +9,7 @@ router.post('/send-digest', async (req, res) => {
     const result = await sendDigestToAllUsers(mode);
     res.json({ success: true, mode, result });
   } catch (error) {
-    console.error('Manual digest failed:', error);
+    logger.error('Manual digest failed:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

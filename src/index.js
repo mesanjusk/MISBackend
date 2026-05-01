@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const mongoSanitize = require('express-mongo-sanitize');
 const helmet = require("helmet");
 const http = require("http");
 const connectDB = require("./config/mongo");
@@ -68,15 +69,16 @@ app.use(helmet({
   contentSecurityPolicy: process.env.NODE_ENV === "production" ? undefined : false,
 }));
 app.use(cors(corsOptions));
+app.use(mongoSanitize());
 
 // ---------- Core middleware ----------
 app.use(
   express.json({
-    limit: "50mb",
+    limit: "5mb",
     verify: (_req, _res, buf) => { _req.rawBody = buf; },
   })
 );
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 app.use(compression());
 
 // ---------- General rate limit (all /api routes) ----------

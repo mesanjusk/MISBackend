@@ -1,4 +1,5 @@
 const Flow = require('../repositories/Flow');
+const logger = require('../utils/logger');
 
 const normalizeTriggerKeywords = (keywords = []) =>
   [...new Set((Array.isArray(keywords) ? keywords : []).map((keyword) => String(keyword || '').trim().toLowerCase()).filter(Boolean))];
@@ -17,7 +18,7 @@ const listFlows = async (_req, res) => {
     const flows = await Flow.find({}).sort({ createdAt: -1 }).lean();
     return res.json({ success: true, data: flows });
   } catch (error) {
-    console.error('[flows] list error:', error);
+    logger.error('[flows] list error:', error);
     return res.status(500).json({ success: false, error: 'Failed to fetch flows' });
   }
 };
@@ -41,7 +42,7 @@ const createFlow = async (req, res) => {
 
     return res.status(201).json({ success: true, data: flow });
   } catch (error) {
-    console.error('[flows] create error:', error);
+    logger.error('[flows] create error:', error);
     return res.status(400).json({ success: false, error: 'Failed to create flow' });
   }
 };
@@ -62,7 +63,7 @@ const updateFlow = async (req, res) => {
 
     return res.json({ success: true, data: flow });
   } catch (error) {
-    console.error('[flows] update error:', error);
+    logger.error('[flows] update error:', error);
     return res.status(400).json({ success: false, error: 'Failed to update flow' });
   }
 };
@@ -78,7 +79,7 @@ const deleteFlow = async (req, res) => {
 
     return res.json({ success: true, data: flow });
   } catch (error) {
-    console.error('[flows] delete error:', error);
+    logger.error('[flows] delete error:', error);
     return res.status(400).json({ success: false, error: 'Failed to delete flow' });
   }
 };
@@ -96,7 +97,7 @@ const toggleFlow = async (req, res) => {
 
     return res.json({ success: true, data: flow.toObject() });
   } catch (error) {
-    console.error('[flows] toggle error:', error);
+    logger.error('[flows] toggle error:', error);
     return res.status(400).json({ success: false, error: 'Failed to toggle flow' });
   }
 };

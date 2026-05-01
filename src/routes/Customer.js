@@ -5,6 +5,7 @@ const { v4: uuid } = require("uuid");
 const Transaction = require("../repositories/transaction");
 const Order = require("../repositories/order");
 const { getCustomerTimeline } = require("../controllers/customerTimelineController");
+const logger = require('../utils/logger');
 
 /* ----------------------- helpers ----------------------- */
 const S = (v) => String(v ?? "").trim();
@@ -49,7 +50,7 @@ router.get("/GetCustomerList", async (req, res) => {
 
     return res.json({ success: true, result });
   } catch (error) {
-    console.error("GetCustomerList error:", error);
+    logger.error("GetCustomerList error:", error);
     return res
       .status(500)
       .json({ success: false, message: "Server error in GetCustomerList" });
@@ -105,7 +106,7 @@ router.post("/addCustomer", async (req, res) => {
       .status(201)
       .json({ success: true, message: "Customer added successfully" });
   } catch (error) {
-    console.error("Error saving customer:", error);
+    logger.error("Error saving customer:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -157,7 +158,7 @@ router.get("/GetCustomersList", async (req, res) => {
 
     return res.json({ success: true, result });
   } catch (error) {
-    console.error("Error fetching customers:", error);
+    logger.error("Error fetching customers:", error);
     return res
       .status(500)
       .json({ success: false, message: "Internal server error" });
@@ -184,7 +185,7 @@ router.get("/checkDuplicateName", async (req, res) => {
       .status(200)
       .json({ success: true, exists: Boolean(existingCustomer) });
   } catch (error) {
-    console.error("Error in /checkDuplicateName:", error);
+    logger.error("Error in /checkDuplicateName:", error);
     return res
       .status(500)
       .json({ success: false, message: "Internal server error" });
@@ -223,7 +224,7 @@ router.get("/GetLinkedCustomerIds", async (req, res) => {
     const linkedCustomerIds = Array.from(linkedSet);
     return res.json({ success: true, linkedCustomerIds });
   } catch (err) {
-    console.error("Error fetching linked customer UUIDs:", err);
+    logger.error("Error fetching linked customer UUIDs:", err);
     return res
       .status(500)
       .json({ success: false, message: "Server Error" });
@@ -253,7 +254,7 @@ router.get("/GetCustomerReport", async (req, res) => {
 
     return res.json({ success: true, result: report });
   } catch (error) {
-    console.error("Error generating customer report:", error);
+    logger.error("Error generating customer report:", error);
     return res
       .status(500)
       .json({ success: false, message: "Internal server error" });
@@ -278,7 +279,7 @@ router.get("/:id", async (req, res) => {
 
     return res.status(200).json({ success: true, result: customer });
   } catch (error) {
-    console.error("Error fetching customer:", error);
+    logger.error("Error fetching customer:", error);
     return res.status(500).json({
       success: false,
       message: "Error fetching customer",
@@ -325,7 +326,7 @@ router.put("/update/:id", async (req, res) => {
 
     return res.json({ success: true, result: updated });
   } catch (error) {
-    console.error("Update customer error:", error);
+    logger.error("Update customer error:", error);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -378,7 +379,7 @@ router.delete("/DeleteCustomer/:id", async (req, res) => {
     await Customers.findByIdAndDelete(customerId);
     return res.json({ success: true, message: "Customer deleted successfully." });
   } catch (error) {
-    console.error("Delete customer error:", error);
+    logger.error("Delete customer error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error while deleting customer.",

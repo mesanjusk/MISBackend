@@ -4,6 +4,7 @@ const Orders = require('../repositories/order');
 const Transaction = require('../repositories/transaction');
 const Enquiry = require('../repositories/enquiry');
 const Message = require('../repositories/Message');
+const logger = require('../utils/logger');
 
 const normalizePhone = (value) => String(value || '').replace(/\D/g, '');
 
@@ -57,7 +58,7 @@ const getCustomerTimeline = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Customer timeline error:', error);
+    logger.error('Customer timeline error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch customer timeline' });
   }
 };

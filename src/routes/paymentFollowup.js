@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
 const PaymentFollowup = require("../repositories/paymentFollowup");
+const logger = require('../utils/logger');
 
 /* ----------------------- helpers ----------------------- */
 const norm = (s) => String(s || "").trim();
@@ -57,7 +58,7 @@ router.post("/add", async (req, res) => {
     }
     return res.json({ success: true, result: doc });
   } catch (err) {
-    console.error("Add payment follow-up error:", err);
+    logger.error("Add payment follow-up error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -78,7 +79,7 @@ router.get("/list", async (req, res) => {
 
     return res.json({ success: true, result });
   } catch (err) {
-    console.error("List payment follow-ups error:", err);
+    logger.error("List payment follow-ups error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -107,7 +108,7 @@ router.patch("/:id/status", async (req, res) => {
     }
     return res.json({ success: true, result: updated });
   } catch (err) {
-    console.error("Update payment follow-up status error:", err);
+    logger.error("Update payment follow-up status error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -178,7 +179,7 @@ router.post('/send-overdue-reminders', async (req, res) => {
         });
         sent += 1;
       } catch (innerErr) {
-        console.error('Reminder failed for followup:', followup._id, innerErr.message);
+        logger.error('Reminder failed for followup:', followup._id, innerErr.message);
         failed += 1;
       }
     }

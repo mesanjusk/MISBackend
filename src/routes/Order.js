@@ -18,6 +18,8 @@ const {
   isGoogleAuthError,
 } = require("../services/googleDriveOAuthService");
 const GoogleDriveToken = require("../repositories/googleDriveToken");
+const { validate } = require('../middleware/validate');
+const { z } = require('zod');
 const Users = require("../repositories/users");
 const ProductionJob = require("../repositories/productionJob");
 const VendorLedger = require("../repositories/vendorLedger");
@@ -29,6 +31,7 @@ const {
   assignOrderToUser,
   buildTaskSummaryMessage,
 } = require("../services/orderTaskService");
+const logger = require('../utils/logger');
 
 /* ----------------------- helpers ----------------------- */
 const isProd = process.env.NODE_ENV === "production";
@@ -203,7 +206,7 @@ async function pushStatusOnly(filter, task, assignedHint = "DragDrop") {
 
     return { ok: true };
   } catch (e) {
-    console.error("[order.updateStatus] pushStatusOnly error:", e);
+    logger.error("[order.updateStatus] pushStatusOnly error:", e);
     return {
       ok: false,
       code: 500,
@@ -805,7 +808,7 @@ router.post("/addOrder", async (req, res) => {
         };
       }
     } catch (driveErr) {
-      console.error("Google Drive copy error:", driveErr);
+      logger.error("Google Drive copy error:", driveErr);
       const reconnectRequired = Boolean(driveErr?.reconnectRequired) || isGoogleAuthError(driveErr);
 
       if (reconnectRequired) {
@@ -847,7 +850,7 @@ router.post("/addOrder", async (req, res) => {
       warning: driveWarning,
     });
   } catch (error) {
-    console.error("Error saving order:", error);
+    logger.error("Error saving order:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to add order",
@@ -870,7 +873,7 @@ router.get("/tasks/mine", async (req, res) => {
       summary: buildTaskSummaryMessage({ employee: userName, orders: rows.orders }),
     });
   } catch (error) {
-    console.error("tasks/mine error:", error);
+    logger.error("tasks/mine error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to fetch order tasks" });
   }
 });
@@ -880,7 +883,7 @@ router.get("/tasks/queue", async (_req, res) => {
     const rows = await getUnassignedOrders();
     return res.json({ success: true, orders: rows });
   } catch (error) {
-    console.error("tasks/queue error:", error);
+    logger.error("tasks/queue error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to fetch order queue" });
   }
 });
@@ -899,7 +902,7 @@ router.patch("/:id/assign", async (req, res) => {
 
     return res.json({ success: true, order: updated });
   } catch (error) {
-    console.error("assign order error:", error);
+    logger.error("assign order error:", error);
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to assign order",
@@ -987,7 +990,7 @@ router.get("/all-data", async (req, res) => {
 
     res.json({ delivered, report, outstanding, allvendors, bills });
   } catch (error) {
-    console.error("Error generating unified report:", error.message);
+    logger.error("Error generating unified report:", error.message);
     res.status(500).json({ error: "Failed to load report data" });
   }
 });
@@ -1045,7 +1048,7 @@ router.patch("/bills/:id/status", async (req, res) => {
       },
     });
   } catch (e) {
-    console.error("PATCH /order/bills/:id/status error:", e);
+    logger.error("PATCH /order/bills/:id/status error:", e);
     return res.status(500).json({ success: false, message: e.message });
   }
 });
@@ -1103,7 +1106,7 @@ router.get("/GetOrderList", async (req, res) => {
     ]);
     res.json({ success: true, result: rows });
   } catch (err) {
-    console.error("GetOrderList error:", err);
+    logger.error("GetOrderList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1121,7 +1124,7 @@ router.get("/GetDeliveredList", async (req, res) => {
     ]);
     res.json({ success: true, result: rows });
   } catch (err) {
-    console.error("GetDeliveredList error:", err);
+    logger.error("GetDeliveredList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1139,7 +1142,7 @@ router.get("/GetBillList", async (req, res) => {
     ]);
     res.json({ success: true, result: rows });
   } catch (err) {
-    console.error("GetBillList error:", err);
+    logger.error("GetBillList error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1260,7 +1263,7 @@ router.get("/GetBillListPaged", async (req, res) => {
 
     return res.json({ success: true, result: rows, total, page, limit });
   } catch (err) {
-    console.error("GetBillListPaged error:", err);
+    logger.error("GetBillListPaged error:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1272,7 +1275,7 @@ router.get("/CheckCustomer/:customerUuid", async (req, res) => {
     const orderExists = await Orders.findOne({ Customer_uuid: customerUuid });
     res.json({ exists: !!orderExists });
   } catch (error) {
-    console.error("Error checking orders:", error);
+    logger.error("Error checking orders:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
@@ -1352,7 +1355,7 @@ router.get("/allvendors-raw", async (req, res) => {
     const docs = await Orders.aggregate(pipeline);
     res.json({ rows: docs, total: docs.length });
   } catch (e) {
-    console.error("allvendors-raw error:", e);
+    logger.error("allvendors-raw error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1419,7 +1422,7 @@ router.get("/allvendors", async (req, res) => {
 
     res.json({ rows, total: rows.length });
   } catch (e) {
-    console.error("allvendors error:", e);
+    logger.error("allvendors error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1430,7 +1433,7 @@ router.get("/allvendors", async (req, res) => {
 router.post("/updateStatus", async (req, res) => {
   const { id, task } = parseStatusPayload(req);
   if (!id || !task) {
-    if (!isProd) console.error("[order.updateStatus] bad payload:", { body: req.body });
+    if (!isProd) logger.error("[order.updateStatus] bad payload:", { body: req.body });
     return res.status(400).json({ success: false, message: "Order id and Task are required" });
   }
 
@@ -1439,7 +1442,7 @@ router.post("/updateStatus", async (req, res) => {
 
   const out = await pushStatusOnly(filter, task, "DragDrop");
   if (!out.ok) {
-    if (!isProd) console.error("[order.updateStatus] fail:", out.msg, { id, task, filter });
+    if (!isProd) logger.error("[order.updateStatus] fail:", out.msg, { id, task, filter });
     return res.status(out.code || 500).json({ success: false, message: out.msg });
   }
 
@@ -1452,7 +1455,7 @@ router.put("/updateStatus/:id", async (req, res) => {
   const task = String(req.body?.Task || req.body?.task || "").trim();
 
   if (!id || !task) {
-    if (!isProd) console.error("[order.updateStatus/:id] bad payload:", { params: req.params, body: req.body });
+    if (!isProd) logger.error("[order.updateStatus/:id] bad payload:", { params: req.params, body: req.body });
     return res.status(400).json({ success: false, message: "Order id and Task are required" });
   }
 
@@ -1461,7 +1464,7 @@ router.put("/updateStatus/:id", async (req, res) => {
 
   const out = await pushStatusOnly(filter, task, "DragDrop");
   if (!out.ok) {
-    if (!isProd) console.error("[order.updateStatus/:id] fail:", out.msg, { id, task, filter });
+    if (!isProd) logger.error("[order.updateStatus/:id] fail:", out.msg, { id, task, filter });
     return res.status(out.code || 500).json({ success: false, message: out.msg });
   }
 
@@ -1472,7 +1475,7 @@ router.put("/updateStatus/:id", async (req, res) => {
 router.post("/addStatus", async (req, res) => {
   const { id, task } = parseStatusPayload(req);
   if (!id || !task) {
-    if (!isProd) console.error("[order.addStatus] bad payload:", { body: req.body });
+    if (!isProd) logger.error("[order.addStatus] bad payload:", { body: req.body });
     return res.status(400).json({ success: false, message: "Order id and Task are required" });
   }
   const filter = idToFilter(id);
@@ -1480,7 +1483,7 @@ router.post("/addStatus", async (req, res) => {
 
   const out = await pushStatusOnly(filter, task, "API");
   if (!out.ok) {
-    if (!isProd) console.error("[order.addStatus] fail:", out.msg, { id, task, filter });
+    if (!isProd) logger.error("[order.addStatus] fail:", out.msg, { id, task, filter });
     return res.status(out.code || 500).json({ success: false, message: out.msg });
   }
 
@@ -1582,7 +1585,7 @@ router.put("/updateOrder/:id", async (req, res) => {
     const refreshed = await Orders.findById(saved._id).lean();
     return res.json({ success: true, result: refreshed, vendorJobs, message: "Order updated successfully" });
   } catch (err) {
-    console.error("Update error:", err);
+    logger.error("Update error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1619,7 +1622,7 @@ router.get("/reports/planning", async (_req, res) => {
 
     return res.json({ success: true, result: { orders: orderRows, jobs } });
   } catch (error) {
-    console.error("planning report error:", error);
+    logger.error("planning report error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to load planning report" });
   }
 });
@@ -1664,7 +1667,7 @@ router.put("/updateDelivery/:id", async (req, res) => {
       result: refreshed,
     });
   } catch (error) {
-    console.error("Error updating order:", error);
+    logger.error("Error updating order:", error);
     res
       .status(500)
       .json({ success: false, message: "Error updating order", error: error.message });
@@ -1789,7 +1792,7 @@ router.post("/orders/:orderId/steps", async (req, res) => {
     const created = order.Steps[order.Steps.length - 1];
     res.json({ ok: true, stepId: created._id, steps: order.Steps });
   } catch (e) {
-    console.error("create step error:", e);
+    logger.error("create step error:", e);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -1835,7 +1838,7 @@ router.patch("/orders/:orderId/steps/:stepId", async (req, res) => {
     await order.save();
     res.json({ ok: true, step });
   } catch (e) {
-    console.error("edit step error:", e);
+    logger.error("edit step error:", e);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -1952,7 +1955,7 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
       res.json({ ok: true, txnId: txnDocs[0]._id, transactionId: nextId });
     });
   } catch (e) {
-    console.error("assign-vendor error:", e);
+    logger.error("assign-vendor error:", e);
     res.status(500).json({ ok: false, error: e.message });
   } finally {
     session.endSession();
@@ -2022,7 +2025,7 @@ router.post("/steps/toggle", async (req, res) => {
     const result = await Orders.updateOne(find, { $pull: { Steps: { $or: pullOr } } });
     return res.json({ success: true, updated: result.modifiedCount > 0 });
   } catch (e) {
-    console.error("/order/steps/toggle error", e);
+    logger.error("/order/steps/toggle error", e);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });

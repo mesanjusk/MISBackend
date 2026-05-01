@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const Customergroup = require("../repositories/customergroup");
 const { v4: uuid } = require("uuid");
+const logger = require('../utils/logger');
 
 router.post("/addCustomergroup", async (req, res) => {
     const{ Customer_group}=req.body
@@ -23,7 +24,7 @@ router.post("/addCustomergroup", async (req, res) => {
 
     }
     catch(e){
-      console.error("Error saving group:", e);
+      logger.error("Error saving group:", e);
       res.status(500).json("fail");
     }
   });
@@ -38,7 +39,7 @@ router.post("/addCustomergroup", async (req, res) => {
         res.json({ success: true, result: data.filter((a) => a.Customer_group) });
       else res.json({ success: false, message: "Customer Group Not found" });
     } catch (err) {
-      console.error("Error fetching group:", err);
+      logger.error("Error fetching group:", err);
         res.status(500).json({ success: false, message: err });
     }
   });

@@ -1,5 +1,6 @@
 const express = require('express');
 const Contact = require('../repositories/contact');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -83,7 +84,7 @@ router.get('/', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('[contacts] list error', err);
+    logger.error('[contacts] list error', err);
     return res.status(500).json({ success: false, error: 'Failed to fetch contacts' });
   }
 });
@@ -97,7 +98,7 @@ router.get('/:phone', async (req, res) => {
     }
     return res.json({ success: true, data: contact });
   } catch (err) {
-    console.error('[contacts] fetch error', err);
+    logger.error('[contacts] fetch error', err);
     return res.status(500).json({ success: false, error: 'Failed to fetch contact' });
   }
 });
@@ -147,7 +148,7 @@ router.patch('/:phone', async (req, res) => {
 
     return res.json({ success: true, data: contact });
   } catch (err) {
-    console.error('[contacts] update error', err);
+    logger.error('[contacts] update error', err);
     return res.status(500).json({ success: false, error: 'Failed to update contact' });
   }
 });

@@ -25,6 +25,7 @@ const Flow = require('../repositories/Flow');
 const { processWhatsAppAttendanceCommand } = require('../services/whatsappAttendanceService');
 const AutoReply = require('../repositories/AutoReply');
 const { formatIST } = require('../utils/dateTime');
+const logger = require('../utils/logger');
 
 const {
   WHATSAPP_ACCESS_TOKEN,
@@ -66,9 +67,9 @@ const normalizeWhatsAppApiError = (error, fallbackMessage = 'WhatsApp API reques
       : 502;
 
   if (normalized.code === 'TOKEN_EXPIRED') {
-    console.error('[whatsapp] token issue detected:', error?.response?.status || error?.message);
+    logger.error('[whatsapp] token issue detected:', error?.response?.status || error?.message);
   } else if (normalized.code === 'NETWORK_ERROR') {
-    console.error('[whatsapp] network/API failure:', error?.response?.status || error?.message);
+    logger.error('[whatsapp] network/API failure:', error?.response?.status || error?.message);
   }
 
   const sanitizedMessage =
@@ -310,7 +311,7 @@ const markWhatsAppStartAttendance = async (payload) => {
       sendText: dispatchTextMessage,
     });
   } catch (error) {
-    console.error('[whatsapp] Failed to process attendance command:', error);
+    logger.error('[whatsapp] Failed to process attendance command:', error);
     return { handled: false };
   }
 };
@@ -660,7 +661,7 @@ const processIncomingMediaMessage = async ({ messageRecordId, mediaId }) => {
       console.log(`[whatsapp] Media processed for message=${messageRecordId} mediaId=${mediaId}`);
     }
   } catch (error) {
-    console.error(`[whatsapp] Media processing failed for mediaId=${mediaId}:`, error.message);
+    logger.error(`[whatsapp] Media processing failed for mediaId=${mediaId}:`, error.message);
   }
 };
 
@@ -1221,7 +1222,7 @@ const getTemplates = asyncHandler(async (_req, res) => {
     try {
       response = await fetchTemplatesFromApi();
     } catch (firstError) {
-      console.error(
+      logger.error(
         '[whatsapp] Template API first attempt failed:',
         firstError?.response?.status || firstError?.message
       );
@@ -1233,7 +1234,7 @@ const getTemplates = asyncHandler(async (_req, res) => {
       templates: Array.isArray(response?.data?.data) ? response.data.data : [],
     });
   } catch (error) {
-    console.error('[whatsapp] Template API failed:', error?.response?.status || error?.message);
+    logger.error('[whatsapp] Template API failed:', error?.response?.status || error?.message);
     throw normalizeWhatsAppApiError(error, 'Failed to load WhatsApp templates');
   }
 });
@@ -1323,7 +1324,7 @@ const receiveWebhook = (req, res) => {
       const signature = String(req.headers['x-hub-signature-256'] || '');
 
       if (!req.rawBody || !signature.startsWith('sha256=')) {
-        console.error('[whatsapp] Missing rawBody or signature header');
+        logger.error('[whatsapp] Missing rawBody or signature header');
         return res.status(403).send('Invalid signature');
       }
 
@@ -1343,7 +1344,7 @@ const receiveWebhook = (req, res) => {
       })();
 
       if (!isValidSignature) {
-        console.error('[whatsapp] Signature mismatch');
+        logger.error('[whatsapp] Signature mismatch');
         return res.status(403).send('Invalid signature');
       }
     }
@@ -1436,18 +1437,18 @@ const receiveWebhook = (req, res) => {
       try {
         await persistStatusEvents(statusPayloads);
       } catch (statusError) {
-        console.error('[whatsapp] Failed to persist status events:', statusError);
+        logger.error('[whatsapp] Failed to persist status events:', statusError);
       }
 
       for (const payload of incomingPayloads) {
         try {
           upsertContactFromIncomingMessage(payload).catch((contactError) => {
-            console.error('[whatsapp] Failed to upsert contact:', contactError);
+            logger.error('[whatsapp] Failed to upsert contact:', contactError);
           });
 
           const customerSync = await upsertCustomerAndEnquiryFromIncomingMessage(payload).catch(
             (customerError) => {
-              console.error('[whatsapp] Failed to sync customer/enquiry:', customerError);
+              logger.error('[whatsapp] Failed to sync customer/enquiry:', customerError);
               return null;
             }
           );
@@ -1513,16 +1514,16 @@ const receiveWebhook = (req, res) => {
 });
               continue;
             } catch (replyError) {
-              console.error('[whatsapp] Failed to send auto reply:', replyError);
+              logger.error('[whatsapp] Failed to send auto reply:', replyError);
             }
           }
         } catch (saveError) {
-          console.error('[whatsapp] Failed to save incoming message:', saveError);
+          logger.error('[whatsapp] Failed to save incoming message:', saveError);
         }
       }
     });
   } catch (error) {
-    console.error('[whatsapp] Webhook error:', error);
+    logger.error('[whatsapp] Webhook error:', error);
     return res.status(200).json({ received: true });
   }
 };

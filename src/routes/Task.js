@@ -3,6 +3,7 @@ const router = express.Router();
 const Tasks = require("../repositories/tasks");
 const { v4: uuid } = require("uuid");
 const { createTask } = require("../services/taskService");
+const logger = require('../utils/logger');
 
 router.post("/addTask", async (req, res) => {
     const{Task_name, Task_group, orderId, deadline, status}=req.body
@@ -30,7 +31,7 @@ router.post("/addTask", async (req, res) => {
 
     }
     catch(e){
-      console.error("Error saving Task:", e);
+      logger.error("Error saving Task:", e);
       res.status(500).json("fail");
     }
   });
@@ -58,7 +59,7 @@ router.get("/", async (req, res) => {
 
     return res.json({ success: true, result: data, tasks });
   } catch (err) {
-    console.error("Error fetching tasks:", err);
+    logger.error("Error fetching tasks:", err);
     return res.status(500).json({ success: false, message: "Error fetching tasks" });
   }
 });
@@ -71,7 +72,7 @@ router.get("/", async (req, res) => {
         res.json({ success: true, result: data.filter((a) => a.Task_name) });
       else res.json({ success: false, message: "Task Not found" });
     } catch (err) {
-      console.error("Error fetching Task:", err);
+      logger.error("Error fetching Task:", err);
         res.status(500).json({ success: false, message: err });
     }
   });
@@ -94,7 +95,7 @@ router.get("/", async (req, res) => {
             result: task,
         });
     } catch (error) {
-        console.error('Error fetching task:', error);
+        logger.error('Error fetching task:', error);
         res.status(500).json({
             success: false,
             message: 'Error fetching task',
@@ -119,7 +120,7 @@ router.get("/", async (req, res) => {
 
         res.json({ success: true, result: user });
     } catch (error) {
-        console.error(error);
+        logger.error(error);
         res.status(500).json({ success: false, message: "Server error" });
     }
 });

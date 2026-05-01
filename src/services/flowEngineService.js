@@ -1,6 +1,7 @@
 const axios = require('axios');
 const Flow = require('../repositories/Flow');
 const FlowSession = require('../repositories/FlowSession');
+const logger = require('../utils/logger');
 
 const normalizeText = (value) => String(value || '').trim();
 const normalizeKeyword = (value) => normalizeText(value).toLowerCase();
@@ -293,7 +294,7 @@ const processIncomingMessageFlow = async ({ payload, sendText }) => {
     try {
       await sendText({ to: user, body: message });
     } catch (error) {
-      console.error('[flow-engine] Failed to send flow message:', error?.response?.data || error?.message || error);
+      logger.error('[flow-engine] Failed to send flow message:', error?.response?.data || error?.message || error);
     }
   }
 

@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const router = express.Router();
 
 const Orders = require("../repositories/order");
+const logger = require('../utils/logger');
 
 // ---- Any doc with "old format" matches this filter ----
 // Old if: any Step missing 'posting' OR Items missing Priority/Remark OR no Items array but legacy fields exist
@@ -145,7 +146,7 @@ router.get("/migrate/flat", async (req, res) => {
 
     res.json({ success: true, total: rows.length, rows });
   } catch (e) {
-    console.error("migrate/flat error", e);
+    logger.error("migrate/flat error", e);
     res.status(500).json({ success: false, message: e.message });
   }
 });
@@ -189,7 +190,7 @@ router.post("/migrate/ids", async (req, res) => {
 
     res.json({ success: true, migrated: bulk.length });
   } catch (e) {
-    console.error("migrate/ids error", e);
+    logger.error("migrate/ids error", e);
     res.status(500).json({ success: false, message: e.message });
   }
 });
@@ -235,7 +236,7 @@ router.post("/migrate/all", async (req, res) => {
 
     res.json({ success: true, migrated });
   } catch (e) {
-    console.error("migrate/all error", e);
+    logger.error("migrate/all error", e);
     res.status(500).json({ success: false, message: e.message });
   }
 });

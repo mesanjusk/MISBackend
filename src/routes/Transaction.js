@@ -8,6 +8,7 @@ const { v4: uuid } = require("uuid");
 
 const multer = require("multer");
 const cloudinary = require("../utils/cloudinary.js");
+const logger = require('../utils/logger');
 
 // Multer using in-memory storage; we will stream files to Cloudinary manually
 const storage = multer.memoryStorage();
@@ -214,7 +215,7 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
       result: newTransaction,
     });
   } catch (error) {
-    console.error("Error in /addTransaction:", error);
+    logger.error("Error in /addTransaction:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -263,7 +264,7 @@ router.get("/", async (req, res) => {
       result: transactions,
     });
   } catch (error) {
-    console.error("Error in GET /transactions:", error);
+    logger.error("Error in GET /transactions:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch transactions",
@@ -276,7 +277,7 @@ router.get("/distinctPaymentModes", async (req, res) => {
     const modes = await Transaction.distinct("Payment_mode");
     return res.json({ success: true, result: modes });
   } catch (error) {
-    console.error("Error in GET /transactions/distinctPaymentModes:", error);
+    logger.error("Error in GET /transactions/distinctPaymentModes:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch modes" });
   }
 });
@@ -302,7 +303,7 @@ router.get("/:uuid", async (req, res) => {
       result: tx,
     });
   } catch (error) {
-    console.error("Error in GET /transactions/:uuid:", error);
+    logger.error("Error in GET /transactions/:uuid:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch transaction",
@@ -394,7 +395,7 @@ router.put("/:uuid", upload.single("image"), async (req, res) => {
       result: updated,
     });
   } catch (error) {
-    console.error("Error in PUT /transactions/:uuid:", error);
+    logger.error("Error in PUT /transactions/:uuid:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to update transaction",
@@ -428,7 +429,7 @@ router.delete("/:uuid", async (req, res) => {
       message: "Transaction deleted successfully",
     });
   } catch (error) {
-    console.error("Error in DELETE /transactions/:uuid:", error);
+    logger.error("Error in DELETE /transactions/:uuid:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to delete transaction",

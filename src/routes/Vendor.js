@@ -10,6 +10,7 @@ const Orders = require('../repositories/order');
 const Counter = require('../repositories/counter');
 const Items = require('../repositories/items');
 const { getAttendanceConfig, saveAttendanceConfig } = require('../services/whatsappAttendanceService');
+const logger = require('../utils/logger');
 
 async function nextCounter(id, seed = 0) {
   const current = await Counter.findById(id).lean();
@@ -114,7 +115,7 @@ router.post('/addVendor', async (req, res) => {
     await newVendor.save();
     res.json('notexist');
   } catch (e) {
-    console.error('Error saving vendor:', e);
+    logger.error('Error saving vendor:', e);
     res.status(500).json('fail');
   }
 });
@@ -132,7 +133,7 @@ router.get('/GetVendorList', async (_req, res) => {
       masters,
     });
   } catch (err) {
-    console.error('Error fetching vendors:', err);
+    logger.error('Error fetching vendors:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -181,7 +182,7 @@ router.get('/masters/summary', async (_req, res) => {
 
     res.json({ success: true, result });
   } catch (error) {
-    console.error('Vendor summary failed', error);
+    logger.error('Vendor summary failed', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -238,7 +239,7 @@ router.post('/masters', async (req, res) => {
     const vendor = await ensureVendorMaster(req.body || {});
     res.json({ success: true, result: vendor });
   } catch (error) {
-    console.error('Failed to create vendor master', error);
+    logger.error('Failed to create vendor master', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -330,7 +331,7 @@ router.post('/ledger', async (req, res) => {
     });
     res.json({ success: true, result: created });
   } catch (error) {
-    console.error('Failed to create vendor ledger entry', error);
+    logger.error('Failed to create vendor ledger entry', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -463,7 +464,7 @@ router.post('/production-jobs', async (req, res) => {
 
     res.json({ success: true, result: created });
   } catch (error) {
-    console.error('Failed to create production job', error);
+    logger.error('Failed to create production job', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -531,7 +532,7 @@ router.get('/:id', async (req, res) => {
     }
     res.status(200).json({ success: true, result: vendor });
   } catch (error) {
-    console.error('Error fetching vendor:', error);
+    logger.error('Error fetching vendor:', error);
     res.status(500).json({ success: false, message: 'Error fetching vendor', error: error.message });
   }
 });

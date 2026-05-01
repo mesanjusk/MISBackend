@@ -2,6 +2,7 @@
 
 const mongoose = require('mongoose');
 require('dotenv').config(); // Load environment variables
+const logger = require('../utils/logger');
 
 const connectDB = async () => {
   try {
@@ -10,7 +11,7 @@ const connectDB = async () => {
     // No options needed for new Mongoose versionss
     await mongoose.connect(mongoURI);
 
-    console.log('✅ MongoDB connected');
+    logger.info('✅ MongoDB connected');
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);
     process.exit(1);

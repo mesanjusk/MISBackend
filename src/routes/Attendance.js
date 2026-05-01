@@ -8,6 +8,7 @@ const { getPendingOrdersForUser } = require("../services/orderTaskService");
 const { formatIST } = require("../utils/dateTime");
 const { sendMessageToWhatsApp } = require("../services/whatsappService");
 const normalizeWhatsAppNumber = require("../utils/normalizeNumber");
+const logger = require('../utils/logger');
 
 const toLower = (value = "") => String(value || "").trim().toLowerCase();
 
@@ -116,7 +117,7 @@ router.post('/addAttendance', async (req, res) => {
             buildPendingTaskMessage({ user, assignments: assignmentSnapshot })
           );
         } catch (err) {
-          console.error("Failed to send pending task WhatsApp after attendance:", err.message);
+          logger.error("Failed to send pending task WhatsApp after attendance:", err.message);
         }
       }
 
@@ -146,7 +147,7 @@ router.post('/addAttendance', async (req, res) => {
           buildPendingTaskMessage({ user, assignments: assignmentSnapshot })
         );
       } catch (err) {
-        console.error("Failed to send pending task WhatsApp after attendance:", err.message);
+        logger.error("Failed to send pending task WhatsApp after attendance:", err.message);
       }
     }
 
@@ -157,7 +158,7 @@ router.post('/addAttendance', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error saving attendance:", error);
+    logger.error("Error saving attendance:", error);
     res.status(500).json({ success: false, message: "Error saving attendance: " + error.message });
   }
 });
@@ -186,7 +187,7 @@ router.get("/GetAttendanceList", async (req, res) => {
       res.json({ success: false, message: "Details not found" });
     }
   } catch (err) {
-    console.error("Error fetching attendance:", err);
+    logger.error("Error fetching attendance:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -257,7 +258,7 @@ router.get('/getTodayAttendance/:userName', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error fetching today's attendance:", error);
+    logger.error("Error fetching today's attendance:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
@@ -299,7 +300,7 @@ router.post('/setAttendanceState', async (req, res) => {
     res.json({ success: true, message: `Attendance marked as ${State}` });
 
   } catch (error) {
-    console.error("Error setting attendance state:", error);
+    logger.error("Error setting attendance state:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

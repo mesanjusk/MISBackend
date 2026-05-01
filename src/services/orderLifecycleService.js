@@ -7,6 +7,7 @@ const PaymentFollowup = require('../repositories/paymentFollowup');
 const Users = require('../repositories/users');
 const Usertasks = require('../repositories/usertask');
 const { sendMessage } = require('./metaApiService');
+const logger = require('../utils/logger');
 
 const VALID_STAGES = [
   'enquiry',
@@ -95,7 +96,7 @@ const autoCreateDesignerTask = async (order) => {
       Status: 'Pending',
     });
   } catch (err) {
-    console.error('Failed to auto-create designer task:', err.message);
+    logger.error('Failed to auto-create designer task:', err.message);
     return null;
   }
 };
@@ -116,7 +117,7 @@ const notifyDeliveredOrder = async (order) => {
       console.log(`WhatsApp sent to ${mobile} for delivered order #${order.Order_Number}`);
     }
   } catch (error) {
-    console.error(`WhatsApp failed: ${error.message}`);
+    logger.error(`WhatsApp failed: ${error.message}`);
   }
 
   try {
@@ -145,7 +146,7 @@ const notifyDeliveredOrder = async (order) => {
       }
     }
   } catch (followupErr) {
-    console.error('Failed to create payment followup:', followupErr.message);
+    logger.error('Failed to create payment followup:', followupErr.message);
   }
 };
 

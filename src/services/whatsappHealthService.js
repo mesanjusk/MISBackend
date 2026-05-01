@@ -1,4 +1,5 @@
 const axios = require('axios');
+const logger = require('../utils/logger');
 
 const TOKEN_ERROR_CODES = new Set([190, 10, 102, 200, 2500]);
 
@@ -78,7 +79,7 @@ const checkWhatsAppHealth = async () => {
     return { isConnected: true, reason: null };
   } catch (error) {
     const normalized = classifyWhatsAppApiError(error);
-    console.error('[whatsapp] health-check failed:', normalized.code, error?.response?.status || error?.message);
+    logger.error('[whatsapp] health-check failed:', normalized.code, error?.response?.status || error?.message);
     return {
       isConnected: false,
       reason: normalized.code,

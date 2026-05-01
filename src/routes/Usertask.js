@@ -4,6 +4,7 @@ const Usertasks = require("../repositories/usertask");
 const { v4: uuid } = require("uuid");
 const { sendMessageToWhatsApp } = require("../services/whatsappService");
 const normalizeWhatsAppNumber = require("../utils/normalizeNumber"); // ✅ New import
+const logger = require('../utils/logger');
 
 // Add new user task and optionally send WhatsApp message to user
 router.post("/addUsertask", async (req, res) => {
@@ -38,13 +39,13 @@ router.post("/addUsertask", async (req, res) => {
           `Hello! Your task "${Usertask_name}" has been created and is pending. Deadline: ${Deadline || "N/A"}`
         );
       } catch (err) {
-        console.error("Failed to send WhatsApp message:", err.message);
+        logger.error("Failed to send WhatsApp message:", err.message);
       }
 
       res.json("notexist");
     }
   } catch (e) {
-    console.error("Error saving Task:", e);
+    logger.error("Error saving Task:", e);
     res.status(500).json("fail");
   }
 });
@@ -62,7 +63,7 @@ router.post('/send-message', async (req, res) => {
     const response = await sendMessageToWhatsApp(formattedMobile, message);
     res.status(200).json(response);
   } catch (error) {
-    console.error('WhatsApp Send Error:', error);
+    logger.error('WhatsApp Send Error:', error);
     res.status(500).json({ error: 'Failed to send message' });
   }
 });
@@ -75,7 +76,7 @@ router.get("/GetUsertaskList", async (req, res) => {
       res.json({ success: true, result: data.filter((a) => a.Usertask_name) });
     else res.json({ success: false, message: "Task Not found" });
   } catch (err) {
-    console.error("Error fetching Task:", err);
+    logger.error("Error fetching Task:", err);
     res.status(500).json({ success: false, message: err });
   }
 });
@@ -104,7 +105,7 @@ router.put("/update/:id", async (req, res) => {
 
     res.json({ success: true, result: user });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });

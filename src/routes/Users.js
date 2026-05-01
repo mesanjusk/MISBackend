@@ -1,16 +1,20 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
+const { authLimiter } = require('../middleware/rateLimit');
+const { validate } = require('../middleware/validate');
+const { z } = require('zod');
 const Users = require("../repositories/users");
 const { v4: uuid } = require("uuid");
 const jwt = require('jsonwebtoken');
 const { hashPassword, isHashedPassword, verifyPassword } = require("../utils/password");
 const Transaction = require("../repositories/transaction");
 const Order = require("../repositories/order");
+const logger = require('../utils/logger');
 
 // LOGIN
 // LOGIN
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, validate({ body: z.object({ Mobile_number: z.string().min(10), Password: z.string().min(1) }) }), async (req, res) => {
   const { User_name, Password } = req.body;
 
   try {
@@ -37,7 +41,7 @@ router.post("/login", async (req, res) => {
           user.Password = hashPassword(Password);
           await user.save();
         } catch (hashError) {
-          console.error("Password migration failed:", hashError);
+          logger.error("Password migration failed:", hashError);
         }
       }
 
@@ -53,7 +57,7 @@ router.post("/login", async (req, res) => {
       res.json({ status: "invalid", message: "Invalid credentials." });
     }
   } catch (e) {
-    console.error("Error during login:", e);
+    logger.error("Error during login:", e);
     res.status(500).json({ status: "fail" });
   }
 });
@@ -88,7 +92,7 @@ router.post("/addUser", async (req, res) => {
       res.json("notexist");
     }
   } catch (e) {
-    console.error("Error saving user:", e);
+    logger.error("Error saving user:", e);
     res.status(500).json("fail");
   }
 });
@@ -122,7 +126,7 @@ router.get("/GetUserList", async (req, res) => {
       result: userWithUsage,
     });
   } catch (err) {
-    console.error("Error fetching users:", err);
+    logger.error("Error fetching users:", err);
     res.status(500).json({ success: false, message: err });
   }
 });
@@ -153,7 +157,7 @@ router.put("/updateUser/:id", async (req, res) => {
 
     res.json({ success: true, result: user });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -178,7 +182,7 @@ router.get('/GetLoggedInUser', authenticateToken, async (req, res) => {
 
     res.json({ success: true, result: { group: user.User_group } });
   } catch (error) {
-    console.error('Error fetching user group:', error);
+    logger.error('Error fetching user group:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -201,7 +205,7 @@ router.get('/:id', async (req, res) => {
       result: user,
     });
   } catch (error) {
-    console.error('Error fetching user:', error);
+    logger.error('Error fetching user:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching user',
@@ -235,7 +239,7 @@ router.put('/update/:id', async (req, res) => {
       result: updatedUser,
     });
   } catch (error) {
-    console.error('Error updating user:', error);
+    logger.error('Error updating user:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating user',
@@ -262,7 +266,7 @@ router.get('/getUserByName/:username', async (req, res) => {
       result: user,
     });
   } catch (error) {
-    console.error('Error fetching user:', error);
+    logger.error('Error fetching user:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching user',
@@ -284,7 +288,7 @@ router.delete('/DeleteUser/:userUuid', async (req, res) => {
     }
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
-    console.error('Error deleting user:', error);
+    logger.error('Error deleting user:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

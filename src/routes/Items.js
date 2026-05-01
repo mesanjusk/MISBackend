@@ -4,6 +4,7 @@ const Items = require("../repositories/items");
 const { v4: uuid } = require("uuid");
 const Transaction = require("../repositories/transaction");
 const Order = require("../repositories/order");
+const logger = require('../utils/logger');
 
 const normalizeArray = (value) => {
   if (!value) return [];
@@ -83,7 +84,7 @@ router.post("/addItem", async (req, res) => {
     await newItem.save();
     res.json("notexist");
   } catch (e) {
-    console.error("Error saving Item:", e);
+    logger.error("Error saving Item:", e);
     res.status(500).json("fail");
   }
 });
@@ -113,7 +114,7 @@ router.get("/GetItemList", async (_req, res) => {
 
     res.json({ success: true, result: itemWithUsage });
   } catch (err) {
-    console.error("Error fetching Item:", err);
+    logger.error("Error fetching Item:", err);
     res.status(500).json({ success: false, message: err.message || err });
   }
 });
@@ -127,7 +128,7 @@ router.get('/:id', async (req, res) => {
     }
     res.status(200).json({ success: true, result: item });
   } catch (error) {
-    console.error('Error fetching item:', error);
+    logger.error('Error fetching item:', error);
     res.status(500).json({ success: false, message: 'Error fetching item', error: error.message });
   }
 });
@@ -148,7 +149,7 @@ router.put('/update/:id', async (req, res) => {
     }
     res.json({ success: true, result: item });
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

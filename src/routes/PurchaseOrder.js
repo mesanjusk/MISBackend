@@ -3,6 +3,7 @@ const router = express.Router();
 const Counter = require('../repositories/counter');
 const PurchaseOrder = require('../repositories/purchaseOrder');
 const VendorMaster = require('../repositories/vendorMaster');
+const logger = require('../utils/logger');
 
 const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -59,7 +60,7 @@ router.post('/create', async (req, res) => {
 
     res.status(201).json({ success: true, result: po });
   } catch (error) {
-    console.error('Create PO failed', error);
+    logger.error('Create PO failed', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

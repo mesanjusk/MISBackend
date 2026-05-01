@@ -1,5 +1,6 @@
 const { google } = require("googleapis");
 const GoogleDriveToken = require("../repositories/googleDriveToken");
+const logger = require('../utils/logger');
 
 const SCOPES = ["https://www.googleapis.com/auth/drive"];
 
@@ -68,7 +69,7 @@ async function fetchGoogleAccountEmail(oauth2Client) {
     const { data } = await oauth2.userinfo.get();
     return data?.email || null;
   } catch (error) {
-    console.warn("Unable to fetch Google account email:", error.message);
+    logger.warn("Unable to fetch Google account email:", error.message);
     return null;
   }
 }

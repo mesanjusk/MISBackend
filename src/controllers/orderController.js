@@ -1,5 +1,6 @@
 const express = require("express");
 const Orders = require("../repositories/order");
+const logger = require('../utils/logger');
 
 const updateOrderStatus = async (orderId, newStatus) => {
   try {
@@ -24,7 +25,7 @@ const updateOrderStatus = async (orderId, newStatus) => {
       return { success: false, message: 'Order not found' };
     }
   } catch (error) {
-    console.error('Error updating order status:', error);
+    logger.error('Error updating order status:', error);
     return { success: false, message: 'Error updating order status' };
   }
 };
