@@ -11,13 +11,19 @@ const { hashPassword, isHashedPassword, verifyPassword } = require("../utils/pas
 const Transaction = require("../repositories/transaction");
 const Order = require("../repositories/order");
 const logger = require('../utils/logger');
+const { requireAuth } = require('../middleware/auth');
 
-// LOGIN
 // LOGIN
 router.post("/login", authLimiter, validate({ body: z.object({ User_name: z.string().min(1), Password: z.string().min(1) }) }), async (req, res) => {
   const { User_name, Password } = req.body;
 
   try {
+    // Guard: ACCESS_TOKEN_SECRET must be set
+    if (!process.env.ACCESS_TOKEN_SECRET) {
+      logger.error("ACCESS_TOKEN_SECRET is not set in environment variables.");
+      return res.status(500).json({ status: "fail", message: "Server misconfiguration. Contact admin." });
+    }
+
     const user = await Users.findOne({ User_name });
     if (!user) return res.json({ status: "notexist" });
 
@@ -25,10 +31,10 @@ router.post("/login", authLimiter, validate({ body: z.object({ User_name: z.stri
 
     if (isValidPassword) {
 
-      // ✅ CREATE JWT TOKEN
+      // CREATE JWT TOKEN
       const token = jwt.sign(
         {
-          id: user._id,   // VERY IMPORTANT (used in authenticateToken)
+          id: user._id,
           userName: user.User_name,
           userGroup: user.User_group,
         },
@@ -36,6 +42,7 @@ router.post("/login", authLimiter, validate({ body: z.object({ User_name: z.stri
         { expiresIn: "99d" }
       );
 
+      // Migrate plain-text passwords to scrypt on first login
       if (!isHashedPassword(user.Password)) {
         try {
           user.Password = hashPassword(Password);
@@ -45,7 +52,6 @@ router.post("/login", authLimiter, validate({ body: z.object({ User_name: z.stri
         }
       }
 
-      // ✅ SEND TOKEN TO FRONTEND
       res.json({
         status: "exist",
         token: token,
@@ -63,8 +69,8 @@ router.post("/login", authLimiter, validate({ body: z.object({ User_name: z.stri
 });
 
 
-// ADD USER
-router.post("/addUser", async (req, res) => {
+// ADD USER — protected: only authenticated users (admins) can create users
+router.post("/addUser", requireAuth, async (req, res) => {
   const {
     User_name,
     Password,
@@ -97,11 +103,11 @@ router.post("/addUser", async (req, res) => {
   }
 });
 
-// GET USER LIST WITH USAGE AND TASK GROUPS
-router.get("/GetUserList", async (req, res) => {
+// GET USER LIST — protected, strips Password from response
+router.get("/GetUserList", requireAuth, async (req, res) => {
   try {
     const [data, orders, transactions] = await Promise.all([
-      Users.find({}),
+      Users.find({}).select('-Password'),
       Order.find({}, 'Status'),
       Transaction.find({}, 'Created_by')
     ]);
@@ -131,8 +137,8 @@ router.get("/GetUserList", async (req, res) => {
   }
 });
 
-// UPDATE USER BY ID (Method 1)
-router.put("/updateUser/:id", async (req, res) => {
+// UPDATE USER BY ID (Method 1) — protected
+router.put("/updateUser/:id", requireAuth, async (req, res) => {
   const { id } = req.params;
   const { User_name, Password, Mobile_number, User_group, Allowed_Task_Groups } = req.body;
 
@@ -148,8 +154,7 @@ router.put("/updateUser/:id", async (req, res) => {
       updatePayload.Password = isHashedPassword(Password) ? Password : hashPassword(Password);
     }
 
-    const user = await Users.findByIdAndUpdate(id, updatePayload, { new: true });
-
+    const user = await Users.findByIdAndUpdate(id, updatePayload, { new: true }).select('-Password');
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -162,7 +167,7 @@ router.put("/updateUser/:id", async (req, res) => {
   }
 });
 
-// AUTH TOKEN CHECK
+// AUTH TOKEN CHECK (local middleware kept for backward compat with GetLoggedInUser)
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.sendStatus(401);
@@ -187,12 +192,12 @@ router.get('/GetLoggedInUser', authenticateToken, async (req, res) => {
   }
 });
 
-// GET SINGLE USER BY ID
-router.get('/:id', async (req, res) => {
+// GET SINGLE USER BY ID — protected, strips Password
+router.get('/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const user = await Users.findById(id);
+    const user = await Users.findById(id).select('-Password');
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -214,8 +219,8 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// UPDATE USER BY ID (Method 2)
-router.put('/update/:id', async (req, res) => {
+// UPDATE USER BY ID (Method 2) — protected
+router.put('/update/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { User_name, Mobile_number, User_group, Allowed_Task_Groups } = req.body;
 
@@ -224,7 +229,7 @@ router.put('/update/:id', async (req, res) => {
       { _id: id },
       { User_name, Mobile_number, User_group, Allowed_Task_Groups },
       { new: true }
-    );
+    ).select('-Password');
 
     if (!updatedUser) {
       return res.status(404).json({
@@ -248,12 +253,12 @@ router.put('/update/:id', async (req, res) => {
   }
 });
 
-// GET USER BY NAME
-router.get('/getUserByName/:username', async (req, res) => {
+// GET USER BY NAME — protected, strips Password
+router.get('/getUserByName/:username', requireAuth, async (req, res) => {
   const { username } = req.params;
 
   try {
-    const user = await Users.findOne({ User_name: username });
+    const user = await Users.findOne({ User_name: username }).select('-Password');
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -275,8 +280,8 @@ router.get('/getUserByName/:username', async (req, res) => {
   }
 });
 
-// DELETE USER
-router.delete('/DeleteUser/:userUuid', async (req, res) => {
+// DELETE USER — protected
+router.delete('/DeleteUser/:userUuid', requireAuth, async (req, res) => {
   const { userUuid } = req.params;
   try {
     const filters = [{ User_uuid: userUuid }];

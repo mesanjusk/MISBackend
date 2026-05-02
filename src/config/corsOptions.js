@@ -1,7 +1,12 @@
 /**
  * CORS configuration
- * Set ALLOWED_ORIGINS in your .env as a comma-separated list of frontend URLs.
- * Example: ALLOWED_ORIGINS=https://your-app.vercel.app,https://your-custom-domain.com
+ *
+ * Set ALLOWED_ORIGINS in your environment as a comma-separated list of frontend URLs.
+ *
+ * Render.com example:
+ *   ALLOWED_ORIGINS=https://your-app.vercel.app,https://your-custom-domain.com
+ *
+ * The backend always allows localhost origins in non-production for developer convenience.
  */
 const getAllowedOrigins = () => {
   const raw = process.env.ALLOWED_ORIGINS || '';
@@ -10,7 +15,7 @@ const getAllowedOrigins = () => {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // Always allow localhost in non-production for developer convenience
+  // Always allow localhost in non-production
   if (process.env.NODE_ENV !== 'production') {
     list.push('http://localhost:5173', 'http://localhost:3000', 'http://localhost:4173');
   }
@@ -29,7 +34,12 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    return callback(new Error(`CORS: origin ${origin} not allowed`));
+    // In development with an empty ALLOWED_ORIGINS, allow everything for convenience
+    if (process.env.NODE_ENV !== 'production' && allowed.length === 0) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS: origin ${origin} not allowed. Add it to ALLOWED_ORIGINS env var.`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
