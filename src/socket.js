@@ -4,15 +4,23 @@ const logger = require('./utils/logger');
 let ioInstance = null;
 
 const getAllowedOrigins = () => {
-  const origins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
+  const sources = [
+    process.env.ALLOWED_ORIGINS      || '',
+    process.env.FRONTEND_URL         || '',
+    process.env.SOCKET_IO_CORS_ORIGIN || '',
+  ];
+
+  const origins = sources
+    .flatMap((s) => s.split(','))
     .map((o) => o.trim())
     .filter(Boolean);
+
   if (process.env.NODE_ENV !== 'production') {
     if (!origins.includes('http://localhost:5173')) {
       origins.push('http://localhost:5173');
     }
   }
+
   return origins;
 };
 

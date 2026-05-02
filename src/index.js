@@ -133,6 +133,7 @@ app.use("/order", (req, res) => res.redirect(301, `/api/orders${req.path}`));
 app.use("/orders", (req, res) => res.redirect(301, `/api/orders${req.path}`));
 app.use("/items", (req, res) => res.redirect(301, `/api/items${req.path}`));
 app.use("/vendors", (req, res) => res.redirect(301, `/api/vendors${req.path}`));
+app.use("/paymentfollowup", (req, res) => res.redirect(301, `/api/paymentfollowup${req.path}`));
 
 // ---------- Init DB + schedulers ----------
 (async () => {

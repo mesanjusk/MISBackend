@@ -1,23 +1,31 @@
 /**
  * CORS configuration
  *
- * Set ALLOWED_ORIGINS in your environment as a comma-separated list of frontend URLs.
+ * Reads allowed origins from multiple env vars (all comma-separated):
+ *   ALLOWED_ORIGINS      — primary list  e.g. https://dash.sanjusk.in
+ *   FRONTEND_URL         — single URL fallback (already set in your .env)
+ *   SOCKET_IO_CORS_ORIGIN — socket origin (already set in your .env)
  *
- * Render.com example:
- *   ALLOWED_ORIGINS=https://your-app.vercel.app,https://your-custom-domain.com
- *
- * The backend always allows localhost origins in non-production for developer convenience.
+ * Set at least one of these on Render.com.
+ * localhost origins are always allowed in non-production.
  */
 const getAllowedOrigins = () => {
-  const raw = process.env.ALLOWED_ORIGINS || '';
-  const list = raw
-    .split(',')
+  const sources = [
+    process.env.ALLOWED_ORIGINS     || '',
+    process.env.FRONTEND_URL        || '',
+    process.env.SOCKET_IO_CORS_ORIGIN || '',
+  ];
+
+  const list = sources
+    .flatMap((s) => s.split(','))
     .map((s) => s.trim())
     .filter(Boolean);
 
   // Always allow localhost in non-production
   if (process.env.NODE_ENV !== 'production') {
-    list.push('http://localhost:5173', 'http://localhost:3000', 'http://localhost:4173');
+    ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:4173'].forEach((o) => {
+      if (!list.includes(o)) list.push(o);
+    });
   }
 
   return list;
@@ -34,12 +42,17 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // In development with an empty ALLOWED_ORIGINS, allow everything for convenience
+    // In non-production with no origins configured, allow all (dev convenience)
     if (process.env.NODE_ENV !== 'production' && allowed.length === 0) {
       return callback(null, true);
     }
 
-    return callback(new Error(`CORS: origin ${origin} not allowed. Add it to ALLOWED_ORIGINS env var.`));
+    return callback(
+      new Error(
+        `CORS blocked: ${origin} is not in ALLOWED_ORIGINS. ` +
+        `Current allowed: [${allowed.join(', ')}]`
+      )
+    );
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
