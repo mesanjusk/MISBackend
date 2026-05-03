@@ -51,6 +51,7 @@ const webhookRouter = require("./routes/webhook");
 const googleDriveOAuthRoutes = require("./routes/googleDriveOAuth");
 // Legacy googleDriveToken route removed — use /api/google-drive instead
 const FlowRouter = require("./routes/Flow");
+const DesignFiles = require("./routes/DesignFiles");
 const UpiPayments = require("./routes/UpiPayments");
 const BusinessOps = require("./routes/BusinessOps");
 const PurchaseOrder = require("./routes/PurchaseOrder");
@@ -119,6 +120,7 @@ app.use("/api/scheduler", Scheduler);
 app.use("/api/stock", Stock);
 app.use("/api/google-drive", googleDriveOAuthRoutes);
 app.use("/api", FlowRouter);
+app.use("/api/design-files", DesignFiles);
 app.use("/api", Chat);
 
 // ---------- WhatsApp webhook (no auth — Meta calls this directly) ----------
