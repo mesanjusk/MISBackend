@@ -1,3 +1,4 @@
+const { requireAuth, requireInternalKey } = require('../middleware/auth');
 // routes/paymentFollowup.js
 const express = require("express");
 const router = express.Router();
@@ -10,6 +11,8 @@ const norm = (s) => String(s || "").trim();
 const toDate = (v, fallback = new Date()) => (v ? new Date(v) : fallback);
 
 // Add a new payment follow-up
+router.use(requireAuth);
+
 router.post("/add", async (req, res) => {
   try {
     const Customer = norm(req.body.Customer);
@@ -116,7 +119,7 @@ router.patch("/:id/status", async (req, res) => {
 
 // POST /paymentfollowup/send-overdue-reminders
 // Finds all pending followups overdue by >= X days and sends WhatsApp reminders.
-router.post('/send-overdue-reminders', async (req, res) => {
+router.post('/send-overdue-reminders', requireInternalKey, async (req, res) => {
   try {
     const { minDaysOverdue = 3 } = req.body || {};
     const Customers = require('../repositories/customer');

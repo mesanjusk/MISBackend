@@ -9,6 +9,7 @@ const { formatIST } = require("../utils/dateTime");
 const { sendMessageToWhatsApp } = require("../services/whatsappService");
 const normalizeWhatsAppNumber = require("../utils/normalizeNumber");
 const logger = require('../utils/logger');
+const { requireAuth, requireInternalKey } = require('../middleware/auth');
 
 const toLower = (value = "") => String(value || "").trim().toLowerCase();
 
@@ -81,8 +82,18 @@ const buildPendingTaskMessage = ({ user, assignments }) => {
   return `Hello ${user?.User_name || "Team"}, here are your pending assigned tasks:\n${allLines.join("\n")}`;
 };
 
-// Add attendance entry
-router.post('/addAttendance', async (req, res) => {
+// Add attendance — accepts both JWT (dashboard) and internal key (device/kiosk)
+router.post('/addAttendance', async (req, res, next) => {
+  // Allow either a valid JWT or an internal API key (for hardware clock-in devices)
+  const hasAuth = req.headers.authorization?.startsWith('Bearer ');
+  const hasInternalKey = !!req.headers['x-internal-key'];
+
+  if (!hasAuth && !hasInternalKey) {
+    const { requireAuth } = require('../middleware/auth');
+    return requireAuth(req, res, next);
+  }
+  next();
+}, async (req, res) => {
   const { User_name, Type, Status, Time } = req.body;
 
   if (!User_name || !Type || !Status || !Time) {
@@ -163,7 +174,9 @@ router.post('/addAttendance', async (req, res) => {
   }
 });
 
-// Get all attendance records
+// All remaining attendance routes require JWT
+router.use(requireAuth);
+
 router.get("/GetAttendanceList", async (req, res) => {
   try {
     const data = await Attendance.find({});

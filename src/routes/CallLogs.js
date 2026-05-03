@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const CallLogs = require("../repositories/callLogs");
@@ -5,6 +6,8 @@ const { v4: uuid } = require("uuid");
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 
+
+router.use(requireAuth);
 
 router.post("/addCallLog", async (req, res) => {
     const { Name, Mobile_number, Type, Duration, Status } = req.body;

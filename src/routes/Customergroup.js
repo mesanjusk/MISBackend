@@ -1,8 +1,11 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Customergroup = require("../repositories/customergroup");
 const { v4: uuid } = require("uuid");
 const logger = require('../utils/logger');
+
+router.use(requireAuth);
 
 router.post("/addCustomergroup", async (req, res) => {
     const{ Customer_group}=req.body

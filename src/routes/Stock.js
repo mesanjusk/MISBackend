@@ -1,8 +1,11 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require('express');
 const router = express.Router();
 const StockLedger = require('../repositories/stockLedger');
 
 // GET /stock/summary — compute current qty per item from actual stock ledger entries
+router.use(requireAuth);
+
 router.get('/summary', async (_req, res) => {
   try {
     const ledger = await StockLedger.find({}).lean();

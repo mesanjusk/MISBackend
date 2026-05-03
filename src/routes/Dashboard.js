@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const Orders = require('../repositories/order');
 const Transaction = require('../repositories/transaction');
+const { requireAuth } = require('../middleware/auth');
 const {
   getDashboardSummary,
   getOutstandingSummary,
@@ -13,6 +14,9 @@ const {
 } = require('../controllers/dashboardSummaryController');
 const logger = require('../utils/logger');
 
+// All dashboard routes require authentication
+router.use(requireAuth);
+
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
 const endOfDay   = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
 
@@ -21,7 +25,7 @@ function getRange(period) {
   if (period === 'today') return { from: startOfDay(now), to: endOfDay(now) };
 
   if (period === 'week') {
-    const day = now.getDay(); // 0=Sun
+    const day = now.getDay();
     const monday = new Date(now);
     monday.setDate(now.getDate() - ((day + 6) % 7));
     const sunday = new Date(monday);
@@ -35,7 +39,6 @@ function getRange(period) {
     return { from: startOfDay(first), to: endOfDay(last) };
   }
 
-  // default: today
   return { from: startOfDay(now), to: endOfDay(now) };
 }
 
@@ -86,7 +89,6 @@ router.get('/trial-balance', async (_req, res) => {
   }
 });
 
-
 router.get('/:period', async (req, res) => {
   try {
     const period = String(req.params.period || 'today').toLowerCase();
@@ -96,7 +98,7 @@ router.get('/:period', async (req, res) => {
       Orders.countDocuments({ createdAt: { $gte: from, $lte: to } }),
       Orders.countDocuments({ Status: { $elemMatch: { Task: 'Delivered' } }, updatedAt: { $gte: from, $lte: to } }),
       Transaction.aggregate([
-        { $match: { Transaction_date: { $gte: from, $lte: to } } }, // adjust field if different
+        { $match: { Transaction_date: { $gte: from, $lte: to } } },
         {
           $group: {
             _id: null,

@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require('express');
 const Contact = require('../repositories/contact');
 const logger = require('../utils/logger');
@@ -5,6 +6,8 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 const escapeRegex = (input = '') => input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+router.use(requireAuth);
 
 router.get('/', async (req, res) => {
   try {

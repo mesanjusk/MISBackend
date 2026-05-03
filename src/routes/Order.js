@@ -31,6 +31,7 @@ const {
   assignOrderToUser,
   buildTaskSummaryMessage,
 } = require("../services/orderTaskService");
+const { requireAuth } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 /* ----------------------- helpers ----------------------- */
@@ -607,6 +608,9 @@ async function enrichOrderItemsAndBuildWorkRows(lineItems = [], inheritedDueDate
 
   return { enrichedItems, workRows };
 }
+// All order routes require authentication
+router.use(requireAuth);
+
 /* ----------------------- CREATE NEW ORDER ----------------------- */
 
 router.post("/addOrder", async (req, res) => {
@@ -1890,8 +1894,8 @@ router.post("/orders/:orderId/steps/:stepId/assign-vendor", async (req, res) => 
 
       const lines = [
         { Account_id: `${resolvedVendor}`, Type: "Debit", Amount: amount },
-        // TODO: replace with your real Purchase/Cash/Bank account id
-        { Account_id: "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount },
+          // PURCHASE_ACCOUNT_UUID env var — set in .env (your Creditor/Bank account UUID)
+        { Account_id: process.env.PURCHASE_ACCOUNT_UUID || "fdf29a16-1e87-4f57-82d6-6b31040d3f1e", Type: "Credit", Amount: amount },
       ];
 
       const txnDate = plannedDate ? new Date(plannedDate) : new Date();

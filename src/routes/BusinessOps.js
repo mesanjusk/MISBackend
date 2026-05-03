@@ -1,3 +1,5 @@
+const { requireAuth } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/authorize');
 const express = require('express');
 const router = express.Router();
 const {
@@ -27,6 +29,9 @@ function sendError(res, error, fallback = 'Operation failed') {
     message: error.message || fallback,
   });
 }
+
+// All business ops routes require authentication
+router.use(requireAuth);
 
 router.get('/summary', async (_req, res) => {
   try {

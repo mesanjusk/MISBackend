@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
@@ -5,6 +6,8 @@ const Payment_mode = require("../repositories/payment_mode");
 const { v4: uuid } = require("uuid");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
+
+router.use(requireAuth);
 
 router.post(
   "/addPayment",

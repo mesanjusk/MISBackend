@@ -49,6 +49,7 @@ const CallLogs = require("./routes/CallLogs");
 const Chat = require("./routes/chat");
 const webhookRouter = require("./routes/webhook");
 const googleDriveOAuthRoutes = require("./routes/googleDriveOAuth");
+// Legacy googleDriveToken route removed — use /api/google-drive instead
 const FlowRouter = require("./routes/Flow");
 const UpiPayments = require("./routes/UpiPayments");
 const BusinessOps = require("./routes/BusinessOps");

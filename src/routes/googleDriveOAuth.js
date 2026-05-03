@@ -1,12 +1,33 @@
 const express = require("express");
 const router = express.Router();
 const GoogleDriveToken = require("../repositories/googleDriveToken");
-const {
-  getGoogleDriveAuthUrl,
-  saveGoogleTokensFromCode,
-  isDriveAutomationEnabled,
-  getGoogleDriveConnectionStatus,
-} = require("../services/googleDriveOAuthService");
+
+const { getGoogleDriveAuthUrl, saveGoogleTokensFromCode, isDriveAutomationEnabled, getGoogleDriveConnectionStatus } = require('../services/googleDriveOAuthService');
+
+/**
+ * Validates that a redirect URL is safe (same origin as configured frontend).
+ * Prevents open-redirect attacks on the OAuth callback.
+ */
+function isSafeRedirect(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const allowed = [
+      process.env.FRONTEND_URL,
+      process.env.ALLOWED_ORIGINS,
+      'https://dash.sanjusk.in',
+    ]
+      .filter(Boolean)
+      .flatMap((s) => s.split(','))
+      .map((s) => s.trim().replace(/\/$/, ''));
+
+    const origin = parsed.origin;
+    return allowed.some((a) => origin === a || origin.endsWith('.' + a.replace(/^https?:\/\//, '')));
+  } catch {
+    return false;
+  }
+}
+
 
 router.get("/connect", async (req, res) => {
   try {
@@ -32,11 +53,9 @@ router.get("/callback", async (req, res) => {
 
     const result = await saveGoogleTokensFromCode(code);
 
-    const redirectUrl =
-      returnTo ||
-      state ||
-      process.env.FRONTEND_URL ||
-      "https://dash.sanjusk.in/home";
+    // Validate redirect URL to prevent open redirect attacks
+    const candidateUrl = returnTo || state || process.env.FRONTEND_URL || "https://dash.sanjusk.in/home";
+    const redirectUrl = isSafeRedirect(candidateUrl) ? candidateUrl : (process.env.FRONTEND_URL || "https://dash.sanjusk.in/home");
 
     return res.send(`
       <html>

@@ -1,8 +1,11 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Enquiry = require("../repositories/enquiry");
 const { v4: uuid } = require("uuid");
 const logger = require('../utils/logger');
+
+router.use(requireAuth);
 
 router.post("/addEnquiry", async (req, res) => {
   const { Customer_name, Priority = "Normal", Item = "New Enquiry", Task = "Design", Delivery_Date, Assigned = "Sai", Remark } = req.body;

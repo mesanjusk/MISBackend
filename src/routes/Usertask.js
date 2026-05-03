@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Usertasks = require("../repositories/usertask");
@@ -7,6 +8,8 @@ const normalizeWhatsAppNumber = require("../utils/normalizeNumber"); // ✅ New 
 const logger = require('../utils/logger');
 
 // Add new user task and optionally send WhatsApp message to user
+router.use(requireAuth);
+
 router.post("/addUsertask", async (req, res) => {
   const { Usertask_name, User, Deadline, Remark } = req.body;
 

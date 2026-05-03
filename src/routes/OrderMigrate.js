@@ -1,3 +1,5 @@
+const { requireAuth } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/authorize');
 // Routers/OrderMigrate.js
 const express = require("express");
 const mongoose = require("mongoose");
@@ -113,6 +115,9 @@ function reasonsFor(doc) {
 }
 
 /* -------------------- GET: preview flat list -------------------- */
+// Migration routes — admin only
+router.use(requireAuth, requireAdmin);
+
 router.get("/migrate/flat", async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || "100", 10), 1000);

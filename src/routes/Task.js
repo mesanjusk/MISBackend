@@ -1,9 +1,12 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Tasks = require("../repositories/tasks");
 const { v4: uuid } = require("uuid");
 const { createTask } = require("../services/taskService");
 const logger = require('../utils/logger');
+
+router.use(requireAuth);
 
 router.post("/addTask", async (req, res) => {
     const{Task_name, Task_group, orderId, deadline, status}=req.body

@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require('express');
 const router = express.Router();
 const { v4: uuid } = require('uuid');
@@ -82,6 +83,8 @@ async function ensureVendorMaster(vendorPayload = {}) {
 
   return created;
 }
+
+router.use(requireAuth);
 
 router.post('/addVendor', async (req, res) => {
   const { Order_Number, Order_uuid, Item_uuid } = req.body;

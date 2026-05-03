@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require('express');
 const router = express.Router();
 const Counter = require('../repositories/counter');
@@ -35,6 +36,8 @@ function normalizeItems(items = []) {
     })
     .filter((item) => item.itemName);
 }
+
+router.use(requireAuth);
 
 router.post('/create', async (req, res) => {
   try {

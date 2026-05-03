@@ -42,15 +42,15 @@ const upload = multer({
 });
 
 // ---------- Embedded Signup ----------
-router.post('/embedded-signup/exchange-code', exchangeMetaToken);
+router.post('/embedded-signup/exchange-code', requireAuth, exchangeMetaToken);
 
 // ---------- Manual connect (for SaaS clients) ----------
-router.post('/manual-connect', manualConnect);
+router.post('/manual-connect', requireAuth, manualConnect);
 
 // ---------- Account routes ----------
 router.get('/accounts', listAccounts);
 router.get('/status', getStatus);
-router.delete('/accounts/:id', deleteAccount);
+router.delete('/accounts/:id', requireAuth, deleteAccount);
 
 // ---------- Messaging routes ----------
 router.post('/send-text', requireAuth, messagingLimiter, enforceWhatsApp24hWindow, sendText);

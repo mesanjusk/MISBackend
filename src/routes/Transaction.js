@@ -1,7 +1,10 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 
 const Transaction = require("../repositories/transaction");
+const Counter = require('../repositories/counter');
+
 const Orders = require("../repositories/order"); // kept for legacy helpers
 const { refreshOrderPaymentStatus } = require("../services/businessWorkflowService");
 const { v4: uuid } = require("uuid");
@@ -102,6 +105,10 @@ async function maybeMarkOrderUnpaid({ Order_uuid, Order_number }) {
   });
 }
 
+// All transaction routes require authentication
+router.use(requireAuth);
+
+
 // =================== ROUTES ===================
 
 // Add Transaction
@@ -174,13 +181,13 @@ router.post("/addTransaction", upload.single("image"), async (req, res) => {
     const file = req.file;
     const imageUrl = file ? await uploadToCloudinary(file) : null;
 
-    // Generate new Transaction ID
-    const lastTransaction = await Transaction.findOne().sort({
-      Transaction_id: -1,
-    });
-    const newTransactionNumber = lastTransaction
-      ? lastTransaction.Transaction_id + 1
-      : 1;
+    // Generate Transaction ID atomically using Counter to prevent race conditions
+    const txnCounter = await Counter.findByIdAndUpdate(
+      'transaction_number',
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+    const newTransactionNumber = Number(txnCounter?.seq || 1);
 
     const newTransaction = new Transaction({
       Transaction_uuid: uuid(),

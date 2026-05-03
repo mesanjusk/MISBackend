@@ -1,7 +1,10 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Note = require("../repositories/note");
 const { v4: uuid } = require("uuid");
+
+router.use(requireAuth);
 
 router.post("/addNote", async (req, res) => {
   const { Customer_uuid, Note_name, Order_uuid } = req.body;

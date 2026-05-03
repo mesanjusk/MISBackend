@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Items = require("../repositories/items");
@@ -39,6 +40,8 @@ const normalizeBom = (bom = []) => {
     }))
     .filter((row) => row.componentItemName);
 };
+
+router.use(requireAuth);
 
 router.post("/addItem", async (req, res) => {
   const {

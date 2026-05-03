@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require('express');
 const router = express.Router();
 const Message = require('../repositories/Message');
@@ -15,6 +16,8 @@ const buildPhoneVariants = (value = '') => {
  * GET /chatlist
  * Returns customers who have any WhatsApp chat history.
  */
+router.use(requireAuth);
+
 router.get('/chatlist', async (_req, res) => {
   try {
     const messages = await Message.find({}).sort({ timestamp: -1, time: -1, createdAt: -1 }).lean();

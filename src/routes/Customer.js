@@ -1,3 +1,4 @@
+const { requireAuth } = require('../middleware/auth');
 const express = require("express");
 const router = express.Router();
 const Customers = require("../repositories/customer");
@@ -24,6 +25,8 @@ const normalizePartyRoles = (roles = []) => {
    ADD: ALIAS for frontends expecting /customer/GetCustomerList
    Returns a minimal, stable shape and avoids heavy joins
 ----------------------------------------------------------------- */
+router.use(requireAuth);
+
 router.get("/GetCustomerList", async (req, res) => {
   try {
     const customers = await Customers.find({})
